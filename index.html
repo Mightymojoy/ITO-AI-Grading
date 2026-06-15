@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ITO 新品考试 AI 智能评分系统</title>
+<style>
+  :root { --primary: #1a1a2e; --primary-light: #16213e; --accent: #e94560; --accent-light: #ff6b81; --bg: #f5f5f5; --card: #fff; --text: #333; --text-light: #888; --border: #e0e0e0; --success: #27ae60; --warning: #f39c12; --danger: #e74c3c; --radius: 12px; --shadow: 0 2px 12px rgba(0,0,0,0.08); }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+  .header { background:linear-gradient(135deg,var(--primary),var(--primary-light)); color:#fff; padding:20px 40px; display:flex; align-items:center; justify-content:space-between; }
+  .header h1 { font-size:22px; font-weight:600; }
+  .header .subtitle { font-size:13px; opacity:0.8; margin-top:4px; }
+  .header-actions { display:flex; gap:10px; align-items:center; }
+  .badge { background:rgba(255,255,255,0.15); padding:4px 12px; border-radius:20px; font-size:12px; }
+  .container { max-width:1400px; margin:0 auto; padding:20px; display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+  .card { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); overflow:hidden; }
+  .card-header { padding:16px 20px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
+  .card-header h2 { font-size:16px; font-weight:600; }
+  .card-body { padding:20px; }
+  .question-list { max-height:calc(100vh - 180px); overflow-y:auto; }
+  .question-item { padding:12px 16px; border:1px solid var(--border); border-radius:8px; margin-bottom:8px; cursor:pointer; transition:all .2s; }
+  .question-item:hover { border-color:var(--accent); }
+  .question-item.active { border-color:var(--accent); background:#fff5f5; }
+  .question-item .q-title { font-size:14px; font-weight:500; margin-bottom:4px; display:flex; justify-content:space-between; }
+  .question-item .q-text { font-size:13px; color:var(--text-light); line-height:1.5; }
+  .question-item .q-badge { font-size:11px; padding:2px 8px; border-radius:10px; }
+  .badge-single { background:#e3f2fd; color:#1565c0; }
+  .badge-multi { background:#fce4ec; color:#c62828; }
+  .badge-essay { background:#e8f5e9; color:#2e7d32; }
+  .section-divider { padding:12px 16px; background:var(--bg); border-radius:8px; margin:12px 0; font-weight:600; font-size:14px; display:flex; justify-content:space-between; }
+  .answer-section { margin-bottom:16px; }
+  .answer-section label { display:block; font-size:13px; font-weight:500; margin-bottom:6px; color:var(--text-light); }
+  .answer-section textarea { width:100%; min-height:80px; padding:12px; border:1px solid var(--border); border-radius:8px; font-size:13px; line-height:1.6; resize:vertical; font-family:inherit; }
+  .answer-section textarea:focus { outline:none; border-color:var(--accent); }
+  .btn { padding:10px 24px; border:none; border-radius:8px; font-size:14px; font-weight:500; cursor:pointer; transition:all .2s; }
+  .btn-primary { background:var(--accent); color:#fff; }
+  .btn-primary:hover { background:var(--accent-light); transform:translateY(-1px); }
+  .btn-primary:disabled { background:#ccc; cursor:not-allowed; transform:none; }
+  .btn-outline { background:transparent; border:1px solid var(--border); color:var(--text); }
+  .btn-outline:hover { border-color:var(--accent); color:var(--accent); }
+  .btn-sm { padding:6px 14px; font-size:12px; }
+  .action-bar { display:flex; gap:10px; margin-top:16px; flex-wrap:wrap; }
+  .result-section { margin-top:20px; }
+  .score-summary { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:20px; }
+  .score-card { padding:16px; border-radius:8px; text-align:center; }
+  .score-card.total { background:linear-gradient(135deg,var(--primary),var(--primary-light)); color:#fff; }
+  .score-card.objective { background:#e8f5e9; color:#2e7d32; }
+  .score-card.subjective { background:#fff3e0; color:#e65100; }
+  .score-card .score-value { font-size:28px; font-weight:700; }
+  .score-card .score-label { font-size:12px; opacity:0.8; margin-top:4px; }
+  .result-item { padding:12px 16px; border:1px solid var(--border); border-radius:8px; margin-bottom:8px; }
+  .result-item.correct { border-left:4px solid var(--success); }
+  .result-item.wrong { border-left:4px solid var(--danger); }
+  .result-item.partial { border-left:4px solid var(--warning); }
+  .result-item .r-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+  .result-item .r-text { font-size:13px; }
+  .result-item .r-feedback { font-size:12px; color:var(--text-light); margin-top:6px; }
+  .result-item .r-answer { font-size:12px; color:var(--info); margin-top:4px; }
+  .sw-section { margin-top:16px; }
+  .sw-section h3 { font-size:14px; margin-bottom:8px; }
+  .tag { display:inline-block; padding:4px 12px; border-radius:16px; font-size:12px; margin:3px; }
+  .tag-strength { background:#e8f5e9; color:#2e7d32; border:1px solid #a5d6a7; }
+  .tag-weakness { background:#ffebee; color:#c62828; border:1px solid #ef9a9a; }
+  .modal-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000; justify-content:center; align-items:center; }
+  .modal-overlay.active { display:flex; }
+  .modal { background:#fff; border-radius:var(--radius); padding:30px; width:480px; max-width:90vw; box-shadow:0 20px 60px rgba(0,0,0,0.3); }
+  .modal h2 { margin-bottom:20px; font-size:18px; }
+  .modal .form-group { margin-bottom:14px; }
+  .modal .form-group label { display:block; font-size:13px; font-weight:500; margin-bottom:4px; color:var(--text-light); }
+  .modal .form-group input { width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:8px; font-size:13px; }
+  .modal .form-group input:focus { outline:none; border-color:var(--accent); }
+  .modal .form-group .status-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
+  .modal .form-group .status-dot.configured { background:var(--success); }
+  .modal .form-group .status-dot.unconfigured { background:#ccc; }
+  .modal-actions { display:flex; gap:10px; justify-content:flex-end; margin-top:20px; }
+  .loading { display:none; text-align:center; padding:40px; }
+  .loading.active { display:block; }
+  .spinner { width:40px; height:40px; border:3px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin .8s linear infinite; margin:0 auto 16px; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .loading p { color:var(--text-light); font-size:14px; }
+  .model-select { padding:8px 12px; border:1px solid var(--border); border-radius:8px; font-size:13px; background:#fff; cursor:pointer; }
+  .model-select:focus { outline:none; border-color:var(--accent); }
+  .question-list::-webkit-scrollbar { width:6px; }
+  .question-list::-webkit-scrollbar-thumb { background:#ddd; border-radius:3px; }
+  .question-list::-webkit-scrollbar-track { background:transparent; }
+  .empty-state { text-align:center; padding:60px 20px; color:var(--text-light); }
+  .empty-state .icon { font-size:48px; margin-bottom:12px; }
+  .empty-state p { font-size:14px; }
+  @media (max-width:900px) { .container { grid-template-columns:1fr; } .header { padding:16px 20px; flex-direction:column; gap:12px; } .header-actions { width:100%; justify-content:flex-end; } .score-summary { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>📚 ITO 新品考试 AI 智能评分系统</h1>
+    <div class="subtitle">PISTACHIO PLUS · TRUFFLE PRO · WEEKENDER · 满分100分 · 80分及格</div>
+  </div>
+  <div class="header-actions">
+    <select id="modelSelect" class="model-select">
+      <option value="deepseek">DeepSeek</option>
+      <option value="gemini">Gemini</option>
+      <option value="kimi">Kimi</option>
+      <option value="chatanywhere">ChatAnywhere</option>
+    </select>
+    <button class="btn btn-outline btn-sm" onclick="openConfig()">⚙ API Key</button>
+    <span class="badge" id="loadStatus">就绪</span>
+  </div>
+</div>
+
+<div class="container">
+  <div class="card">
+    <div class="card-header"><h2>📋 考试题目</h2><span style="font-size:13px;color:var(--text-light)" id="questionCount">20单选·10多选·8简答</span></div>
+    <div class="card-body question-list" id="questionList"></div>
+  </div>
+  <div class="card">
+    <div class="card-header"><h2>✍️ 答题与评分</h2><span style="font-size:13px;color:var(--text-light)">填写主播答案</span></div>
+    <div class="card-body">
+      <div id="answerArea"><div class="answer-section"><div id="answerInputs"></div></div></div>
+      <div class="action-bar">
+        <button class="btn btn-primary" onclick="startGrading()" id="gradeBtn">🤖 AI 智能评分</button>
+        <button class="btn btn-outline" onclick="clearAll()">🗑 清空</button>
+        <button class="btn btn-outline" onclick="fillSample()">📄 样例</button>
+      </div>
+      <div class="loading" id="loadingIndicator">
+        <div class="spinner"></div>
+        <p>AI 正在评分中，请稍候...</p>
+        <p style="font-size:12px;color:var(--text-light);margin-top:8px;">客观题自动对错 + 主观题 NLP 智能评分</p>
+      </div>
+      <div class="result-section" id="resultArea" style="display:none;">
+        <div class="score-summary" id="scoreSummary"></div>
+        <div class="card" style="box-shadow:none;border:1px solid var(--border);">
+          <div class="card-header"><h2>📊 详细评分</h2><div><span id="passBadge" class="badge"></span></div></div>
+          <div class="card-body"><div id="resultDetails"></div></div>
+        </div>
+        <div class="sw-section" id="swSection" style="display:none;">
+          <div class="card" style="box-shadow:none;border:1px solid var(--border);">
+            <div class="card-header"><h2>💡 综合评估</h2></div>
+            <div class="card-body">
+              <div id="strengthsArea" style="margin-bottom:16px;"><h3 style="font-size:14px;margin-bottom:8px;">✅ 优势</h3><div id="strengthsTags"></div></div>
+              <div id="weaknessesArea" style="margin-bottom:16px;"><h3 style="font-size:14px;margin-bottom:8px;">⚠️ 待改进</h3><div id="weaknessesTags"></div></div>
+              <div id="overallFeedback" style="padding:12px 16px;background:var(--bg);border-radius:8px;font-size:13px;line-height:1.6;"></div>
+            </div>
+          </div>
+        </div>
+        <div class="action-bar" style="margin-top:12px;">
+          <button class="btn btn-outline btn-sm" onclick="exportResult()">📥 导出评分报告</button>
+          <button class="btn btn-outline btn-sm" onclick="document.getElementById('resultArea').style.display='none'">✖ 关闭</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="configModal">
+  <div class="modal">
+    <h2>⚙ API Key 配置</h2>
+    <p style="font-size:13px;color:var(--text-light);margin-bottom:16px;">API Key 保存在浏览器本地，仅用于本机评分</p>
+    <div class="form-group"><label><span class="status-dot" id="dot-deepseek"></span>DeepSeek API Key</label><input type="password" id="key-deepseek" placeholder="sk-..."></div>
+    <div class="form-group"><label><span class="status-dot" id="dot-gemini"></span>Gemini API Key</label><input type="password" id="key-gemini" placeholder="AIza..."></div>
+    <div class="form-group"><label><span class="status-dot" id="dot-kimi"></span>Kimi API Key</label><input type="password" id="key-kimi" placeholder="sk-..."></div>
+    <div class="form-group"><label><span class="status-dot" id="dot-chatanywhere"></span>ChatAnywhere API Key</label><input type="password" id="key-chatanywhere" placeholder="sk-..."></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeConfig()">取消</button>
+      <button class="btn btn-primary" onclick="saveConfig()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const EXAM_DATA = { "title":"ITO 2026 新品考试","totalScore":100,"passScore":80,"sections":[
+  {"type":"单选","count":20,"scorePerQuestion":1.5,"totalScore":30,"questions":[
+    {"id":"s1q1","text":"ITO 品牌创立于哪一年？","options":["A. 2005 年","B. 2006 年","C. 2007 年","D. 2008 年"],"answer":"C"},
+    {"id":"s1q2","text":"以下哪项不属于 ITO 品牌的价值观？","options":["A. 好奇","B. 真实","C. 执着","D. 有趣"],"answer":"D"},
+    {"id":"s1q3","text":"PISTACHIO PLUS 20 寸登机箱的零售价是？","options":["A. ¥1,490","B. ¥1,590","C. ¥1,690","D. ¥1,790"],"answer":"C"},
+    {"id":"s1q4","text":"PISTACHIO PLUS 25 寸托运箱的零售价是？","options":["A. ¥1,990","B. ¥2,090","C. ¥2,190","D. ¥2,290"],"answer":"C"},
+    {"id":"s1q5","text":"以下哪个颜色属于 PISTACHIO PLUS 系列？","options":["A. 气泡粉","B. 晶体绿","C. 豆绿","D. 液态紫"],"answer":"C"},
+    {"id":"s1q6","text":"PISTACHIO PLUS 20 寸前仓可容纳最大多少英寸笔记本电脑？","options":["A. 14 英寸","B. 15 英寸","C. 16 英寸","D. 17 英寸"],"answer":"C"},
+    {"id":"s1q7","text":"PISTACHIO PLUS 25/29 寸托运箱采用哪种锁具设计？","options":["A. ITO PEBBLE 翻盖式","B. 分体集成海关密码锁","C. 普通 TSA 密码锁","D. 数字密码锁"],"answer":"B"},
+    {"id":"s1q8","text":"PISTACHIO PLUS 25/29 寸的核心创新结构？","options":["A. 独立双仓","B. 分体集成海关锁双模式","C. 前盖快取口袋","D. PEBBLE 锁具"],"answer":"B"},
+    {"id":"s1q9","text":"TRUFFLE PRO TOTE 的零售价和容量？","options":["A. ¥1,190/15L","B. ¥1,290/18L","C. ¥1,390/20L","D. ¥1,490/22L"],"answer":"B"},
+    {"id":"s1q10","text":"TRUFFLE PRO TOTE 的主面料是？","options":["A. CORDURA® Naturalle","B. camira Era 英国进口","C. 尼龙面料","D. 涤纶面料"],"answer":"B"},
+    {"id":"s1q11","text":"TRUFFLE PRO BACKPACK 20L 零售价和净重？","options":["A. ¥1,190/1.00kg","B. ¥1,290/1.05kg","C. ¥1,390/1.11kg","D. ¥1,490/1.20kg"],"answer":"C"},
+    {"id":"s1q12","text":"TRUFFLE PRO BACKPACK 12L 最多容纳多大电脑？","options":["A. 13 英寸","B. 14 英寸","C. 15 英寸","D. 16 英寸"],"answer":"B"},
+    {"id":"s1q13","text":"WEEKENDER 的零售价和容量？","options":["A. ¥1,290/28L","B. ¥1,390/32L","C. ¥1,490/34L","D. ¥1,590/36L"],"answer":"D"},
+    {"id":"s1q14","text":"WEEKENDER 采用什么面料？","options":["A. camira Era","B. CORDURA® Naturalle","C. 帆布","D. 尼龙"],"answer":"B"},
+    {"id":"s1q15","text":"TRUFFLE PRO 和 WEEKENDER 的共有工艺？","options":["A. 分体集成海关锁","B. PEBBLE 锁具","C. 自锁五金拉链","D. 双 U 框开口"],"answer":"C"},
+    {"id":"s1q16","text":"TRUFFLE PRO BACKPACK 快取口袋的正确描述？","options":["A. 需摘下背包使用","B. 背着包单手存取","C. 只能放手机","D. 位于背包底部"],"answer":"B"},
+    {"id":"s1q17","text":"TRUFFLE PRO TOTE 和 WEEKENDER 背面的共同功能？","options":["A. 隐藏水杯袋","B. 拉杆箱插袋系统","C. 充电宝口袋","D. 防盗暗袋"],"answer":"B"},
+    {"id":"s1q18","text":"PISTACHIO PLUS 的售后服务？","options":["A. 5 年联保","B. 3 年联保","C. 终身质保","D. 1 年联保"],"answer":"A"},
+    {"id":"s1q19","text":"ITO CARE 无忧换新服务内容？","options":["A. 180天1次免费换新","B. 360天1次免费换新","C. 720天不限次换新","D. 90天1次换新"],"answer":"B"},
+    {"id":"s1q20","text":"TRUFFLE PRO TOTE 的净重？","options":["A. 0.6kg","B. 0.8kg","C. 1.0kg","D. 1.2kg"],"answer":"B"}
+  ]},
+  {"type":"多选","count":10,"scorePerQuestion":3,"totalScore":30,"questions":[
+    {"id":"s2q1","text":"以下哪些属于 ITO 品牌价值观？","options":["A. 好奇","B. 真实","C. 执着","D. 有趣","E. 创新"],"answer":"ABC"},
+    {"id":"s2q2","text":"PISTACHIO PLUS 20 寸登机箱设计亮点？","options":["A. 独立双仓","B. 前仓可放16寸电脑","C. 分体集成海关锁","D. PEBBLE锁","E. 证件快取口袋"],"answer":"ABDE"},
+    {"id":"s2q3","text":"PISTACHIO PLUS 25/29 寸托运箱优势？","options":["A. 分体锁双模式","B. 前盖深仓通仓","C. 置顶U框隐私层","D. 独立双仓","E. 分类收纳口袋"],"answer":"ABCE"},
+    {"id":"s2q4","text":"TRUFFLE PRO TOTE 功能设计？","options":["A. 自锁拉链","B. 背面隐藏拉链仓","C. 正面快取磁吸口袋","D. 左右D环系统","E. 鞋仓/脏衣隔离仓"],"answer":"ABCD"},
+    {"id":"s2q5","text":"TRUFFLE PRO BACKPACK 通用卖点？","options":["A. 快取口袋","B. 九字钩扣大开口","C. 手机隐蔽袋","D. 肩带D环","E. 前置办公分仓"],"answer":"ABCD"},
+    {"id":"s2q6","text":"WEEKENDER 功能设计？","options":["A. 大U框主仓开口","B. 卸挂绳收纳包","C. 鞋仓/脏衣隔离仓","D. 侧面水杯插袋","E. 超纤皮提手"],"answer":"ABCE"},
+    {"id":"s2q7","text":"哪些产品使用 camira Era 面料？","options":["A. PISTACHIO PLUS","B. TRUFFLE PRO TOTE","C. TRUFFLE PRO BACKPACK","D. WEEKENDER","E. 无其他产品"],"answer":"BC"},
+    {"id":"s2q8","text":"关于自锁拉链的正确描述？","options":["A. 拉头自带锁定机构","B. 闭合后自动锁死","C. 需额外挂锁","D. 不会无意滑开","E. 仅用于TOTE"],"answer":"ABD"},
+    {"id":"s2q9","text":"哪些产品采用 PROTECTION+ 三防？","options":["A. PISTACHIO PLUS","B. TRUFFLE PRO TOTE","C. TRUFFLE PRO BACKPACK","D. WEEKENDER","E. 无其他产品"],"answer":"BCD"},
+    {"id":"s2q10","text":"哪些产品共享烟黑/雾灰/棕褐配色？","options":["A. PISTACHIO PLUS","B. TRUFFLE PRO TOTE","C. TRUFFLE PRO BACKPACK","D. WEEKENDER","E. 以上全部"],"answer":"BC"}
+  ]},
+  {"type":"简答","count":8,"totalScore":40,"questions":[
+    {"id":"s3q1","text":"ITO 品牌使命、愿景和价值观？以 PISTACHIO PLUS 为例说明设计体现。","maxScore":5,"scoringPoints":[{"score":1,"point":"使命：提供喜欢且好用的旅行产品"},{"score":0.5,"point":"愿景：成为最值得信赖的旅行品牌"},{"score":1,"point":"价值观：好奇、真实、执着"},{"score":2.5,"point":"设计体现：双仓/双模式→好用；PEBBLE锁→品质；售后→信赖"}]},
+    {"id":"s3q2","text":"面对每周飞2-3次的商务人士，推荐20寸还是25寸？说明推荐思路。","maxScore":5,"scoringPoints":[{"score":1,"point":"推荐20寸（登机免托运）"},{"score":1.5,"point":"前仓独立电脑快取（安检隐私）"},{"score":0.5,"point":"证件快取口袋"},{"score":1,"point":"轻量化/登机尺寸标准"},{"score":1,"point":"结合用户场景表达"}]},
+    {"id":"s3q3","text":"主播直播间客户问TOTE/BACKPACK/WEEKENDER怎么选？","maxScore":5,"scoringPoints":[{"score":1.5,"point":"TOTE→通勤差旅（18L，办公兼顾）"},{"score":1.5,"point":"BACKPACK→解放双手（双肩，快取口袋）"},{"score":1.5,"point":"WEEKENDER→短途（36L，U框打包，鞋仓）"},{"score":0.5,"point":"表达有场景感"}]},
+    {"id":"s3q4","text":"客户问20寸和25/29寸有什么区别，一句话说清。","maxScore":5,"scoringPoints":[{"score":2,"point":"20寸=独立双仓（前仓电脑/主仓衣物，安检方便）"},{"score":2,"point":"25/29寸=双模式（分体锁上拨全开/下拨前开，站立取物）"},{"score":1,"point":"表达简洁清晰"}]},
+    {"id":"s3q5","text":"客户问自锁拉链和普通拉链有必要多花钱吗？","maxScore":5,"scoringPoints":[{"score":1.5,"point":"自锁拉链自动锁死，不会无意滑开"},{"score":1.5,"point":"场景痛点：背包被拉开/东西掉出"},{"score":1,"point":"不需要额外挂锁"},{"score":1,"point":"话术有说服力"}]},
+    {"id":"s3q6","text":"客户问BACKPACK 12L和20L怎么选？","maxScore":5,"scoringPoints":[{"score":1.5,"point":"12L→日常通勤（14寸电脑，轻便）"},{"score":1.5,"point":"20L→差旅（16寸电脑，¥1,390）"},{"score":1,"point":"容量差=电脑尺寸差"},{"score":1,"point":"结合场景推荐"}]},
+    {"id":"s3q7","text":"客户问WEEKENDER看起来就是个旅行袋为什么¥1,590？","maxScore":5,"scoringPoints":[{"score":1.5,"point":"面料：CORDURA® Naturalle高强度耐磨"},{"score":1.5,"point":"设计：大U框开口像行李箱一样打包"},{"score":1,"point":"功能：鞋仓隔离/电脑隔层"},{"score":1,"point":"工艺：三防/抗菌/自锁拉链"}]},
+    {"id":"s3q8","text":"客户在两个颜色之间纠结，怎么帮他做决定？","maxScore":5,"scoringPoints":[{"score":1.5,"point":"观察揣摩客户风格推荐"},{"score":2,"point":"接近色→推荐更百搭经典耐看的颜色"},{"score":1.5,"point":"表达有温度有建议力"}]}
+  ]}
+]};
+
+const AI_ENDPOINTS = {
+  deepseek: { url:'https://api.deepseek.com/v1/chat/completions', model:'deepseek-chat' },
+  gemini: { urlBase:'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent' },
+  kimi: { url:'https://api.moonshot.cn/v1/chat/completions', model:'moonshot-v1-8k' },
+  chatanywhere: { url:'https://api.chatanywhere.tech/v1/chat/completions', model:'gpt-3.5-turbo' }
+};
+
+// 初始化
+function init() {
+  renderQuestions(); renderAnswerInputs();
+  document.getElementById('loadStatus').textContent = '已加载 · 100分 · 80分及格';
+}
+
+// 左侧题目
+function renderQuestions() {
+  const c = document.getElementById('questionList'); let h = '';
+  EXAM_DATA.sections.forEach(s => {
+    const bg = s.type==='单选'?'#e3f2fd':s.type==='多选'?'#fce4ec':'#e8f5e9';
+    const cl = s.type==='单选'?'#1565c0':s.type==='多选'?'#c62828':'#2e7d32';
+    h += `<div class="section-divider" style="background:${bg};color:${cl}"><span>${s.type==='简答'?'简答题':'选择题'}</span><span>${s.type==='简答'?'共'+s.count+'题 · '+s.totalScore+'分':s.count+'题 · '+s.scorePerQuestion+'分/题 · '+s.totalScore+'分'}</span></div>`;
+    s.questions.forEach((q,i) => {
+      const bc = s.type==='单选'?'badge-single':s.type==='多选'?'badge-multi':'badge-essay';
+      const tl = s.type==='简答'?'简答'+q.maxScore+'分':(s.type==='单选'?'单选':'多选');
+      h += `<div class="question-item" id="qitem-${q.id}" onclick="focusQuestion('${q.id}')"><div class="q-title"><span>Q${i+1}</span><span class="q-badge ${bc}">${tl}</span></div><div class="q-text">${q.text}</div>${q.options?'<div style="font-size:12px;color:#666;margin-top:4px;line-height:1.6;">'+q.options.join('<br>')+'</div>':''}</div>`;
+    });
+  });
+  c.innerHTML = h;
+}
+
+// 右侧答题区
+function renderAnswerInputs() {
+  const c = document.getElementById('answerInputs'); let h = '';
+  EXAM_DATA.sections.forEach(s => {
+    if (s.type === '简答') {
+      s.questions.forEach((q,i) => {
+        h += `<div style="margin-bottom:12px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:#fafafa;"><div style="font-size:12px;font-weight:500;color:#2e7d32;margin-bottom:6px;">简答${i+1}（${q.maxScore}分）：${q.text.length>60?q.text.substring(0,60)+'...':q.text}</div><textarea id="ans-${q.id}" placeholder="请输入主播的回答..." style="width:100%;min-height:60px;padding:10px;border:1px solid #ddd;border-radius:6px;font-size:13px;font-family:inherit;line-height:1.6;resize:vertical;"></textarea></div>`;
+      });
+    } else {
+      s.questions.forEach((q,i) => {
+        h += `<div style="margin-bottom:10px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:#fafafa;"><div style="font-size:12px;font-weight:500;color:${s.type==='单选'?'#1565c0':'#c62828'};margin-bottom:4px;">${s.type==='单选'?'单选':'多选'}${i+1}：${q.text}</div>${q.options?'<div style="font-size:11px;color:#888;margin-bottom:6px;line-height:1.5;">'+q.options.join('&nbsp;&nbsp;')+'</div>':''}<div style="display:flex;align-items:center;gap:10px;"><input type="text" id="ans-${q.id}" placeholder="${s.type==='单选'?'填入字母 A/B/C/D':'填入字母组合 如 ABCDE'}" style="flex:1;padding:8px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;" maxlength="${s.type==='单选'?'1':'5'}"><span style="font-size:11px;color:#888;min-width:50px;text-align:right;">${q.answer||''}</span></div></div>`;
+      });
+    }
+  });
+  c.innerHTML = h;
+}
+
+function focusQuestion(id) {
+  document.querySelectorAll('.question-item').forEach(el => el.classList.remove('active'));
+  const item = document.getElementById('qitem-'+id);
+  if (item) { item.classList.add('active'); item.scrollIntoView({behavior:'smooth',block:'center'}); }
+  const input = document.getElementById('ans-'+id);
+  if (input) { input.focus(); input.scrollIntoView({behavior:'smooth',block:'center'}); }
+}
+
+// 收集答案
+function collectAnswers() {
+  const answers = []; let missing = 0;
+  EXAM_DATA.sections.forEach(s => {
+    s.questions.forEach(q => {
+      const input = document.getElementById('ans-'+q.id);
+      const val = input ? input.value.trim() : '';
+      if (!val && s.type !== '简答') missing++;
+      answers.push({ id:q.id, type:s.type==='简答'?'subjective':'objective', answer:val||(s.type==='简答'?'（未作答）':'未作答') });
+    });
+  });
+  if (missing > 0 && !confirm('有 '+missing+' 道客观题未作答，确定继续？')) return null;
+  return answers;
+}
+
+// 构建 Prompt
+function buildPrompt(answers) {
+  let p = `# ITO 新品考试智能评分\n\n## 评分规则\n### 客观题\n- 单选20题×1.5分=30分\n- 多选10题×3分=30分（多选/少选/错选均不得分）\n\n### 主观题\n- 简答8题×5分=40分\n- 采分点制，核心信息覆盖即得分\n\n## 标准答案\n\n### 单选题\n`;
+  EXAM_DATA.sections[0].questions.forEach(q => { p += q.id+': '+q.answer+'\n'; });
+  p += '\n### 多选题\n';
+  EXAM_DATA.sections[1].questions.forEach(q => { p += q.id+': '+q.answer+'\n'; });
+  p += '\n### 简答题（采分点）\n';
+  EXAM_DATA.sections[2].questions.forEach(q => {
+    p += q.id+'（'+q.maxScore+'分）\n';
+    q.scoringPoints.forEach(sp => { p += '['+sp.score+'分] '+sp.point+'\n'; });
+    p += '\n';
+  });
+  p += '\n## 学员答案\n';
+  answers.forEach(a => { p += a.id+': '+a.answer+'\n'; });
+  p += `\n## 请输出JSON格式评分结果（不要任何其他文字）\n{\n  "scores": {\n    "singleChoice": { "total":30, "earned":28.5, "details":{ "s1q1":"C", "s1q2":"D" } },\n    "multipleChoice": { "total":30, "earned":24, "details":{ "s2q1":"ABC", "s2q2":"ABDE" } },\n    "essay": { "total":40, "earned":32, "details":{ "s3q1":{"score":4,"feedback":"评语","missedPoints":["遗漏1"]} } }\n  },\n  "summary": {\n    "totalEarned":84.5,\n    "passed":true,\n    "strengths":["优势1","优势2"],\n    "weaknesses":["不足1","不足2"],\n    "overallFeedback":"总体评语"\n  }\n}`;
+  return p;
+}
+
+// 调用AI
+async function callAI(provider, prompt) {
+  const apiKey = localStorage.getItem('ai_key_'+provider);
+  if (!apiKey) throw new Error('请先配置 '+provider+' 的 API Key');
+  const ep = AI_ENDPOINTS[provider];
+  if (provider === 'gemini') {
+    const url = ep.urlBase+'?key='+encodeURIComponent(apiKey);
+    const res = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ contents:[{ parts:[{ text:prompt }] }], generationConfig:{ temperature:0.3, maxOutputTokens:8192 } }) });
+    const data = await res.json();
+    if (!res.ok) throw new Error('Gemini '+(data.error?.message||res.status));
+    if (data.candidates?.[0]?.finishReason==='SAFETY') throw new Error('Gemini 安全过滤');
+    return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  }
+  const res = await fetch(ep.url, { method:'POST', headers:{ 'Authorization':'Bearer '+apiKey, 'Content-Type':'application/json' },
+    body:JSON.stringify({ model:ep.model, messages:[{ role:'system', content:'你是严格评分专家。只输出JSON。' }, { role:'user', content:prompt }], temperature:0.3, max_tokens:8192 }) });
+  const data = await res.json();
+  if (!res.ok) throw new Error('AI '+res.status+': '+(data.error?.message||JSON.stringify(data).substring(0,200)));
+  return data.choices?.[0]?.message?.content || '';
+}
+
+// 评分主流程
+async function startGrading() {
+  const answers = collectAnswers(); if (!answers) return;
+  const provider = document.getElementById('modelSelect').value;
+  const btn = document.getElementById('gradeBtn');
+  const loading = document.getElementById('loadingIndicator');
+  const ra = document.getElementById('resultArea');
+  btn.disabled = true; btn.textContent = '评分中...'; loading.classList.add('active'); ra.style.display = 'none';
+  try {
+    const prompt = buildPrompt(answers);
+    const aiText = await callAI(provider, prompt);
+    // 找JSON
+    let clean = aiText.replace(/```[a-z]*\s*/gi,'').replace(/```\s*/g,'').trim();
+    const brace = clean.indexOf('{');
+    if (brace === -1) throw new Error('AI返回无JSON');
+    clean = clean.substring(brace);
+    const lastBrace = clean.lastIndexOf('}');
+    if (lastBrace === -1) throw new Error('JSON格式不完整');
+    clean = clean.substring(0, lastBrace+1).replace(/,\s*}/g,'}').replace(/,\s*\]/g,']');
+    const result = JSON.parse(clean);
+    displayResults(result, answers);
+  } catch(e) {
+    ra.style.display = 'block';
+    document.getElementById('scoreSummary').innerHTML = `<div class="empty-state"><p>❌ ${e.message}</p></div>`;
+    document.getElementById('resultDetails').innerHTML = '';
+  } finally {
+    btn.disabled = false; btn.textContent = '🤖 AI 智能评分'; loading.classList.remove('active');
+  }
+}
+
+// 显示结果
+function displayResults(data, answers) {
+  const ra = document.getElementById('resultArea'); ra.style.display = 'block';
+  const scores = data.scores;
+  if (!scores) { document.getElementById('scoreSummary').innerHTML = '<div class="empty-state"><p>⚠ AI返回异常，请重试</p></div>'; return; }
+  const objTotal = (scores.singleChoice?.earned||0) + (scores.multipleChoice?.earned||0);
+  const subTotal = scores.essay?.earned||0;
+  const total = objTotal + subTotal;
+  const passed = total >= 80;
+  const badge = document.getElementById('passBadge');
+  badge.textContent = passed ? '✅ 合格' : '❌ 不合格';
+  badge.style.background = passed ? '#e8f5e9' : '#ffebee';
+  badge.style.color = passed ? '#2e7d32' : '#c62828';
+
+  document.getElementById('scoreSummary').innerHTML =
+    `<div class="score-card total"><div class="score-value">${total}/100</div><div class="score-label">总分</div><div style="font-size:13px;margin-top:8px;padding:4px 12px;border-radius:16px;display:inline-block;background:${passed?'rgba(255,255,255,0.2)':'rgba(231,76,60,0.3)'}">${passed?'✅ 及格':'❌ 未及格'}</div></div>` +
+    `<div class="score-card objective"><div class="score-value">${(scores.singleChoice?.earned||0)}/${(scores.singleChoice?.total||30)}</div><div class="score-label">单选题</div></div>` +
+    `<div class="score-card objective"><div class="score-value">${(scores.multipleChoice?.earned||0)}/${(scores.multipleChoice?.total||30)}</div><div class="score-label">多选题</div></div>` +
+    `<div class="score-card subjective"><div class="score-value">${subTotal}/${(scores.essay?.total||40)}</div><div class="score-label">简答题</div></div>`;
+
+  let dh = '<h3 style="font-size:14px;margin-bottom:10px;">📝 客观题</h3>';
+  EXAM_DATA.sections[0].questions.forEach(q => {
+    const userAns = (document.getElementById('ans-'+q.id)?.value||'').trim().toUpperCase();
+    const correct = userAns === q.answer;
+    dh += `<div class="result-item ${correct?'correct':'wrong'}"><div class="r-header"><span class="r-text"><b>${q.id}</b> ${q.text.length>50?q.text.substring(0,50)+'...':q.text}</span><span style="font-weight:600;font-size:14px;color:${correct?'var(--success)':'var(--danger)'}">${correct?'+1.5':'+0'}</span></div><div class="r-answer">你的答案: <b>${userAns||'未作答'}</b> ${correct?'✅':'❌'} 标准答案: <b style="color:var(--success)">${q.answer}</b></div></div>`;
+  });
+  EXAM_DATA.sections[1].questions.forEach(q => {
+    const userAns = (document.getElementById('ans-'+q.id)?.value||'').trim().toUpperCase();
+    const us = userAns.split('').sort().join(''); const cs = q.answer.split('').sort().join('');
+    const correct = us === cs && userAns.length > 0;
+    dh += `<div class="result-item ${correct?'correct':'wrong'}"><div class="r-header"><span class="r-text"><b>${q.id}</b> ${q.text.length>50?q.text.substring(0,50)+'...':q.text}</span><span style="font-weight:600;font-size:14px;color:${correct?'var(--success)':'var(--danger)'}">${correct?'+3':'+0'}</span></div><div class="r-answer">你的答案: <b>${userAns||'未作答'}</b> ${correct?'✅':'❌'} 标准答案: <b style="color:var(--success)">${q.answer}</b></div></div>`;
+  });
+
+  dh += '<h3 style="font-size:14px;margin:20px 0 10px;">💬 简答题</h3>';
+  EXAM_DATA.sections[2].questions.forEach((q,i) => {
+    const d = scores.essay?.details?.[q.id] || {score:0,feedback:'AI未评分',missedPoints:[]};
+    const r = d.score/q.maxScore;
+    dh += `<div class="result-item ${r>=0.8?'correct':r>=0.5?'partial':'wrong'}"><div class="r-header"><span class="r-text"><b>简答${i+1}（${q.maxScore}分）</b> ${q.text.length>60?q.text.substring(0,60)+'...':q.text}</span><span style="font-weight:600;font-size:14px;color:${r>=0.8?'var(--success)':r>=0.5?'var(--warning)':'var(--danger)'}">${d.score}/${q.maxScore}</span></div><div class="r-feedback"><b>AI评语：</b>${d.feedback||'无评语'}</div>${d.missedPoints?.length?'<div class="r-feedback" style="color:var(--danger)"><b>遗漏：</b>'+d.missedPoints.join('、')+'</div>':''}</div>`;
+  });
+  document.getElementById('resultDetails').innerHTML = dh;
+
+  if (data.summary) {
+    document.getElementById('swSection').style.display = 'block';
+    document.getElementById('strengthsTags').innerHTML = data.summary.strengths?.map(s => '<span class="tag tag-strength">'+s+'</span>').join('') || '';
+    document.getElementById('weaknessesTags').innerHTML = data.summary.weaknesses?.map(w => '<span class="tag tag-weakness">'+w+'</span>').join('') || '';
+    document.getElementById('overallFeedback').textContent = data.summary.overallFeedback||'';
+  }
+  ra.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+// 导出
+function exportResult() {
+  const totalEl = document.querySelector('.score-card.total .score-value');
+  const d = document.getElementById('resultDetails').innerText;
+  const fb = document.getElementById('overallFeedback').textContent;
+  const report = `ITO 新品考试评分报告\n评分时间：${new Date().toLocaleString()}\n模型：${document.getElementById('modelSelect').value}\n总分：${totalEl?.textContent||'N/A'}\n\n--- 详细评分 ---\n${d}\n\n--- 综合评语 ---\n${fb}\n\n--- ITO AI 评分系统 ---`;
+  const blob = new Blob([report], {type:'text/plain;charset=utf-8'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'ITO评分报告_'+new Date().toISOString().slice(0,10)+'.txt'; a.click();
+}
+
+function clearAll() { if (!confirm('确定清空所有答案？')) return; document.querySelectorAll('#answerInputs textarea,#answerInputs input').forEach(el => el.value=''); }
+
+function fillSample() {
+  const s1 = ['C','D','C','C','C','C','B','B','B','B','C','B','D','B','C','B','B','A','B','B'];
+  const s2 = ['ABC','ABDE','ABCE','ABCD','ABCD','ABCE','BC','ABD','BCD','BC'];
+  for(let i=1;i<=20;i++) document.getElementById('ans-s1q'+i).value = s1[i-1];
+  for(let i=1;i<=10;i++) document.getElementById('ans-s2q'+i).value = s2[i-1];
+  const s3 = [
+    'ITO使命是提供喜欢且好用的旅行产品，愿景是成为最值得信赖的旅行品牌，价值观是好奇真实执着。PLUS的独立双仓和分体锁体现好用，PEBBLE锁体现品质，5年联保体现信赖。',
+    '推荐20寸登机箱。每周飞2-3次核心需求是效率。20寸可登机免托运；前仓独立放电脑安检方便；有证件快取口袋。省时省心。',
+    '日常通勤选TOTE装电脑和午餐；需解放双手选BACKPACK背着不累有快取；短途旅行选WEEKENDER大容量加鞋仓，一包搞定。',
+    '20寸是独立双仓前仓放电脑安检不用翻箱；25/29寸是双模式站立取物，适合装更多东西的场景。',
+    '自锁拉链拉上自动锁死，不用担心背包被挤开东西掉出，也不需要额外挂锁。就多几十块买永久的安心。',
+    '12L日常通勤放14寸电脑很轻便；20L适合差旅能放16寸电脑¥1,390。看您使用场景选。',
+    'CORDURA面料高强度耐磨；大U框开口像行李箱一样打开打包；有鞋仓隔离和电脑隔层。每个细节对标高品质旅行需求。',
+    '看您穿搭风格——深色系多推荐棕褐炭黑百搭，亮色系多推荐豆绿烟白有辨识度。相近色选更耐看的经典色。'
+  ];
+  for(let i=1;i<=8;i++) document.getElementById('ans-s3q'+i).value = s3[i-1];
+}
+
+function openConfig() {
+  document.getElementById('configModal').classList.add('active');
+  ['deepseek','gemini','kimi','chatanywhere'].forEach(p => {
+    const saved = localStorage.getItem('ai_key_'+p);
+    const input = document.getElementById('key-'+p);
+    const dot = document.getElementById('dot-'+p);
+    if (saved) { input.value = saved; dot.className = 'status-dot configured'; }
+    else { dot.className = 'status-dot unconfigured'; }
+  });
+}
+function closeConfig() { document.getElementById('configModal').classList.remove('active'); }
+function saveConfig() {
+  ['deepseek','gemini','kimi','chatanywhere'].forEach(p => {
+    const v = document.getElementById('key-'+p).value.trim();
+    if (v) localStorage.setItem('ai_key_'+p, v);
+  });
+  alert('API Key 已保存到浏览器本地！'); closeConfig();
+}
+
+init();
+</script>
+</body>
+</html>
