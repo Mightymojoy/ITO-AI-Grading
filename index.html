@@ -116,11 +116,9 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:1
 .ans-input{flex:1;padding:8px 12px;background:var(--bg);border:1px dashed var(--border);border-radius:var(--radius-sm);font-size:13px;color:var(--text);font-family:var(--font);transition:all .15s;outline:none;letter-spacing:.5px}
 .ans-input:focus{border-color:var(--gold);border-style:solid;background:var(--bg-card)}
 .ans-textarea{min-height:70px;resize:vertical;line-height:1.6}
-.ans-expected{font-size:10px;color:var(--text-tertiary);font-weight:500;padding:3px 8px;background:var(--bg);border-radius:8px;white-space:nowrap;font-variant-numeric:tabular-nums}
 .ans-input::placeholder{color:var(--text-tertiary)}
 .ans-textarea{min-height:72px;resize:vertical;line-height:1.5}
 .ans-options{font-size:11px;color:var(--text-tertiary);margin-bottom:6px;line-height:1.5}
-.ans-expected{font-size:10px;color:var(--text-tertiary);margin-top:4px;display:block;text-align:right}
 
 /* Action bar */
 .action-bar{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;padding-top:16px;border-top:1px solid var(--border)}
@@ -452,13 +450,13 @@ function renderAnswerInputs() {
         h += '<div class="ans-a-label"><i data-lucide="pen-line" style="width:10px;height:10px"></i>填入答案</div>';
         h += '<div class="ans-a-row">';
         h += '<input id="ans-'+q.id+'" class="ans-input" placeholder="填空回答..." style="flex:1">';
-        h += '<span class="ans-expected">'+q.blankAnswer+'</span></div>';
+        h += '</div>';
       } else {
         h += '<div class="ans-a-label"><i data-lucide="pen-line" style="width:10px;height:10px"></i>作答</div>';
         var ph = s.type === '单选' ? '填入字母 A/B/C/D' : '填入字母组合 如 ABCDE';
         h += '<div class="ans-a-row">';
         h += '<input id="ans-'+q.id+'" class="ans-input" placeholder="'+ph+'" maxlength="'+(s.type==='单选'?'1':'5')+'">';
-        h += '<span class="ans-expected">'+q.answer+'</span></div>';
+        h += '</div>';
       }
       h += '</div></div>';
     });
