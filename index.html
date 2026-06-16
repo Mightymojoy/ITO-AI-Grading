@@ -45,6 +45,9 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:1
 .nav-brand small{font-size:12px;color:var(--text-tertiary);font-weight:400;margin-left:4px}
 .nav-actions{display:flex;align-items:center;gap:8px}
 .nav-divider{width:1px;height:20px;background:var(--border);margin:0 8px}
+.nav-input{padding:5px 8px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;color:var(--text);font-family:var(--font);outline:none}
+.nav-input:focus{border-color:var(--gold)}
+.nav-input::placeholder{color:var(--text-tertiary)}
 
 /* Buttons */
 .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;font-weight:500;font-family:var(--font);cursor:pointer;transition:all .15s;background:transparent;color:var(--text-secondary);line-height:1}
@@ -202,6 +205,9 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:1
       <span class="status-dot"></span>
       <span id="loadStatus">载入中</span>
     </div>
+    <div class="nav-divider"></div>
+    <input type="text" id="feishuName" placeholder="主播姓名" class="nav-input" style="width:80px" title="主播姓名（必填，用于飞书记录）">
+    <input type="text" id="feishuDept" placeholder="部门" class="nav-input" style="width:72px" title="所属部门">
     <div class="nav-divider"></div>
     <select id="modelSelect" style="padding:5px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;color:var(--text);font-family:var(--font);outline:none;cursor:pointer">
       <option value="deepseek">DeepSeek</option>
@@ -389,6 +395,18 @@ function init() {
   renderAnswerInputs();
   document.getElementById('loadStatus').textContent = '43 题 · 100 分 · 80 分及格';
   document.getElementById('questionCount').textContent = '18单选 · 9多选 · 10填空 · 6简答';
+  // 恢复主播信息
+  ['feishuName','feishuDept'].forEach(function(id){
+    var saved = localStorage.getItem(id);
+    if (saved) document.getElementById(id).value = saved;
+  });
+  // 自动保存主播信息
+  document.getElementById('feishuName').addEventListener('input', function(){
+    if (this.value.trim()) localStorage.setItem('feishuName', this.value);
+  });
+  document.getElementById('feishuDept').addEventListener('input', function(){
+    if (this.value.trim()) localStorage.setItem('feishuDept', this.value);
+  });
   lucide.createIcons();
 }
 
@@ -623,9 +641,9 @@ async function submitToFeishu(totalScore, passed, feedback) {
   var secret = localStorage.getItem('feishu_secret');
   if (!appId || !secret) return;
 
-  var name = prompt('请输入主播姓名：');
-  if (!name) return;
-  var dept = prompt('请输入部门：') || '';
+  var name = document.getElementById('feishuName').value.trim();
+  if (!name) { alert('请先在顶部填写主播姓名'); return; }
+  var dept = document.getElementById('feishuDept').value.trim();
 
   try {
     // 走 Vercel API 代理，无 CORS 限制
