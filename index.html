@@ -276,7 +276,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:1
       <button class="btn btn-primary" onclick="startGrading()" id="gradeBtn">
         <i data-lucide="brain" style="width:14px;height:14px"></i> AI 评分
       </button>
-      <button class="btn" onclick="fillSample()">
+      <button class="btn" onclick="fillSample()" id="sampleBtn" style="display:none">
         <i data-lucide="file-edit" style="width:14px;height:14px"></i> 样例
       </button>
       <button class="btn" onclick="clearAll()">
@@ -771,6 +771,7 @@ function displayResults(data, answers) {
   // 切回评分结果Tab
   switchTab('score');
   submitToFeishu(total, passed, data.summary?.overallFeedback||'');
+  document.getElementById('sampleBtn').style.display = 'inline-flex';
 }
 
 function exportResult() {
