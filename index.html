@@ -555,7 +555,7 @@ function buildPrompt(answers) {
   p += '\n### 填空题\n'; EXAM_DATA.sections[2].questions.forEach(function(q){p+=q.id+': '+q.blankAnswer+'\n'});
   p += '\n### 简答采分点\n'; EXAM_DATA.sections[3].questions.forEach(function(q){p+=q.id+'（'+q.maxScore+'分）: '; q.scoringPoints.forEach(function(sp){p+='['+sp.score+'分]'+sp.point+'; '}); p+='\n'});
   p += '\n---\n## 学员答案\n'; answers.forEach(function(sa){p+=sa.id+': '+sa.answer+'\n'});
-  p += '\n---\n## 输出JSON格式（不要其他文字）\n{\n  "scores":{\n    "singleChoice":{"total":27,"earned":0,"details":{}},\n    "multipleChoice":{"total":27,"earned":0,"details":{}},\n    "fillBlank":{"total":10,"earned":0,"details":{}},\n    "essay":{"total":36,"earned":0,"details":{}}\n  },\n  "summary":{"totalEarned":0,"passed":false,"strengths":[],"weaknesses":[],"overallFeedback":""}\n}';
+  p += '\n---\n## 输出JSON格式（不要其他文字）\n{\n  "scores":{\n    "singleChoice":{"total":27,"earned":0,"details":{"s1q1":"","s1q2":""}},\n    "multipleChoice":{"total":27,"earned":0,"details":{"s2q1":"","s2q2":""}},\n    "fillBlank":{"total":10,"earned":0,"details":{"s3q1":"","s3q2":""}},\n    "essay":{"total":36,"earned":0,"details":{"s4q1":{"score":0,"feedback":"评语","missedPoints":[]}}}\n  },\n  "summary":{"totalEarned":0,"passed":false,"strengths":[],"weaknesses":[],"overallFeedback":""}\n}';
   return p;
 }
 
