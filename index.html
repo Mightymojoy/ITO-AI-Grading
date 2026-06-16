@@ -353,57 +353,107 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:1
 
 <script>
 // ============================================================
-//  考试数据
+//  大题库（每次随机抽题）
 // ============================================================
-var EXAM_DATA = {"title":"ITO 2026 新品系列产品知识考试","totalScore":100,"passScore":80,"sections":[
-{"type":"单选","title":"单选题","count":18,"scorePerQuestion":1.5,"totalScore":27,"questions":[
-{"id":"s1q1","text":"PISTACHIO PLUS 20 寸登机箱的零售价是？","options":["A. ¥1,490","B. ¥1,590","C. ¥1,690","D. ¥1,790"],"answer":"C"},
-{"id":"s1q2","text":"PISTACHIO PLUS 25 寸托运箱的零售价是？","options":["A. ¥1,990","B. ¥2,090","C. ¥2,190","D. ¥2,290"],"answer":"C"},
-{"id":"s1q3","text":"以下哪个颜色属于 PISTACHIO PLUS 系列？","options":["A. 气泡粉","B. 晶体绿","C. 豆绿","D. 液态紫"],"answer":"C"},
-{"id":"s1q4","text":"PISTACHIO PLUS 20 寸前仓可容纳最大多少英寸笔记本电脑？","options":["A. 14 英寸","B. 15 英寸","C. 16 英寸","D. 17 英寸"],"answer":"C"},
-{"id":"s1q5","text":"PISTACHIO PLUS 25/29 寸托运箱采用哪种锁具设计？","options":["A. ITO PEBBLE 翻盖式","B. 分体集成海关密码锁","C. 普通 TSA 密码锁","D. 数字密码锁"],"answer":"B"},
-{"id":"s1q6","text":"PISTACHIO PLUS 25/29 寸托运箱的核心创新结构是？","options":["A. 独立双仓","B. 分体集成海关锁双模式","C. 前盖快取口袋","D. PEBBLE 锁具"],"answer":"B"},
-{"id":"s1q7","text":"TRUFFLE PRO TOTE 的零售价和容量分别是？","options":["A. ¥1,190，15L","B. ¥1,290，18L","C. ¥1,390，20L","D. ¥1,490，22L"],"answer":"B"},
-{"id":"s1q8","text":"TRUFFLE PRO TOTE 的主面料是？","options":["A. CORDURA® Naturalle","B. camira Era","C. 尼龙面料","D. 涤纶面料"],"answer":"B"},
-{"id":"s1q9","text":"TRUFFLE PRO BACKPACK 20L 的零售价和净重分别是？","options":["A. ¥1,190，1.00kg","B. ¥1,290，1.05kg","C. ¥1,390，1.11kg","D. ¥1,490，1.20kg"],"answer":"C"},
-{"id":"s1q10","text":"TRUFFLE PRO BACKPACK 12L 最多可容纳多大尺寸笔记本电脑？","options":["A. 13 英寸","B. 14 英寸","C. 15 英寸","D. 16 英寸"],"answer":"B"},
-{"id":"s1q11","text":"WEEKENDER 的零售价和容量分别是？","options":["A. ¥1,290，28L","B. ¥1,390，32L","C. ¥1,490，34L","D. ¥1,590，36L"],"answer":"D"},
-{"id":"s1q12","text":"WEEKENDER 采用什么面料？","options":["A. camira Era","B. CORDURA® Naturalle","C. 帆布","D. 尼龙"],"answer":"B"},
-{"id":"s1q13","text":"以下哪个是包袋产品和 WEEKENDER 的共有工艺？","options":["A. 分体集成海关锁","B. PEBBLE 锁具","C. 自锁五金拉链","D. 双 U 框开口"],"answer":"C"},
-{"id":"s1q14","text":"TRUFFLE PRO BACKPACK 快取口袋的说法正确的是？","options":["A. 需摘下使用","B. 背着包单手存取","C. 只能放手机","D. 位于底部"],"answer":"B"},
-{"id":"s1q15","text":"TRUFFLE PRO TOTE 和 WEEKENDER 背面的共同功能是？","options":["A. 水杯袋","B. 拉杆箱插袋系统","C. 充电宝口袋","D. 防盗暗袋"],"answer":"B"},
-{"id":"s1q16","text":"PISTACHIO PLUS 的售后服务表述最正确的是？","options":["A. 5 年联保，功能性损坏可享售后","B. 3 年联保，人为损坏免费","C. 终身质保","D. 1 年联保"],"answer":"A"},
-{"id":"s1q17","text":"ITO CARE 无忧换新服务的具体内容是？","options":["A. 180 天 1 次免费换新","B. 360 天 1 次免费换新","C. 720 天不限次换新","D. 90 天 1 次换新"],"answer":"B"},
-{"id":"s1q18","text":"TRUFFLE PRO TOTE 的净重是多少？","options":["A. 0.6kg","B. 0.8kg","C. 1.0kg","D. 1.2kg"],"answer":"B"}]},
-{"type":"多选","title":"多选题","count":9,"scorePerQuestion":3,"totalScore":27,"questions":[
-{"id":"s2q1","text":"PISTACHIO PLUS 20 寸登机箱设计亮点包括？","options":["A. 独立双仓","B. 前仓可容纳16寸笔记本","C. 分体集成海关锁","D. PEBBLE 海关密码锁","E. 前盖快取证件口袋"],"answer":"ABDE"},
-{"id":"s2q2","text":"25/29 寸托运箱优势包括？","options":["A. 分体锁上拨中开/下拨前开","B. 前盖深仓通仓","C. 置顶U框隐私层","D. 独立双仓","E. 分类收纳口袋"],"answer":"ABCE"},
-{"id":"s2q3","text":"TRUFFLE PRO TOTE 的功能设计包括？","options":["A. 自锁拉链","B. 背面隐藏拉链仓","C. 正面快取磁吸口袋","D. 左右D环","E. 鞋仓"],"answer":"ABCD"},
-{"id":"s2q4","text":"TRUFFLE PRO BACKPACK 通用卖点包括？","options":["A. 正面顶部快取口袋","B. 九字钩扣大开口","C. 手机隐蔽袋","D. 肩带D环","E. 前置办公分仓"],"answer":"ABCD"},
-{"id":"s2q5","text":"WEEKENDER 的功能设计包括？","options":["A. 大U框主仓开口","B. 卸挂绳收纳包","C. 鞋仓/脏衣隔离","D. 侧面水杯插袋","E. 超纤皮提手"],"answer":"ABCE"},
-{"id":"s2q6","text":"哪些产品使用了 camira Era 面料？","options":["A. PISTACHIO PLUS","B. TRUFFLE PRO TOTE","C. TRUFFLE PRO BACKPACK","D. WEEKENDER"],"answer":"BC"},
-{"id":"s2q7","text":"关于自锁拉链的描述正确的有？","options":["A. 拉头自带锁定","B. 闭合后自动锁死","C. 需要额外挂锁","D. 不会无意滑开","E. 仅用于 TOTE"],"answer":"ABD"},
-{"id":"s2q8","text":"采用 PROTECTION+ 三防工艺的产品有？","options":["A. PISTACHIO PLUS","B. TRUFFLE PRO TOTE","C. TRUFFLE PRO BACKPACK","D. WEEKENDER"],"answer":"BCD"},
-{"id":"s2q9","text":"哪些包袋共享烟黑/雾灰/棕褐配色？","options":["A. PISTACHIO PLUS","B. TRUFFLE PRO TOTE","C. TRUFFLE PRO BACKPACK","D. WEEKENDER"],"answer":"BC"}]},
-{"type":"填空","title":"填空题","count":10,"scorePerFill":1,"totalScore":10,"questions":[
-{"id":"s3q1","text":"PISTACHIO PLUS 20寸前仓最大可容纳___英寸笔记本电脑","blankAnswer":"16"},
-{"id":"s3q2","text":"PISTACHIO PLUS 共有___种配色","blankAnswer":"4"},
-{"id":"s3q3","text":"TRUFFLE PRO TOTE 容量为___L","blankAnswer":"18"},
-{"id":"s3q4","text":"TRUFFLE PRO BACKPACK 20L 零售价___元","blankAnswer":"1390"},
-{"id":"s3q5","text":"WEEKENDER 容量为___L","blankAnswer":"36"},
-{"id":"s3q6","text":"WEEKENDER 零售价___元","blankAnswer":"1590"},
-{"id":"s3q7","text":"ITO CARE 无忧换新为订单完成后___天内1次免费换新","blankAnswer":"360"},
-{"id":"s3q8","text":"4个新品通用的三防技术简称___","blankAnswer":"PROTECTION+"},
-{"id":"s3q9","text":"4个新品内里均采用___长效抗菌里布","blankAnswer":"7A"},
-{"id":"s3q10","text":"包袋产品背面的行李箱固定系统名称___","blankAnswer":"拉杆箱插袋系统"}]},
-{"type":"简答","title":"简答题","count":6,"scorePerQuestion":6,"totalScore":36,"questions":[
-{"id":"s4q1","text":"面对每周飞2-3次的商务人士，推荐PISTACHIO PLUS 20寸还是25寸？","maxScore":6,"scoringPoints":[{"point":"推荐20寸（登机免托运）","score":1.5},{"point":"前仓独立电脑快取（安检隐私保护）","score":1.5},{"point":"前盖证件快取口袋","score":1},{"point":"轻量化/登机尺寸","score":1},{"point":"结合用户场景","score":1}]},
-{"id":"s4q2","text":"直播间客户问 TOTE、BACKPACK、WEEKENDER 怎么选？","maxScore":6,"scoringPoints":[{"point":"TOTE→通勤/差旅18L","score":1.5},{"point":"BACKPACK→解放双手/通勤","score":1.5},{"point":"WEEKENDER→短途旅行36L","score":1.5},{"point":"表达有温度","score":1.5}]},
-{"id":"s4q3","text":"一句话让客户听懂20寸和25/29寸的区别？","maxScore":6,"scoringPoints":[{"point":"20寸=独立双仓（前仓电脑/安检方便）","score":2.5},{"point":"25/29寸=双模式开合（站立取物）","score":2.5},{"point":"表达简洁","score":1}]},
-{"id":"s4q4","text":"客户问：自锁拉链和普通拉链有什么区别？","maxScore":6,"scoringPoints":[{"point":"自锁拉链自动锁死不会滑开","score":2},{"point":"场景痛点：被拉开/东西掉出","score":2},{"point":"不需要额外挂锁","score":1},{"point":"话术有说服力","score":1}]},
-{"id":"s4q5","text":"客户问 BACKPACK 12L 和 20L 怎么选？","maxScore":6,"scoringPoints":[{"point":"12L日常通勤/14寸电脑","score":2},{"point":"20L差旅/16寸电脑¥1,390","score":2},{"point":"容量差=电脑尺寸差","score":1},{"point":"结合用户场景","score":1}]},
-{"id":"s4q6","text":"客户问：WEEKENDER 为什么卖 ¥1,590？","maxScore":6,"scoringPoints":[{"point":"CORDURA®面料高强度耐磨","score":1.5},{"point":"大U框开口像行李箱打包","score":1.5},{"point":"鞋仓+电脑隔层","score":1.5},{"point":"三防/抗菌/自锁拉链","score":1.5}]}]}]};
+var QUESTION_POOLS = {
+  single: [
+    {text:'PISTACHIO PLUS 20寸登机箱零售价？',opts:['A. ¥1,490','B. ¥1,590','C. ¥1,690','D. ¥1,790'],ans:'C'},
+    {text:'PISTACHIO PLUS 25寸托运箱零售价？',opts:['A. ¥1,990','B. ¥2,090','C. ¥2,190','D. ¥2,290'],ans:'C'},
+    {text:'PISTACHIO PLUS 共有几种配色？',opts:['A. 2种','B. 3种','C. 4种','D. 5种'],ans:'C'},
+    {text:'PISTACHIO PLUS 20寸前仓最大容纳多大笔记本？',opts:['A. 14英寸','B. 15英寸','C. 16英寸','D. 17英寸'],ans:'C'},
+    {text:'PISTACHIO PLUS 25/29寸采用哪种锁具？',opts:['A. PEBBLE翻盖锁','B. 分体集成海关锁','C. TSA普通锁','D. 数字密码锁'],ans:'B'},
+    {text:'PISTACHIO PLUS 25/29寸核心创新结构？',opts:['A. 独立双仓','B. 分体锁双模式','C. 前盖快取','D. PEBBLE锁'],ans:'B'},
+    {text:'TRUFFLE PRO TOTE 容量和价格？',opts:['A. 15L,¥1,190','B. 18L,¥1,290','C. 20L,¥1,390','D. 22L,¥1,490'],ans:'B'},
+    {text:'TRUFFLE PRO TOTE 主面料？',opts:['A. CORDURA®','B. camira Era','C. 尼龙','D. 涤纶'],ans:'B'},
+    {text:'TRUFFLE PRO BACKPACK 20L 零售价？',opts:['A. ¥1,190','B. ¥1,290','C. ¥1,390','D. ¥1,490'],ans:'C'},
+    {text:'TRUFFLE PRO BACKPACK 12L 可放多大笔记本？',opts:['A. 13英寸','B. 14英寸','C. 15英寸','D. 16英寸'],ans:'B'},
+    {text:'WEEKENDER 容量和零售价？',opts:['A. 28L,¥1,290','B. 32L,¥1,390','C. 34L,¥1,490','D. 36L,¥1,590'],ans:'D'},
+    {text:'WEEKENDER 采用什么面料？',opts:['A. camira Era','B. CORDURA® Naturalle','C. 帆布','D. 尼龙'],ans:'B'},
+    {text:'包袋共有的工艺？',opts:['A. 分体锁','B. PEBBLE锁','C. 自锁五金拉链','D. 双U框'],ans:'C'},
+    {text:'BP快取口袋的正确描述？',opts:['A. 需摘下用','B. 背着单手存取','C. 只能放手机','D. 在背包底部'],ans:'B'},
+    {text:'TOTE和WEEKENDER背面共同功能？',opts:['A. 水杯袋','B. 拉杆箱插袋','C. 充电宝袋','D. 防盗暗袋'],ans:'B'},
+    {text:'PISTACHIO PLUS 售后政策？',opts:['A. 5年联保','B. 3年免费维修','C. 终身质保','D. 1年保修'],ans:'A'},
+    {text:'ITO CARE 换新服务期限？',opts:['A. 180天1次','B. 360天1次','C. 720天不限次','D. 90天1次'],ans:'B'},
+    {text:'TRUFFLE PRO TOTE 净重？',opts:['A. 0.6kg','B. 0.8kg','C. 1.0kg','D. 1.2kg'],ans:'B'},
+    {text:'TRUFFLE PRO BACKPACK 20L 净重？',opts:['A. 0.9kg','B. 1.0kg','C. 1.11kg','D. 1.2kg'],ans:'C'},
+    {text:'WEEKENDER 净重？',opts:['A. 0.8kg','B. 0.9kg','C. 1.0kg','D. 1.1kg'],ans:'D'},
+    {text:'PISTACHIO PLUS 20寸前仓锁类型？',opts:['A. 分体锁','B. PEBBLE鹅卵石锁','C. 数字锁','D. TSA锁'],ans:'B'},
+    {text:'PISTACHIO PLUS 25/29寸前盖开口方式？',opts:['A. 侧开','B. 上翻','C. 前翻','D. 下拉'],ans:'C'},
+    {text:'PISTACHIO PLUS 20寸主仓前仓分隔？',opts:['A. 拉链分隔','B. 全封闭独立仓','C. 弹力带固定','D. 无分隔'],ans:'B'},
+    {text:'TOTE隐藏拉链仓在什么位置？',opts:['A. 正面','B. 背面','C. 侧面','D. 内部'],ans:'B'},
+    {text:'WEEKENDER 内部隔离功能？',opts:['A. 干湿分离','B. 鞋仓隔离','C. 电脑仓','D. 以上都是'],ans:'D'},
+    {text:'BP 正面顶部有什么设计？',opts:['A. 拉链袋','B. 快取口袋','C. 手机隐蔽袋','D. 水杯插袋'],ans:'B'},
+    {text:'TOTE正面有什么设计？',opts:['A. 拉链袋','B. 快取磁吸口袋','C. 水杯袋','D. 品牌标'],ans:'B'},
+    {text:'PISTACHIO PLUS 20寸双仓模式的描述？',opts:['A. 前后仓可联通','B. 物理隔离独立使用','C. 拉链联通','D. 共用空间'],ans:'B'},
+    {text:'25/29寸隐私层U框位置？',opts:['A. 底部','B. 侧面','C. 顶部','D. 前盖'],ans:'C'},
+    {text:'PISTACHIO PLUS 箱体材质？',opts:['A. 德国科思创4层PC','B. 日本ABS','C. 国产PP','D. 铝合金'],ans:'A'}
+  ],
+  multi: [
+    {text:'PISTACHIO PLUS 20寸设计亮点？',opts:['A. 独立双仓','B. 前仓16寸电脑','C. 分体锁','D. PEBBLE锁','E. 证件快取'],ans:'ABDE'},
+    {text:'25/29寸托运箱优势？',opts:['A. 分体锁双模式','B. 前盖通仓站立取物','C. 隐私层','D. 独立双仓','E. 分类收纳'],ans:'ABCE'},
+    {text:'TOTE功能设计包括？',opts:['A. 自锁拉链','B. 背面隐藏拉链仓','C. 磁吸口袋','D. D环系统','E. 鞋仓'],ans:'ABCD'},
+    {text:'BP通用卖点？',opts:['A. 顶部快取口袋','B. 九字钩大开口','C. 手机隐蔽袋','D. 肩带D环','E. 前置办公分仓'],ans:'ABCD'},
+    {text:'WEEKENDER功能包括？',opts:['A. 大U框主仓','B. 卸挂绳收纳包','C. 鞋仓隔离','D. 水杯插袋','E. 超纤皮提手'],ans:'ABCE'},
+    {text:'使用camira Era面料的产品？',opts:['A. PLUS','B. TOTE','C. BACKPACK','D. WEEKENDER','E. 无其他'],ans:'BC'},
+    {text:'自锁拉链描述正确的？',opts:['A. 自带锁定机构','B. 闭合后自动锁死','C. 需额外挂锁','D. 不会无意滑开','E. 仅TOTE用'],ans:'ABD'},
+    {text:'三防工艺覆盖的产品？',opts:['A. PLUS','B. TOTE','C. BACKPACK','D. WEEKENDER','E. 无其他'],ans:'BCD'},
+    {text:'包袋共享配色方案？',opts:['A. PLUS','B. TOTE','C. BACKPACK','D. WEEKENDER','E. 以上全部'],ans:'BC'},
+    {text:'PISTACHIO PLUS 售后保障包括？',opts:['A. 5年联保','B. 360天换新','C. 终身保修','D. 免费配件','E. 1次换新'],ans:'ABE'},
+    {text:'PROTECTION+三防含义？',opts:['A. 防泼水','B. 防油污','C. 防刮','D. 防火','E. 防紫外线'],ans:'ABC'},
+    {text:'TOTE颜色选项？',opts:['A. 烟黑','B. 雾灰','C. 棕褐','D. 豆绿','E. 炭黑'],ans:'ABC'},
+    {text:'WEEKENDER提手材料？',opts:['A. 超纤皮','B. 尼龙','C. 真皮','D. 品牌标识','E. 金属'],ans:'AD'},
+    {text:'BP背面功能设计？',opts:['A. 拉杆箱插袋','B. 透气背板','C. 隐藏口袋','D. 行李牌','E. D环'],ans:'ABCD'},
+    {text:'25/29寸分类收纳口袋类型？',opts:['A. 网布弹力袋','B. 立体成型袋','C. 拉链袋','D. 干湿分离袋','E. 鞋袋'],ans:'AB'}
+  ],
+  fill: [
+    {text:'PISTACHIO PLUS 20寸前仓最大容纳___寸笔记本',ans:'16'},
+    {text:'PISTACHIO PLUS 共有___种配色',ans:'4'},
+    {text:'TRUFFLE PRO TOTE 容量___L',ans:'18'},
+    {text:'TRUFFLE PRO BACKPACK 20L 零售价___元',ans:'1390'},
+    {text:'WEEKENDER 容量___L',ans:'36'},
+    {text:'WEEKENDER 零售价___元',ans:'1590'},
+    {text:'ITO CARE 无忧换新为___天内1次免费换新',ans:'360'},
+    {text:'4个新品通用的三防技术简称___',ans:'PROTECTION+'},
+    {text:'新品内里均采用___长效抗菌里布',ans:'7A'},
+    {text:'包袋背面行李箱固定系统名称___',ans:'拉杆箱插袋系统'},
+    {text:'PISTACHIO PLUS 20寸前仓锁名为___',ans:'PEBBLE'},
+    {text:'TRUFFLE PRO TOTE 净重___kg',ans:'0.8'},
+    {text:'PISTACHIO PLUS 25寸零售价___元',ans:'2190'},
+    {text:'PISTACHIO PLUS 售后为___年联保',ans:'5'},
+    {text:'TRUFFLE PRO BACKPACK 20L 净重___kg',ans:'1.11'},
+    {text:'TRUFFLE PRO BACKPACK 12L 可放___寸电脑',ans:'14'},
+    {text:'PISTACHIO PLUS 20寸零售价___元',ans:'1690'},
+    {text:'WEEKENDER 面料___',ans:'CORDURA Naturalle'},
+    {text:'新品内里均采用___级长效抗菌里布',ans:'7A'},
+    {text:'TRUFFLE PRO TOTE 采用___面料',ans:'camira Era'}
+  ],
+  essay: [
+    {text:'面对每周飞2-3次的商务人士，推荐PISTACHIO PLUS 20寸还是25寸？',maxScore:5,points:[{p:'推荐20寸登机免托运',s:1.5},{p:'前仓独立电脑快取',s:1.5},{p:'前盖证件快取口袋',s:1},{p:'结合用户场景',s:1}]},
+    {text:'直播间客户问TOTE BACKPACK WEEKENDER 怎么选？',maxScore:5,points:[{p:'TOTE通勤差旅18L',s:1.5},{p:'BACKPACK解放双手',s:1.5},{p:'WEEKENDER短途旅行36L',s:1.5},{p:'表达有温度',s:0.5}]},
+    {text:'一句话让客户听懂20寸和25/29寸的区别？',maxScore:5,points:[{p:'20寸独立双仓安检方便',s:2},{p:'25/29寸双模式开合站立取物',s:2},{p:'表达简洁',s:1}]},
+    {text:'客户问自锁拉链和普通拉链有什么区别？',maxScore:5,points:[{p:'自动锁死不会滑开',s:2},{p:'场景痛点东西掉出',s:1.5},{p:'不需要额外挂锁',s:1.5}]},
+    {text:'客户问BACKPACK 12L和20L怎么选？',maxScore:5,points:[{p:'12L日常通勤14寸电脑',s:2},{p:'20L差旅16寸电脑',s:2},{p:'结合用户场景',s:1}]},
+    {text:'客户问WEEKENDER为什么卖1590？',maxScore:5,points:[{p:'CORDURA面料高强度',s:1.5},{p:'大U框开口像行李箱',s:1.5},{p:'鞋仓电脑隔层',s:1},{p:'三防抗菌自锁拉链',s:1}]},
+    {text:'客户问PLUS 20寸和普通行李箱有什么不同？',maxScore:5,points:[{p:'独立双仓前仓电脑隔离',s:1.5},{p:'前盖快取证件PEBBLE锁',s:1.5},{p:'5年联保更安心',s:1},{p:'表达有场景感',s:1}]},
+    {text:'客户问TOTE和WEEKENDER有什么不同？',maxScore:5,points:[{p:'TOTE通勤18L轻便0.8kg',s:1.5},{p:'WEEKENDER旅行36L大U框',s:1.5},{p:'共用插袋自锁三防',s:1},{p:'按使用场景推荐',s:1}]}
+  ]
+};
 
+function shuffleArr(a) { for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;} return a; }
+
+function buildExam() {
+  var single = shuffleArr(QUESTION_POOLS.single).slice(0,25).map(function(q,i){return{id:'s1q'+(i+1),text:q.text,options:q.opts,answer:q.ans};});
+  var multi = shuffleArr(QUESTION_POOLS.multi).slice(0,10).map(function(q,i){return{id:'s2q'+(i+1),text:q.text,options:q.opts,answer:q.ans};});
+  var fill = shuffleArr(QUESTION_POOLS.fill).slice(0,15).map(function(q,i){return{id:'s3q'+(i+1),text:q.text,blankAnswer:q.ans};});
+  var essay = shuffleArr(QUESTION_POOLS.essay).slice(0,5).map(function(q,i){return{id:'s4q'+(i+1),text:q.text,maxScore:q.maxScore,scoringPoints:q.points.map(function(p){return{point:p.p,score:p.s};})};});
+  return {title:'ITO 2026 新品系列产品知识考试',totalScore:100,passScore:80,sections:[
+    {type:'单选',title:'单选题',count:25,scorePerQuestion:1.2,totalScore:30,questions:single},
+    {type:'多选',title:'多选题',count:10,scorePerQuestion:3,totalScore:30,questions:multi},
+    {type:'填空',title:'填空题',count:15,scorePerFill:1,totalScore:15,questions:fill},
+    {type:'简答',title:'简答题',count:5,scorePerQuestion:5,totalScore:25,questions:essay}
+  ]};
+}
+var EXAM_DATA = buildExam();
 // ============================================================
 //  切屏追踪
 // ============================================================
@@ -446,8 +496,9 @@ function showToast(msg) {
 function init() {
   renderQuestions();
   renderAnswerInputs();
-  document.getElementById('loadStatus').textContent = '43 题 · 100 分 · 80 分及格';
-  document.getElementById('questionCount').textContent = '18单选 · 9多选 · 10填空 · 6简答';
+  var c1 = EXAM_DATA.sections[0].count + '单选 · ' + EXAM_DATA.sections[1].count + '多选 · ' + EXAM_DATA.sections[2].count + '填空 · ' + EXAM_DATA.sections[3].count + '简答';
+  document.getElementById('loadStatus').textContent = c1 + ' · 100 分 · 80 分及格';
+  document.getElementById('questionCount').textContent = c1;
   // 恢复主播信息
   ['feishuName','feishuDept'].forEach(function(id){
     var saved = localStorage.getItem(id);
@@ -560,13 +611,14 @@ function collectAnswers() {
 }
 
 function buildPrompt(answers) {
-  var p = '# ITO 2026 考试评分\n\n## 评分规则\n### 客观题\n- 单选每题1.5分共18题27分\n- 多选每题3分共9题27分（多/少/错选不得分）\n- 填空每题1分共10题10分\n- 直接比对答案\n\n### 简答题\n- 每题6分共6题36分\n- 采分点制，看核心信息覆盖\n\n## 标准答案\n\n';
+  var s0 = EXAM_DATA.sections[0], s1 = EXAM_DATA.sections[1], s2 = EXAM_DATA.sections[2], s3 = EXAM_DATA.sections[3];
+  var p = '# ITO 2026 考试评分\n\n## 评分规则\n### 客观题\n- 单选每题' + s0.scorePerQuestion + '分共' + s0.count + '题' + s0.totalScore + '分\n- 多选每题' + s1.scorePerQuestion + '分共' + s1.count + '题' + s1.totalScore + '分（多/少/错选不得分）\n- 填空每题' + (s2.scorePerFill||1) + '分共' + s2.count + '题' + s2.totalScore + '分\n- 直接比对答案\n\n### 简答题\n- 每题' + s3.scorePerQuestion + '分共' + s3.count + '题' + s3.totalScore + '分\n- 采分点制，看核心信息覆盖\n\n## 标准答案\n\n';
   p += '### 单选题\n'; EXAM_DATA.sections[0].questions.forEach(function(q){p+=q.id+': '+q.answer+'\n'});
   p += '\n### 多选题\n'; EXAM_DATA.sections[1].questions.forEach(function(q){p+=q.id+': '+q.answer+'\n'});
   p += '\n### 填空题\n'; EXAM_DATA.sections[2].questions.forEach(function(q){p+=q.id+': '+q.blankAnswer+'\n'});
   p += '\n### 简答采分点\n'; EXAM_DATA.sections[3].questions.forEach(function(q){p+=q.id+'（'+q.maxScore+'分）: '; q.scoringPoints.forEach(function(sp){p+='['+sp.score+'分]'+sp.point+'; '}); p+='\n'});
   p += '\n---\n## 学员答案\n'; answers.forEach(function(sa){p+=sa.id+': '+sa.answer+'\n'});
-  p += '\n---\n## 输出JSON格式（不要其他文字）\n{\n  "scores":{\n    "singleChoice":{"total":27,"earned":0,"details":{"s1q1":"","s1q2":""}},\n    "multipleChoice":{"total":27,"earned":0,"details":{"s2q1":"","s2q2":""}},\n    "fillBlank":{"total":10,"earned":0,"details":{"s3q1":"","s3q2":""}},\n    "essay":{"total":36,"earned":0,"details":{"s4q1":{"score":0,"feedback":"评语","missedPoints":[]}}}\n  },\n  "summary":{"totalEarned":0,"passed":false,"strengths":[],"weaknesses":[],"overallFeedback":""}\n}';
+  p += '\n---\n## 输出JSON格式（不要其他文字）\n{\n  "scores":{\n    "singleChoice":{"total":' + s0.totalScore + ',"earned":0,"details":{"s1q1":"","s1q2":""}},\n    "multipleChoice":{"total":' + s1.totalScore + ',"earned":0,"details":{"s2q1":"","s2q2":""}},\n    "fillBlank":{"total":' + s2.totalScore + ',"earned":0,"details":{"s3q1":"","s3q2":""}},\n    "essay":{"total":' + s3.totalScore + ',"earned":0,"details":{"s4q1":{"score":0,"feedback":"评语","missedPoints":[]}}}\n  },\n  "summary":{"totalEarned":0,"passed":false,"strengths":[],"weaknesses":[],"overallFeedback":""}\n}';
   return p;
 }
 
@@ -734,8 +786,8 @@ function displayResults(data, answers) {
 
   var dh = '<div class="title-divider"><i data-lucide="check-circle"></i> 客观题<span class="title-divider-line"></span></div>';
   var allObjQs = [];
-  EXAM_DATA.sections[0].questions.forEach(function(q){allObjQs.push({s:0,q:q,pts:1.5})});
-  EXAM_DATA.sections[1].questions.forEach(function(q){allObjQs.push({s:1,q:q,pts:3})});
+  EXAM_DATA.sections[0].questions.forEach(function(q){allObjQs.push({s:0,q:q,pts:EXAM_DATA.sections[0].scorePerQuestion})});
+  EXAM_DATA.sections[1].questions.forEach(function(q){allObjQs.push({s:1,q:q,pts:EXAM_DATA.sections[1].scorePerQuestion})});
   EXAM_DATA.sections[2].questions.forEach(function(q){allObjQs.push({s:2,q:q,pts:1,isFill:true})});
   allObjQs.forEach(function(item){
     var ua = (document.getElementById('ans-'+item.q.id)?.value||'').trim();
