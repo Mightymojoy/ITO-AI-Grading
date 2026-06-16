@@ -628,24 +628,28 @@ async function submitToFeishu(totalScore, passed, feedback) {
   var dept = prompt('请输入部门：') || '';
 
   try {
-    // 1. get token
-    var tr = await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({app_id:appId,app_secret:secret})
+    // 走 Vercel API 代理，无 CORS 限制
+    var api = window.location.hostname==='localhost'
+      ? 'http://localhost:8768/api/feishu-submit'
+      : 'https://ito-ai-grading.vercel.app/api/submit-score';
+    var res = await fetch(api, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        app_id: appId,
+        app_secret: secret,
+        name: name,
+        department: dept,
+        totalScore: totalScore,
+        passed: passed,
+        feedback: feedback||''
+      })
     });
-    var td = await tr.json();
-    if (td.code !== 0) throw new Error(td.msg);
-    var token = td.tenant_access_token;
-    // 2. write record
-    var wr = await fetch('https://open.feishu.cn/open-apis/bitable/v1/apps/AH5ewoyPaitFb1kHecOcNiN2nL0/tables/tblEO7PbkyjcWy3l/records', {
-      method:'POST',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
-      body:JSON.stringify({fields:{'主播姓名':name,'部门':dept,'日期':new Date().toISOString().slice(0,10),'得分':totalScore,'是否及格':passed?'是':'否','AI评语':feedback||'','答题用时':0,'切屏次数':0}})
-    });
-    var wd = await wr.json();
-    if (wd.code === 0) { setTimeout(function(){alert('✅ 评分结果已写入飞书表格！');},100); }
-    else { setTimeout(function(){alert('⚠ 飞书写入失败：'+(wd.msg||'未知错误'));},100); }
+    var d = await res.json();
+    if (d.code === 0) { setTimeout(function(){alert('✅ 评分结果已写入飞书表格！');},100); }
+    else { setTimeout(function(){alert('⚠ 飞书写入失败：'+(d.msg||'未知错误'));},100); }
   } catch(e) {
-    setTimeout(function(){alert('⚠ 飞书同步失败：'+e.message+'（可能是CORS限制，当前页面不支持直连飞书API，建议使用本地服务器版）');},100);
+    setTimeout(function(){alert('⚠ 飞书同步失败：'+e.message);},100);
   }
 }
 
