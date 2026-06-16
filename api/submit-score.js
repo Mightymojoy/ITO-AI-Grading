@@ -1,6 +1,8 @@
 const https = require('https');
 
-// Bitable config
+// 飞书凭证从环境变量读取（Vercel后台配置），前端不感知
+const FEISHU_APP_ID = process.env.FEISHU_APP_ID || '';
+const FEISHU_SECRET = process.env.FEISHU_APP_SECRET || '';
 const APP_TOKEN = process.env.FEISHU_APP_TOKEN || 'AH5ewoyPaitFb1kHecOcNiN2nL0';
 const TABLE_ID = process.env.FEISHU_TABLE_ID || 'tblEO7PbkyjcWy3l';
 
@@ -11,7 +13,7 @@ function feishuFetch(url, options) {
       res.on('data', c => data += c);
       res.on('end', () => {
         try { resolve(JSON.parse(data)); }
-        catch(e) { reject(new Error('parse error: ' + data.substring(0,200))); }
+        catch(e) { reject(new Error('parse: ' + data.substring(0,200))); }
       });
     });
     req.on('error', reject);
@@ -21,37 +23,33 @@ function feishuFetch(url, options) {
 }
 
 module.exports = async (req, res) => {
-  // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') { return res.status(200).end(); }
-  if (req.method !== 'POST') { return res.status(405).json({ error: 'Method not allowed' }); }
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  if (!FEISHU_APP_ID || !FEISHU_SECRET) {
+    return res.json({ code: -2, msg: 'Server not configured - contact admin' });
+  }
 
   try {
     const payload = req.body || {};
-    const appId = payload.app_id || process.env.FEISHU_APP_ID || '';
-    const appSecret = payload.app_secret || process.env.FEISHU_APP_SECRET || '';
 
-    if (!appId || !appSecret) {
-      return res.status(400).json({ error: 'Missing credentials' });
-    }
-
-    // 1) Get token
-    const tokenRes = await feishuFetch(
+    // 1) 获取飞书token
+    const tr = await feishuFetch(
       'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',
-      { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ app_id: appId, app_secret: appSecret }) }
+      { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ app_id: FEISHU_APP_ID, app_secret: FEISHU_SECRET })}
     );
-    if (tokenRes.code !== 0) throw new Error('token: ' + tokenRes.msg);
-    const token = tokenRes.tenant_access_token;
+    if (tr.code !== 0) throw new Error('token: ' + tr.msg);
+    const token = tr.tenant_access_token;
 
-    // 2) Write record
-    const todayMs = Date.now();
+    // 2) 写入飞书
     const fields = {
       '主播姓名': payload.name || '',
       '部门': payload.department || '',
-      '日期': todayMs,
+      '日期': Date.now(),
       '得分': payload.totalScore || 0,
       '是否及格': payload.passed ? '是' : '否',
       'AI评语': payload.feedback || '',
@@ -59,17 +57,17 @@ module.exports = async (req, res) => {
       '切屏次数': payload.switches || 0
     };
 
-    const writeRes = await feishuFetch(
+    const wr = await feishuFetch(
       `https://open.feishu.cn/open-apis/bitable/v1/apps/${APP_TOKEN}/tables/${TABLE_ID}/records`,
-      { method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fields }) }
+      { method:'POST',
+        headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
+        body: JSON.stringify({fields})}
     );
 
-    if (writeRes.code === 0) {
-      return res.json({ code: 0, success: true, record_id: writeRes.data.record.record_id });
+    if (wr.code === 0) {
+      return res.json({ code: 0, success: true, record_id: wr.data.record.record_id });
     } else {
-      return res.json({ code: -1, msg: writeRes.msg || 'write failed' });
+      return res.json({ code: -1, msg: wr.msg || 'write failed' });
     }
   } catch(e) {
     return res.json({ code: -1, msg: e.message });
