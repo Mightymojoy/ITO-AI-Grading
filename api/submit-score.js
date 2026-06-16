@@ -1,10 +1,11 @@
 const https = require('https');
 
-// 飞书凭证从环境变量读取（Vercel后台配置），前端不感知
-const FEISHU_APP_ID = process.env.FEISHU_APP_ID || '';
-const FEISHU_SECRET = process.env.FEISHU_APP_SECRET || '';
-const APP_TOKEN = process.env.FEISHU_APP_TOKEN || 'AH5ewoyPaitFb1kHecOcNiN2nL0';
-const TABLE_ID = process.env.FEISHU_TABLE_ID || 'tblEO7PbkyjcWy3l';
+// 飞书凭证（内部工具，直接配置）
+// 如需用Vercel环境变量覆盖，删除=后面的值，在Vercel后台配同名环境变量即可
+const FEISHU_APP_ID = process.env.FEISHU_APP_ID || 'cli_aaba0a16d7bcdbc3';
+const FEISHU_SECRET = process.env.FEISHU_APP_SECRET || 'Z5WUnr1WQptEplbEuAYgubFQOTDv5CgX';
+const APP_TOKEN = 'AH5ewoyPaitFb1kHecOcNiN2nL0';
+const TABLE_ID = 'tblEO7PbkyjcWy3l';
 
 function feishuFetch(url, options) {
   return new Promise((resolve, reject) => {
@@ -34,7 +35,8 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const payload = req.body || {};
+    // 前端传过来的数据（不包含飞书凭证）
+    const payload = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
 
     // 1) 获取飞书token
     const tr = await feishuFetch(
