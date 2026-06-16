@@ -59,10 +59,12 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);-webkit-font
 /* Choice buttons */
 .choices{display:flex;flex-wrap:wrap;gap:6px}
 .choice-item{display:inline-flex;align-items:center;justify-content:center;min-width:32px;height:32px;padding:0 12px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;transition:all .12s;background:var(--bg);color:var(--text-secondary);user-select:none}
-.choice-item:hover{border-color:var(--gold);color:var(--gold)}
-.choice-item.selected{border-color:var(--gold);background:var(--gold-dim);color:var(--gold);font-weight:600}
-.choice-item.multi-sel{border-color:#dc2626;background:rgba(220,38,38,0.06);color:#dc2626;font-weight:600}
-.choice-clear{font-size:10px;color:var(--text-tertiary);cursor:pointer;margin-left:8px;text-decoration:underline}
+.choice-item:hover{border-color:var(--gold)}
+.choice-item.selected{border-color:var(--gold);background:var(--gold-dim)}
+.choice-item.selected .radio-icon{border-color:var(--gold);background:var(--gold);color:#000;font-weight:700}
+.choice-item.multi-sel{border-color:#dc2626;background:rgba(220,38,38,0.06)}
+.choice-item.multi-sel .check-icon{border-color:#dc2626;background:#dc2626;color:#fff;font-weight:700}
+.choice-clear{font-size:10px;color:var(--text-tertiary);cursor:pointer;text-decoration:underline}
 .choice-clear:hover{color:var(--danger)}
 
 /* Fill input */
@@ -407,13 +409,15 @@ function renderQuestions(){var c=document.getElementById('mainContent'),h='',exa
       h+='<div class="q-card-text">'+q.text+'</div>';
       h+='<div class="q-card-body">';
       if(s.type==='单选'){
+        h+='<div style="font-size:11px;color:var(--gold);margin-bottom:6px">点选唯一答案（单选）</div>';
         h+='<div class="choices" id="choices-'+q.id+'">';
-        q.options.forEach(function(o,oi){var v=String.fromCharCode(65+oi);h+='<div class="choice-item" data-q="'+q.id+'" data-val="'+v+'" onclick="clickSingle(\''+q.id+'\',\''+v+'\')">'+o.substring(0,1)+'. '+o.substring(3)+'</div>'});
+        q.options.forEach(function(o,oi){var v=String.fromCharCode(65+oi);h+='<div class="choice-item" data-q="'+q.id+'" data-val="'+v+'" onclick="clickSingle(\''+q.id+'\',\''+v+'\')" style="border-radius:20px;padding:6px 16px"><span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border:1px solid var(--border);border-radius:50%;margin-right:6px;font-size:11px" class="radio-icon">'+v+'</span>'+o.substring(2)+'</div>'});
         h+='</div><input type="hidden" id="ans-'+q.id+'" value="">';
       }else if(s.type==='多选'){
+        h+='<div style="font-size:11px;color:var(--danger);margin-bottom:6px">勾选多个（多选）<span class="choice-clear" onclick="clearMulti(\''+q.id+'\')" style="margin-left:10px">清空</span></div>';
         h+='<div class="choices" id="choices-'+q.id+'">';
-        q.options.forEach(function(o,oi){var v=String.fromCharCode(65+oi);h+='<div class="choice-item" data-q="'+q.id+'" data-val="'+v+'" onclick="clickMulti(\''+q.id+'\',\''+v+'\')">'+o.substring(0,1)+'. '+o.substring(3)+'</div>'});
-        h+='</div><span class="choice-clear" onclick="clearMulti(\''+q.id+'\')">清空</span><input type="hidden" id="ans-'+q.id+'" value="">';
+        q.options.forEach(function(o,oi){var v=String.fromCharCode(65+oi);h+='<div class="choice-item" data-q="'+q.id+'" data-val="'+v+'" onclick="clickMulti(\''+q.id+'\',\''+v+'\')" style="padding:6px 16px"><span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border:1px solid var(--border);border-radius:4px;margin-right:6px;font-size:11px;background:var(--bg)" class="check-icon">'+v+'</span>'+o.substring(2)+'</div>'});
+        h+='</div><input type="hidden" id="ans-'+q.id+'" value="">';
       }else if(s.type==='填空'){
         h+='<div class="fill-row"><input class="fill-input" id="ans-'+q.id+'" placeholder="填写答案..." autocomplete="off"></div>';
       }else{
