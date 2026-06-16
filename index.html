@@ -101,12 +101,19 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:1
 .ans-section{margin-bottom:20px}
 .ans-section-title{font-size:12px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;display:flex;align-items:center;gap:8px}
 .ans-section-title svg{width:13px;height:13px}
-.ans-card{padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:10px;background:var(--bg-card)}
+.ans-card{margin-bottom:10px;border-radius:var(--radius-sm);overflow:hidden;border:1px solid var(--border);background:var(--bg-card)}
 .ans-card:hover{border-color:var(--border-hover)}
-.ans-card-label{font-size:11px;font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:4px}
-.ans-card-label svg{width:11px;height:11px}
-.ans-input{width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;color:var(--text);font-family:var(--font);transition:border-color .12s;outline:none}
-.ans-input:focus{border-color:var(--gold)}
+.ans-q{padding:8px 14px;background:var(--bg);border-bottom:1px solid var(--border)}
+.ans-q-label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text-tertiary);margin-bottom:3px;display:flex;align-items:center;gap:4px}
+.ans-q-text{font-size:13px;line-height:1.5;color:var(--text);font-weight:450}
+.ans-q-options{font-size:11px;color:var(--text-tertiary);margin-top:4px;line-height:1.6}
+.ans-a{padding:8px 14px 10px;background:var(--bg-card)}
+.ans-a-label{font-size:10px;font-weight:600;color:var(--gold);margin-bottom:4px;display:flex;align-items:center;gap:4px}
+.ans-a-row{display:flex;gap:8px;align-items:center}
+.ans-input{flex:1;padding:8px 12px;background:var(--bg);border:1px dashed var(--border);border-radius:var(--radius-sm);font-size:13px;color:var(--text);font-family:var(--font);transition:all .15s;outline:none;letter-spacing:.5px}
+.ans-input:focus{border-color:var(--gold);border-style:solid;background:var(--bg-card)}
+.ans-textarea{min-height:70px;resize:vertical;line-height:1.6}
+.ans-expected{font-size:10px;color:var(--text-tertiary);font-weight:500;padding:3px 8px;background:var(--bg);border-radius:8px;white-space:nowrap;font-variant-numeric:tabular-nums}
 .ans-input::placeholder{color:var(--text-tertiary)}
 .ans-textarea{min-height:72px;resize:vertical;line-height:1.5}
 .ans-options{font-size:11px;color:var(--text-tertiary);margin-bottom:6px;line-height:1.5}
@@ -363,20 +370,30 @@ function renderAnswerInputs() {
   var h = '';
   EXAM_DATA.sections.forEach(function(s) {
     var icon = s.type === '简答' ? 'message-square' : 'check-square';
-    h += '<div class="ans-section-title" style="margin-top:16px"><i data-lucide="'+icon+'" style="width:13px;height:13px"></i>'+s.title+'</div>';
+    var typeKey = s.type === '简答' ? '简答' : s.type === '单选' ? '单选' : '多选';
+    h += '<div class="ans-section-title" style="margin-top:16px"><i data-lucide="'+icon+'"></i>'+s.title+'</div>';
     s.questions.forEach(function(q, i) {
-      if (s.type === '简答') {
-        h += '<div class="ans-card"><div class="ans-card-label" style="color:#4ade80"><i data-lucide="edit-3" style="width:11px;height:11px"></i>简答'+(i+1)+'（'+q.maxScore+'分）</div>'+
-          '<textarea id="ans-'+q.id+'" class="ans-input ans-textarea" placeholder="粘贴主播回答..."></textarea></div>';
-      } else {
-        var label = s.type === '单选' ? '单选' : '多选';
-        var ph = s.type === '单选' ? '填入字母 A/B/C/D' : '填入字母组合 如 ABCDE';
-        h += '<div class="ans-card"><div class="ans-card-label" style="color:'+(s.type==='单选'?'#60a5fa':'#f87171')+'">'+
-          '<i data-lucide="circle" style="width:11px;height:11px"></i>'+label+(i+1)+'</div>'+
-          (q.options ? '<div class="ans-options">'+q.options.join('&nbsp;&nbsp;')+'</div>' : '')+
-          '<div style="display:flex;gap:8px;align-items:center"><input id="ans-'+q.id+'" class="ans-input" style="flex:1" placeholder="'+ph+'" maxlength="'+(s.type==='单选'?'1':'5')+'">'+
-          '<span class="ans-expected">'+q.answer+'</span></div></div>';
+      h += '<div class="ans-card">';
+      // Question section (top - subtle background)
+      h += '<div class="ans-q">';
+      h += '<div class="ans-q-label"><i data-lucide="help-circle" style="width:10px;height:10px"></i>Q'+(i+1)+' · '+typeKey+'</div>';
+      h += '<div class="ans-q-text">'+(q.text.length>80?q.text.substring(0,80)+'…':q.text)+'</div>';
+      if (q.options) {
+        h += '<div class="ans-q-options">'+q.options.join(' · ')+'</div>';
       }
+      h += '</div>';
+      // Answer section (bottom - with input)
+      h += '<div class="ans-a">';
+      h += '<div class="ans-a-label"><i data-lucide="pen-line" style="width:10px;height:10px"></i>作答</div>';
+      if (s.type === '简答') {
+        h += '<textarea id="ans-'+q.id+'" class="ans-input ans-textarea" placeholder="粘贴主播回答..."></textarea>';
+      } else {
+        var ph = s.type === '单选' ? '填入字母 A/B/C/D' : '填入字母组合 如 ABCDE';
+        h += '<div class="ans-a-row">';
+        h += '<input id="ans-'+q.id+'" class="ans-input" placeholder="'+ph+'" maxlength="'+(s.type==='单选'?'1':'5')+'">';
+        h += '<span class="ans-expected">'+q.answer+'</span></div>';
+      }
+      h += '</div></div>';
     });
   });
   c.innerHTML = h;
