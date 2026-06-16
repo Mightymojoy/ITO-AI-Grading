@@ -304,6 +304,13 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:1
     <div class="form-group"><label><span class="dot" id="dot-gemini"></span>Gemini</label><input type="password" id="key-gemini" placeholder="AIza..."></div>
     <div class="form-group"><label><span class="dot" id="dot-kimi"></span>Kimi</label><input type="password" id="key-kimi" placeholder="sk-..."></div>
     <div class="form-group"><label><span class="dot" id="dot-chatanywhere"></span>ChatAnywhere</label><input type="password" id="key-chatanywhere" placeholder="sk-..."></div>
+    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+      <h3 style="font-size:13px;font-weight:600;margin-bottom:12px;display:flex;align-items:center;gap:6px"><i data-lucide="cloud" style="width:14px;height:14px;color:var(--gold)"></i>飞书同步</h3>
+      <div class="form-group"><label><span class="dot" id="dot-feishu-enable"></span>启用飞书写入</label>
+        <select id="feishu-enable" style="width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;color:var(--text);font-family:var(--font);outline:none"><option value="no">关闭</option><option value="yes">开启</option></select></div>
+      <div class="form-group"><label>App ID</label><input type="text" id="feishu-appid" placeholder="cli_xxx"></div>
+      <div class="form-group"><label>App Secret</label><input type="password" id="feishu-secret" placeholder="xxx"></div>
+    </div>
     <div class="modal-actions">
       <button class="btn btn-sm" onclick="closeConfig()">取消</button>
       <button class="btn btn-primary btn-sm" onclick="saveConfig()">保存</button>
@@ -610,39 +617,35 @@ function fillSample() {
 //  飞书提交
 // ============================================================
 async function submitToFeishu(totalScore, passed, feedback) {
-  var apiUrl = localStorage.getItem('feishu_api_url');
-  if (!apiUrl) return; // 没配置，跳过
-  
+  var enable = localStorage.getItem('feishu_enable');
+  if (enable !== 'yes') return;
+  var appId = localStorage.getItem('feishu_appid');
+  var secret = localStorage.getItem('feishu_secret');
+  if (!appId || !secret) return;
+
   var name = prompt('请输入主播姓名：');
   if (!name) return;
   var dept = prompt('请输入部门：') || '';
-  
-  try {
-    await fetch(apiUrl, {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({
-        name: name,
-        department: dept,
-        totalScore: totalScore,
-        passed: passed,
-        feedback: feedback,
-        duration: 0,
-        switches: 0
-      })
-    });
-  } catch(e) {
-    console.log('Feishu submit error:', e);
-  }
-}
 
-// 配置飞书API地址
-function openFeishuConfig() {
-  var url = localStorage.getItem('feishu_api_url') || '';
-  var newUrl = prompt('请输入飞书API地址（部署Vercel后获取）：\n如 https://xxx.vercel.app/api/submit-score', url);
-  if (newUrl !== null) {
-    localStorage.setItem('feishu_api_url', newUrl);
-    alert('已保存！评完分将自动写入飞书表格。');
+  try {
+    // 1. get token
+    var tr = await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({app_id:appId,app_secret:secret})
+    });
+    var td = await tr.json();
+    if (td.code !== 0) throw new Error(td.msg);
+    var token = td.tenant_access_token;
+    // 2. write record
+    var wr = await fetch('https://open.feishu.cn/open-apis/bitable/v1/apps/AH5ewoyPaitFb1kHecOcNiN2nL0/tables/tblEO7PbkyjcWy3l/records', {
+      method:'POST',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
+      body:JSON.stringify({fields:{'主播姓名':name,'部门':dept,'日期':new Date().toISOString().slice(0,10),'得分':totalScore,'是否及格':passed?'是':'否','AI评语':feedback||'','答题用时':0,'切屏次数':0}})
+    });
+    var wd = await wr.json();
+    if (wd.code === 0) { setTimeout(function(){alert('✅ 评分结果已写入飞书表格！');},100); }
+    else { setTimeout(function(){alert('⚠ 飞书写入失败：'+(wd.msg||'未知错误'));},100); }
+  } catch(e) {
+    setTimeout(function(){alert('⚠ 飞书同步失败：'+e.message+'（可能是CORS限制，当前页面不支持直连飞书API，建议使用本地服务器版）');},100);
   }
 }
 
@@ -653,6 +656,14 @@ function openConfig() {
     if (saved) { document.getElementById('key-'+p).value = saved; document.getElementById('dot-'+p).className = 'dot on'; }
     else { document.getElementById('dot-'+p).className = 'dot'; }
   });
+  // 飞书配置
+  ['feishu_enable','feishu_appid','feishu_secret'].forEach(function(k){
+    var v = localStorage.getItem(k);
+    var el = document.getElementById(k.replace(/_/g,'-'));
+    if (el) { if (el.tagName==='SELECT') el.value = v||'no'; else el.value = v||''; }
+  });
+  var fe = localStorage.getItem('feishu_enable');
+  document.getElementById('dot-feishu-enable').className = fe==='yes'?'dot on':'dot';
 }
 function closeConfig() { document.getElementById('configModal').classList.remove('active'); }
 function saveConfig() {
@@ -660,6 +671,12 @@ function saveConfig() {
     var v = document.getElementById('key-'+p).value.trim();
     if (v) localStorage.setItem('ai_key_'+p, v);
   });
+  // 飞书保存
+  localStorage.setItem('feishu_enable', document.getElementById('feishu-enable').value);
+  var aid = document.getElementById('feishu-appid').value.trim();
+  var sec = document.getElementById('feishu-secret').value.trim();
+  if (aid) localStorage.setItem('feishu_appid', aid);
+  if (sec) localStorage.setItem('feishu_secret', sec);
   alert('已保存'); closeConfig();
 }
 
