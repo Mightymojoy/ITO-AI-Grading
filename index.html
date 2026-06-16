@@ -449,13 +449,13 @@ function renderAnswerInputs() {
       } else if (s.type === '填空') {
         h += '<div class="ans-a-label"><i data-lucide="pen-line" style="width:10px;height:10px"></i>填入答案</div>';
         h += '<div class="ans-a-row">';
-        h += '<input id="ans-'+q.id+'" class="ans-input" placeholder="填空回答..." style="flex:1">';
+        h += '<input id="ans-'+q.id+'" class="ans-input" placeholder="填空回答..." style="flex:1" autocomplete="off">';
         h += '</div>';
       } else {
         h += '<div class="ans-a-label"><i data-lucide="pen-line" style="width:10px;height:10px"></i>作答</div>';
         var ph = s.type === '单选' ? '填入字母 A/B/C/D' : '填入字母组合 如 ABCDE';
         h += '<div class="ans-a-row">';
-        h += '<input id="ans-'+q.id+'" class="ans-input" placeholder="'+ph+'" maxlength="'+(s.type==='单选'?'1':'5')+'">';
+        h += '<input id="ans-'+q.id+'" class="ans-input" placeholder="'+ph+'" maxlength="'+(s.type==='单选'?'1':'5')+'" autocomplete="off">';
         h += '</div>';
       }
       h += '</div></div>';
