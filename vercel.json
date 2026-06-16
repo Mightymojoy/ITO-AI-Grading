@@ -1,7 +1,11 @@
 {
   "functions": {
     "api/submit-score.py": {
-      "runtime": "python3.9"
+      "runtime": "python3.9",
+      "maxDuration": 10
     }
-  }
+  },
+  "rewrites": [
+    { "source": "/api/submit-score", "destination": "/api/submit-score.py" }
+  ]
 }

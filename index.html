@@ -647,7 +647,7 @@ async function submitToFeishu(totalScore, passed, feedback) {
     });
     var d = await res.json();
     if (d.code === 0) { setTimeout(function(){alert('✅ 评分结果已写入飞书表格！');},100); }
-    else { setTimeout(function(){alert('⚠ 飞书写入失败：'+(d.msg||'未知错误'));},100); }
+    else { setTimeout(function(){alert('⚠ 飞书写入失败：'+(d.msg||d.error||'未知错误'));},100); }
   } catch(e) {
     setTimeout(function(){alert('⚠ 飞书同步失败：'+e.message);},100);
   }
