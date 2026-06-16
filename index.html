@@ -185,6 +185,35 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:1
 .empty-state svg{width:40px;height:40px;margin-bottom:12px;color:var(--text-tertiary)}
 .empty-state p{font-size:13px}
 
+/* Tabs */
+.tabs{display:flex;gap:0;margin-bottom:16px;border-bottom:1px solid var(--border)}
+.tab-btn{padding:8px 20px;font-size:12px;font-weight:500;cursor:pointer;border:none;background:none;color:var(--text-tertiary);border-bottom:2px solid transparent;transition:all .12s;font-family:var(--font);display:flex;align-items:center;gap:6px}
+.tab-btn:hover{color:var(--text);background:var(--bg)}
+.tab-btn.active{color:var(--gold);border-bottom-color:var(--gold);background:transparent}
+.tab-btn svg{width:13px;height:13px}
+.tab-content{display:none}
+.tab-content.active{display:block}
+
+/* Wrong answers */
+.wrong-item{padding:12px 16px;border:1px solid rgba(239,68,68,0.25);border-radius:var(--radius-sm);margin-bottom:10px;background:var(--bg-card)}
+.wrong-item-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.wrong-q{font-size:13px;font-weight:500;color:var(--text)}
+.wrong-answer{font-size:12px;margin-top:4px}
+.wrong-yours{color:var(--danger)}
+.wrong-correct{color:var(--success)}
+.wrong-explanation{padding:8px 12px;background:var(--bg);border-radius:6px;margin-top:8px;font-size:12px;line-height:1.6;color:var(--text-secondary)}
+
+/* Knowledge base */
+.kb-category{margin-bottom:20px}
+.kb-category-title{font-size:14px;font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:8px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+.kb-category-title svg{width:16px;height:16px;color:var(--gold)}
+.kb-card{padding:12px 16px;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;background:var(--bg-card)}
+.kb-card-title{font-size:13px;font-weight:600;margin-bottom:4px;color:var(--text)}
+.kb-card-desc{font-size:12px;color:var(--text-secondary);line-height:1.6}
+.kb-tag{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:500;margin:2px;background:rgba(201,169,98,0.1);color:var(--gold);border:1px solid rgba(201,169,98,0.2)}
+.kb-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+@media(max-width:700px){.kb-grid{grid-template-columns:1fr}}
+
 /* Status bar */
 .status-bar{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-tertiary)}
 .status-dot{width:6px;height:6px;border-radius:50%;background:var(--success)}
@@ -264,30 +293,33 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:1
 
     <!-- Results -->
     <div class="result-area" id="resultArea">
-      <div class="score-grid" id="scoreSummary"></div>
-
-      <div id="resultDetails"></div>
-
-      <div id="swSection" style="display:none">
-        <div class="title-divider">
-          <i data-lucide="clipboard-check"></i> 综合评估
-          <span class="title-divider-line"></span>
-        </div>
-        <div class="sw-grid">
-          <div class="sw-box">
-            <div class="sw-box-title" style="color:var(--success)"><i data-lucide="sparkles" style="width:13px;height:13px"></i> 优势</div>
-            <div class="tags" id="strengthsTags"></div>
-          </div>
-          <div class="sw-box">
-            <div class="sw-box-title" style="color:var(--danger)"><i data-lucide="target" style="width:13px;height:13px"></i> 待改进</div>
-            <div class="tags" id="weaknessesTags"></div>
-          </div>
-        </div>
-        <div class="title-divider" style="margin-top:0"><i data-lucide="lightbulb"></i> 评语<span class="title-divider-line"></span></div>
-        <div class="feedback-box" id="overallFeedback"></div>
+      <div class="tabs" id="resultTabs">
+        <button class="tab-btn active" data-tab="score" onclick="switchTab('score')"><i data-lucide="clipboard-list"></i>评分结果</button>
+        <button class="tab-btn" data-tab="wrong" onclick="switchTab('wrong')"><i data-lucide="x-circle"></i>错题库<span id="wrongCount" style="margin-left:4px;font-size:10px;color:var(--danger)"></span></button>
+        <button class="tab-btn" data-tab="knowledge" onclick="switchTab('knowledge')"><i data-lucide="book-open"></i>产品知识库</button>
       </div>
 
+      <div class="tab-content active" id="tabScore">
+        <div class="score-grid" id="scoreSummary"></div>
+        <div id="resultDetails"></div>
+        <div id="swSection" style="display:none">
+          <div class="title-divider"><i data-lucide="clipboard-check"></i> 综合评估<span class="title-divider-line"></span></div>
+          <div class="sw-grid">
+            <div class="sw-box"><div class="sw-box-title" style="color:var(--success)"><i data-lucide="sparkles" style="width:13px;height:13px"></i> 优势</div><div class="tags" id="strengthsTags"></div></div>
+            <div class="sw-box"><div class="sw-box-title" style="color:var(--danger)"><i data-lucide="target" style="width:13px;height:13px"></i> 待改进</div><div class="tags" id="weaknessesTags"></div></div>
+          </div>
+          <div class="title-divider" style="margin-top:0"><i data-lucide="lightbulb"></i> 评语<span class="title-divider-line"></span></div>
+          <div class="feedback-box" id="overallFeedback"></div>
+        </div>
+      </div>
+
+      <div class="tab-content" id="tabWrong"><div id="wrongList"></div></div>
+      <div class="tab-content" id="tabKnowledge"><div id="knowledgeBase"></div></div>
+
       <div class="action-bar">
+        <button class="btn btn-sm" onclick="switchTab('wrong');document.getElementById('wrongList').scrollIntoView({behavior:'smooth'})">
+          <i data-lucide="message-square-x"></i> 错题专练
+        </button>
         <button class="btn btn-sm" onclick="exportResult()">
           <i data-lucide="download" style="width:13px;height:13px"></i> 导出报告
         </button>
@@ -544,8 +576,108 @@ async function startGrading() {
   }
 }
 
+// ============================================================
+//  Tab 切换
+// ============================================================
+var WRONG_ANSWERS = [];
+
+function switchTab(name) {
+  document.querySelectorAll('#resultTabs .tab-btn').forEach(function(b){b.classList.toggle('active',b.dataset.tab===name);});
+  document.querySelectorAll('#resultArea .tab-content').forEach(function(c){c.classList.toggle('active',c.id==='tab'+name.charAt(0).toUpperCase()+name.slice(1));});
+  if (name==='wrong') renderWrongAnswers();
+  if (name==='knowledge') renderKnowledgeBase();
+}
+
+function renderWrongAnswers() {
+  var c = document.getElementById('wrongList');
+  if (!WRONG_ANSWERS.length) { c.innerHTML = '<div class="empty-state" style="padding:40px"><i data-lucide="check-circle-2" style="width:32px;height:32px;color:var(--success)"></i><p style="margin-top:8px">全部答对，没有错题 🎉</p></div>'; lucide.createIcons(); return; }
+  var h = '<p style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px">共 <b style="color:var(--danger)">'+WRONG_ANSWERS.length+'</b> 道错题，建议逐一复习</p>';
+  WRONG_ANSWERS.forEach(function(w, i) {
+    h += '<div class="wrong-item"><div class="wrong-item-hdr"><span class="wrong-q">'+(i+1)+'. '+w.text+'</span><span style="font-size:11px;font-weight:600;color:var(--danger)">✕ 答错</span></div>';
+    h += '<div class="wrong-answer"><span class="wrong-yours">你的答案：<b>'+(w.yourAnswer||'未作答')+'</b></span></div>';
+    h += '<div class="wrong-answer"><span class="wrong-correct">正确答案：<b>'+(w.correctAnswer||'')+'</b></span></div>';
+    if (w.explanation) h += '<div class="wrong-explanation">💡 <b>知识点：</b>'+w.explanation+'</div>';
+    h += '</div>';
+  });
+  c.innerHTML = h;
+  lucide.createIcons();
+}
+
+function renderKnowledgeBase() {
+  var c = document.getElementById('knowledgeBase');
+  if (c.innerHTML.trim()) return; // 只渲染一次
+  var h = '';
+  KB_DATA.forEach(function(cat) {
+    h += '<div class="kb-category"><div class="kb-category-title"><i data-lucide="'+cat.icon+'"></i>'+cat.name+'</div>';
+    cat.items.forEach(function(item) {
+      h += '<div class="kb-card"><div class="kb-card-title">'+item.title+'</div><div class="kb-card-desc">'+item.desc+'</div>'+
+        (item.tags ? '<div style="margin-top:6px">'+item.tags.map(function(t){return '<span class="kb-tag">'+t+'</span>';}).join('')+'</div>' : '')+'</div>';
+    });
+    h += '</div>';
+  });
+  c.innerHTML = h;
+  lucide.createIcons();
+}
+
+// ============================================================
+//  产品知识库数据
+// ============================================================
+var KB_DATA = [
+  {icon:'luggage',name:'PISTACHIO PLUS 20寸 登机箱',items:[
+    {title:'独立双仓结构',desc:'前仓独立存放电脑和文件，与主仓物理隔离。安检无需翻箱倒柜，直接从前仓取出电脑。',tags:['20寸','双仓','安检快取']},
+    {title:'前仓电脑仓',desc:'最大可容纳 16 英寸笔记本电脑，绒面内衬保护设备不被刮伤。',tags:['16寸电脑','绒面内衬']},
+    {title:'PEBBLE 鹅卵石锁',desc:'ITO原创PEBBLE造型旋转式海关密码锁，操作流畅，精致小巧，提升整体质感。',tags:['海关锁','PEBBLE']},
+    {title:'前盖快取证件口袋',desc:'前盖内侧设有证件快取口袋，安检时可快速取出登机牌/身份证。',tags:['快取','证件']},
+    {title:'PROTECTION+ 三防',desc:'面料经三防处理：防泼水、防油污、防刮擦。日常使用更省心。',tags:['三防','PROTECTION+']},
+    {title:'7A抗菌里布',desc:'内里采用7A级长效抗菌里布，有效抑制细菌滋生，保持箱内卫生。',tags:['7A','抗菌']}
+  ]},
+  {icon:'luggage',name:'PISTACHIO PLUS 25/29寸 托运箱',items:[
+    {title:'分体集成海关锁双模式',desc:'核心创新。上拨锁具→中开模式（全开箱体，适合打包整理）；下拨锁具→前开模式（仅开前盖，站立取物）。一锁双模，灵活切换。',tags:['双模式','分体锁','核心创新']},
+    {title:'前盖深仓通仓设计',desc:'前盖打开后形成深仓通仓，站立即可取物，无需放倒行李箱。适合在狭小空间（酒店走道、车站）使用。',tags:['深仓通仓','站立取物']},
+    {title:'置顶U框隐私层',desc:'前盖通仓顶部设U框拉链私密空间，形成「仓中仓」。适合放钱包、首饰、文档等贵重物品。',tags:['隐私层','仓中仓','贵重物品']},
+    {title:'分类收纳口袋系统',desc:'两个网布弹力口袋（适配电源/鼠标等不规则物品）+ 立体成型口袋（适合鞋履/化妆包）。',tags:['分类收纳','网布口袋','立体口袋']},
+    {title:'U框固定系统',desc:'前盖边缘U框结构与箱体咬合，确保前盖闭合稳固，旅行颠簸中不会意外开启。',tags:['U框','稳固']},
+    {title:'轻松翻盖体验',desc:'分体锁解锁后前盖轻弹开启，单手即可操作，放倒或直立状态下都方便使用。',tags:['轻松翻盖','单手操作']}
+  ]},
+  {icon:'shopping-bag',name:'TRUFFLE PRO TOTE',items:[
+    {title:'18L 容量 · 0.8kg 超轻',desc:'零售价 ¥1,290。足够日常通勤和短途差旅，自重仅 0.8kg 无负担。',tags:['¥1,290','18L','0.8kg']},
+    {title:'camira Era 英国面料',desc:'主面料为英国进口 camira Era 面料，质感高级，兼具耐用性。',tags:['英国进口','camira Era']},
+    {title:'自锁五金拉链',desc:'拉头自带锁定机构，闭合后自动锁死，不会在行走中无意滑开。不需要额外挂锁。',tags:['自锁拉链','安全']},
+    {title:'背面隐藏拉链仓',desc:'紧贴背部侧设有隐藏拉链仓，可放手机/钱包等高频取用物品，安全防盗。',tags:['隐藏仓','防盗']},
+    {title:'正面快取磁吸口袋',desc:'正面设有磁吸开合口袋，无需拉拉链即可快速存取。',tags:['磁吸口袋','快取']},
+    {title:'左右 D 环系统',desc:'左右两侧 D 环设计，可挂载小包、钥匙或装饰配件，扩展携带能力。',tags:['D环','扩展']},
+    {title:'拉杆箱插袋系统',desc:'背面设有插袋，可套在拉杆箱拉杆上，差旅时与行李箱一体推行。',tags:['插袋系统','拉杆箱']}
+  ]},
+  {icon:'backpack',name:'TRUFFLE PRO BACKPACK',items:[
+    {title:'12L / 20L 双尺寸',desc:'12L（¥990，14寸电脑）适合日常通勤；20L（¥1,390，16寸电脑，1.11kg）适合差旅。',tags:['¥990/¥1,390','14/16寸电脑']},
+    {title:'正面顶部快取口袋',desc:'背着包就能单手拉开存取手机/耳机/交通卡，行進中无需卸包。',tags:['快取口袋','单手操作']},
+    {title:'九字钩扣大开口',desc:'主仓采用九字钩扣设计，可大角度开口，像行李箱一样方便打包和翻找。',tags:['九字钩扣','大开口']},
+    {title:'手机隐蔽袋',desc:'背包侧面设有隐蔽手机袋，安全存放且取用方便。',tags:['隐蔽袋','手机']},
+    {title:'肩带 D 环',desc:'肩带上设有 D 环，可挂太阳镜、钥匙扣等小物件。',tags:['D环','肩带']}
+  ]},
+  {icon:'suitcase',name:'WEEKENDER',items:[
+    {title:'36L · ¥1,590',desc:'短途旅行首选容量，36L 足够 2-3 天行程需求。',tags:['¥1,590','36L']},
+    {title:'CORDURA® Naturalle 面料',desc:'采用 CORDURA® Naturalle 高强度耐磨面料，兼顾触感和耐久性。',tags:['CORDURA','耐磨']},
+    {title:'大 U 框主仓开口',desc:'像行李箱一样的大 U 框开口设计，可完全展开打包，告别「袋底捞物」。',tags:['U框','打包']},
+    {title:'鞋仓/脏衣隔离仓',desc:'独立鞋仓设计，与主仓物理隔离，干净卫生。底部隔层可放脏衣服。',tags:['鞋仓','隔离']},
+    {title:'卸挂绳收纳包',desc:'配有可拆卸的卸挂绳收纳包，可单独作为小包使用。',tags:['卸挂绳','收纳包']},
+    {title:'超纤皮提手',desc:'超纤皮材质提手，手感舒适，印有 ITO 品牌标识。',tags:['超纤皮','品牌标识']}
+  ]},
+  {icon:'shield',name:'共性工艺 · 通用配置',items:[
+    {title:'PROTECTION+ 三防工艺',desc:'TRUFFLE PRO 全系列 + WEEKENDER 标配。防泼水、防油污、防刮擦，日常使用无忧。',tags:['三防','TRUFFLE','WEEKENDER']},
+    {title:'7A 长效抗菌里布',desc:'全部新品内里采用 7A 级长效抗菌里布，抑制细菌滋生，保持包内卫生。',tags:['7A','抗菌','全部新品']},
+    {title:'自锁五金拉链',desc:'TRUFFLE PRO 全系列 + WEEKENDER 标配。拉上即锁，防意外滑开。',tags:['自锁拉链','安全']},
+    {title:'拉杆箱插袋系统',desc:'TRUFFLE PRO TOTE/BP + WEEKENDER 背面设有插袋，可固定在拉杆箱拉杆上。',tags:['插袋系统','差旅']}
+  ]},
+  {icon:'award',name:'售后政策',items:[
+    {title:'PISTACHIO PLUS',desc:'5 年联保服务。功能性损坏（箱体、配件、连接件等）可享售后保障。',tags:['5年联保']},
+    {title:'ITO CARE 无忧换新',desc:'订单完成后 360 天内，可享受 1 次免费换新服务。换新产品为原订单同款同色。',tags:['360天','免费换新']}
+  ]}
+];
+
 function displayResults(data, answers) {
   var ra = document.getElementById('resultArea'); ra.classList.add('visible');
+  WRONG_ANSWERS = []; // 重置错题库
   var s = data.scores;
   if (!s) { document.getElementById('scoreSummary').innerHTML = '<div class="score-card" style="grid-column:span 4;padding:32px;color:var(--warning)">AI返回异常</div>'; return; }
   var sc = s.singleChoice?.earned||0, mc = s.multipleChoice?.earned||0, fb = s.fillBlank?.earned||0;
@@ -569,14 +701,18 @@ function displayResults(data, answers) {
   allObjQs.forEach(function(item){
     var ua = (document.getElementById('ans-'+item.q.id)?.value||'').trim();
     var c = false;
+    var correctAns = item.q.answer||item.q.blankAnswer||'';
     if (item.isFill) {
-      c = ua.toUpperCase() === (''+item.q.blankAnswer).toUpperCase() || ua === item.q.blankAnswer;
+      c = ua.toUpperCase() === (''+correctAns).toUpperCase() || ua === correctAns;
     } else {
       var us = ua.toUpperCase().split('').sort().join('');
-      var cs = item.q.answer.split('').sort().join('');
+      var cs = correctAns.split('').sort().join('');
       c = us === cs && ua.length > 0;
     }
-    dh += '<div class="res-item '+(c?'correct':'wrong')+'"><div class="res-item-hdr"><span class="res-item-text"><b>'+item.q.id+'</b> '+(item.q.text.length>50?item.q.text.substring(0,50)+'...':item.q.text)+'</span><span class="res-item-score" style="color:'+(c?'var(--success)':'var(--danger)')+'">'+(c?'+'+item.pts:'+0')+'</span></div><div class="res-item-answer">你的答案: <b>'+(ua||'未作答')+'</b> '+(c?'✓':'✗')+' 标准答案: <b style="color:var(--success)">'+(item.q.answer||item.q.blankAnswer)+'</b></div></div>';
+    if (!c) {
+      WRONG_ANSWERS.push({text:item.q.text,yourAnswer:ua,correctAnswer:correctAns,explanation:''});
+    }
+    dh += '<div class="res-item '+(c?'correct':'wrong')+'"><div class="res-item-hdr"><span class="res-item-text"><b>'+item.q.id+'</b> '+(item.q.text.length>50?item.q.text.substring(0,50)+'...':item.q.text)+'</span><span class="res-item-score" style="color:'+(c?'var(--success)':'var(--danger)')+'">'+(c?'+'+item.pts:'+0')+'</span></div><div class="res-item-answer">你的答案: <b>'+(ua||'未作答')+'</b> '+(c?'✓':'✗')+' 标准答案: <b style="color:var(--success)">'+correctAns+'</b></div></div>';
   });
 
   dh += '<div class="title-divider" style="margin-top:24px"><i data-lucide="message-square"></i> 简答题<span class="title-divider-line"></span></div>';
@@ -584,6 +720,10 @@ function displayResults(data, answers) {
     var d = s.essay?.details?.[q.id]||{score:0,feedback:'AI未评分',missedPoints:[]};
     var es = d.score||0; var ef = d.feedback||'AI未评分'; var em = d.missedPoints||[];
     var r = es/q.maxScore;
+    if (r < 0.6) {
+      var ua = (document.getElementById('ans-'+q.id)?.value||'未作答').substring(0,100);
+      WRONG_ANSWERS.push({text:'简答: '+q.text,yourAnswer:ua,correctAnswer:'参考采分点: '+q.scoringPoints.map(function(sp){return '['+sp.score+'分]'+sp.point}).join('; '),explanation:'得分 '+es+'/'+q.maxScore+'分。AI评语: '+ef+(em.length?' 遗漏: '+em.join(', '):'')});
+    }
     dh += '<div class="res-item '+(r>=0.8?'correct':r>=0.5?'partial':'wrong')+'"><div class="res-item-hdr"><span class="res-item-text"><b>简答'+(i+1)+'（'+q.maxScore+'分）</b> '+(q.text.length>60?q.text.substring(0,60)+'...':q.text)+'</span><span class="res-item-score" style="color:'+(r>=0.8?'var(--success)':r>=0.5?'var(--warning)':'var(--danger)')+'">'+es+'/'+q.maxScore+'</span></div><div class="res-item-feedback"><b>AI评语：</b>'+ef+'</div>'+(em.length?'<div class="res-item-feedback" style="color:var(--danger)"><b>遗漏要点：</b>'+em.join('、')+'</div>':'')+'</div>';
   });
   document.getElementById('resultDetails').innerHTML = dh;
@@ -598,6 +738,10 @@ function displayResults(data, answers) {
   }
   ra.scrollIntoView({behavior:'smooth',block:'start'});
   // Auto-submit to Feishu if configured
+  // 更新错题计数
+  document.getElementById('wrongCount').textContent = WRONG_ANSWERS.length ? '('+WRONG_ANSWERS.length+'题)' : '';
+  // 切回评分结果Tab
+  switchTab('score');
   submitToFeishu(total, passed, data.summary?.overallFeedback||'');
 }
 
