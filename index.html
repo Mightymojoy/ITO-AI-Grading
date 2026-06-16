@@ -405,6 +405,17 @@ var EXAM_DATA = {"title":"ITO 2026 新品系列产品知识考试","totalScore":
 {"id":"s4q6","text":"客户问：WEEKENDER 为什么卖 ¥1,590？","maxScore":6,"scoringPoints":[{"point":"CORDURA®面料高强度耐磨","score":1.5},{"point":"大U框开口像行李箱打包","score":1.5},{"point":"鞋仓+电脑隔层","score":1.5},{"point":"三防/抗菌/自锁拉链","score":1.5}]}]}]};
 
 // ============================================================
+//  切屏追踪
+// ============================================================
+var switchCount = 0;
+document.addEventListener('visibilitychange', function(){
+  if (document.hidden) {
+    switchCount++;
+    showToast('⚠ 检测到切屏，已记录第 '+switchCount+' 次');
+  }
+});
+
+// ============================================================
 //  AI 端点配置
 // ============================================================
 var AI_ENDPOINTS = {
@@ -824,7 +835,7 @@ async function submitToFeishu(totalScore, passed, feedback) {
         passed: passed,
         feedback: feedback||'',
         duration: 0,
-        switches: 0
+        switches: switchCount
       })
     });
     var d = await res.json();
