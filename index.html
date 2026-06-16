@@ -449,6 +449,10 @@ function init() {
   document.getElementById('feishuDept').addEventListener('input', function(){
     if (this.value.trim()) localStorage.setItem('feishuDept', this.value);
   });
+  // 内置 DeepSeek API Key（仅第一次注入，用户可覆盖）
+  if (!localStorage.getItem('ai_key_deepseek')) {
+    localStorage.setItem('ai_key_deepseek', 'sk-738f6fd966504bb98a6dc4ab27510045');
+  }
   // 从URL参数读取API Key（支持 ?key=xxx 或 ?api_key=xxx 或 ?model=deepseek）
   var params = new URLSearchParams(location.search);
   var keyFromUrl = params.get('key') || params.get('api_key') || '';
