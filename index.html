@@ -527,7 +527,7 @@ function displayResults(data, answers) {
   if (!s) { document.getElementById('scoreSummary').innerHTML = '<div class="score-card" style="grid-column:span 4;padding:32px;color:var(--warning)">AI返回异常</div>'; return; }
   var sc = s.singleChoice?.earned||0, mc = s.multipleChoice?.earned||0, fb = s.fillBlank?.earned||0;
   var objT = sc+mc+fb;
-  var subT = s.essay?.earned||0;
+  var subT = (s.essay?.earned||0);
   var total = objT+subT;
   var passed = total >= 80;
 
@@ -559,8 +559,9 @@ function displayResults(data, answers) {
   dh += '<div class="title-divider" style="margin-top:24px"><i data-lucide="message-square"></i> 简答题<span class="title-divider-line"></span></div>';
   EXAM_DATA.sections[3].questions.forEach(function(q,i){
     var d = s.essay?.details?.[q.id]||{score:0,feedback:'AI未评分',missedPoints:[]};
-    var r = d.score/q.maxScore;
-    dh += '<div class="res-item '+(r>=0.8?'correct':r>=0.5?'partial':'wrong')+'"><div class="res-item-hdr"><span class="res-item-text"><b>简答'+(i+1)+'（'+q.maxScore+'分）</b> '+(q.text.length>60?q.text.substring(0,60)+'...':q.text)+'</span><span class="res-item-score" style="color:'+(r>=0.8?'var(--success)':r>=0.5?'var(--warning)':'var(--danger)')+'">'+d.score+'/'+q.maxScore+'</span></div><div class="res-item-feedback"><b>AI评语：</b>'+d.feedback+'</div>'+(d.missedPoints?.length?'<div class="res-item-feedback" style="color:var(--danger)"><b>遗漏要点：</b>'+d.missedPoints.join('、')+'</div>':'')+'</div>';
+    var es = d.score||0; var ef = d.feedback||'AI未评分'; var em = d.missedPoints||[];
+    var r = es/q.maxScore;
+    dh += '<div class="res-item '+(r>=0.8?'correct':r>=0.5?'partial':'wrong')+'"><div class="res-item-hdr"><span class="res-item-text"><b>简答'+(i+1)+'（'+q.maxScore+'分）</b> '+(q.text.length>60?q.text.substring(0,60)+'...':q.text)+'</span><span class="res-item-score" style="color:'+(r>=0.8?'var(--success)':r>=0.5?'var(--warning)':'var(--danger)')+'">'+es+'/'+q.maxScore+'</span></div><div class="res-item-feedback"><b>AI评语：</b>'+ef+'</div>'+(em.length?'<div class="res-item-feedback" style="color:var(--danger)"><b>遗漏要点：</b>'+em.join('、')+'</div>':'')+'</div>';
   });
   document.getElementById('resultDetails').innerHTML = dh;
   lucide.createIcons();
