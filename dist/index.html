@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ITO · AI 评分</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:opsz@14..32&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@latest"></script>
+<style>
+:root{--font:'Inter','PingFang SC','Microsoft YaHei',sans-serif;--gold:#c9a962;--gold-dim:rgba(201,169,98,0.08);--bg:#f5f5f0;--bg-card:#fff;--text:#1a1a18;--text-secondary:#4a4a46;--text-tertiary:#9a9a96;--border:#e8e7e2;--border-hover:#d0cfc8;--radius:12px;--radius-sm:8px;--success:#16a34a;--danger:#dc2626;--warning:#d97706;--success-bg:rgba(22,163,74,0.07);--danger-bg:rgba(220,38,38,0.07)}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:var(--font);background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased}
+
+/* Nav */
+.nav{background:var(--bg-card);border-bottom:1px solid var(--border);padding:0 24px;height:52px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
+.nav-brand{display:flex;align-items:center;gap:8px;text-decoration:none;color:var(--text);font-weight:600;font-size:15px}
+.nav-brand svg{width:18px;height:18px;color:var(--gold)}
+.nav-right{display:flex;align-items:center;gap:10px}
+.nav-divider{width:1px;height:20px;background:var(--border)}
+.status-bar{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-tertiary)}
+.status-dot{width:5px;height:5px;border-radius:50%;background:var(--success)}
+.nav-input{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px;font-family:var(--font);color:var(--text);outline:none;width:100px;transition:border-color .12s}
+.nav-input:focus{border-color:var(--gold)}
+.nav-select{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px 6px;font-size:11px;font-family:var(--font);color:var(--text);outline:none;cursor:pointer}
+.btn{display:inline-flex;align-items:center;gap:5px;padding:7px 16px;border:none;border-radius:var(--radius-sm);font-size:12px;font-weight:500;font-family:var(--font);cursor:pointer;transition:all .12s;background:var(--bg);color:var(--text);border:1px solid var(--border)}
+.btn:hover{border-color:var(--gold);color:var(--gold)}
+.btn-primary{background:var(--gold);color:#000;border-color:var(--gold);font-weight:600}
+.btn-primary:hover{opacity:.9}
+.btn-ghost{background:transparent;border:1px solid transparent;padding:5px 8px}
+.btn-ghost:hover{border-color:var(--border)}
+.btn-sm{padding:5px 12px;font-size:11px}
+.btn-icon{padding:5px}
+
+/* Main content - single column */
+.main{padding:20px 24px 60px;max-width:780px;margin:0 auto}
+
+/* Section headers */
+.sec-hdr{font-size:13px;font-weight:600;margin:20px 0 12px;padding-bottom:8px;border-bottom:2px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.sec-hdr svg{width:14px;height:14px}
+.sec-hdr .sc{font-size:11px;font-weight:400;color:var(--text-tertiary)}
+.sec-hdr.single{color:#2563eb}
+.sec-hdr.multi{color:#dc2626}
+.sec-hdr.fill{color:#7c3aed}
+.sec-hdr.essay{color:#16a34a}
+
+/* Question card */
+.q-card{border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:10px;background:var(--bg-card);overflow:hidden}
+.q-card:hover{border-color:var(--border-hover)}
+.q-card-header{padding:10px 14px 8px;background:var(--bg);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.q-card-tag{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;padding:1px 7px;border-radius:4px}
+.q-card-tag.single{background:rgba(37,99,235,0.1);color:#2563eb}
+.q-card-tag.multi{background:rgba(220,38,38,0.1);color:#dc2626}
+.q-card-tag.fill{background:rgba(124,58,237,0.1);color:#7c3aed}
+.q-card-tag.essay{background:rgba(22,163,74,0.1);color:#16a34a}
+.q-card-text{font-size:14px;line-height:1.6;padding:10px 14px 6px;font-weight:450}
+.q-card-body{padding:6px 14px 12px}
+
+/* Choice buttons */
+.choices{display:flex;flex-wrap:wrap;gap:6px}
+.choice-item{display:inline-flex;align-items:center;justify-content:center;min-width:32px;height:32px;padding:0 12px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;transition:all .12s;background:var(--bg);color:var(--text-secondary);user-select:none}
+.choice-item:hover{border-color:var(--gold)}
+.choice-item.selected{border-color:var(--gold);background:var(--gold-dim)}
+.choice-item.selected .radio-icon{border-color:var(--gold);background:var(--gold);color:#000;font-weight:700}
+.choice-item.multi-sel{border-color:#dc2626;background:rgba(220,38,38,0.06)}
+.choice-item.multi-sel .check-icon{border-color:#dc2626;background:#dc2626;color:#fff;font-weight:700}
+.choice-clear{font-size:10px;color:var(--text-tertiary);cursor:pointer;text-decoration:underline}
+.choice-clear:hover{color:var(--danger)}
+
+/* Fill input */
+.fill-row{display:flex;gap:8px;align-items:center}
+.fill-input{flex:1;padding:8px 12px;background:var(--bg);border:1px dashed var(--border);border-radius:var(--radius-sm);font-size:13px;font-family:var(--font);color:var(--text);outline:none;transition:all .12s;letter-spacing:.3px}
+.fill-input:focus{border-color:var(--gold);border-style:solid;background:var(--bg-card)}
+
+/* Essay input */
+.essay-input{width:100%;min-height:80px;padding:10px 12px;background:var(--bg);border:1px dashed var(--border);border-radius:var(--radius-sm);font-size:13px;font-family:var(--font);color:var(--text);line-height:1.6;outline:none;resize:vertical;transition:all .12s}
+.essay-input:focus{border-color:var(--gold);border-style:solid;background:var(--bg-card)}
+
+/* Action bar */
+.actions{display:flex;gap:8px;margin:20px 0;flex-wrap:wrap;padding-top:16px;border-top:1px solid var(--border)}
+.actions-msg{font-size:11px;color:var(--text-tertiary);display:flex;align-items:center;gap:4px;margin-left:auto}
+
+/* Loading */
+.loading{display:none;text-align:center;padding:48px 20px}
+.loading.active{display:block}
+.spinner{width:28px;height:28px;border:2px solid var(--border);border-top-color:var(--gold);border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 10px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading p{font-size:13px;color:var(--text-secondary)}
+
+/* Result area */
+.result{margin-top:20px;display:none}
+.result.visible{display:block}
+.r-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:20px}
+.r-card{padding:14px;border:1px solid var(--border);border-radius:var(--radius-sm);text-align:center;background:var(--bg-card)}
+.r-card.total{background:var(--gold-dim);border-color:rgba(201,169,98,0.25)}
+.r-card-val{font-size:24px;font-weight:700;letter-spacing:-.5px}
+.r-card-lbl{font-size:10px;color:var(--text-tertiary);margin-top:2px}
+.r-pass{display:inline-block;margin-top:6px;padding:1px 10px;border-radius:10px;font-size:10px;font-weight:600}
+
+/* Tabs */
+.tabs{display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid var(--border)}
+.tab{padding:8px 16px;font-size:12px;font-weight:500;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;color:var(--text-tertiary);transition:all .12s;display:flex;align-items:center;gap:6px}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--gold);border-bottom-color:var(--gold);font-weight:600}
+.tab svg{width:13px;height:13px}
+.tab-content{display:none}
+.tab-content.active{display:block}
+
+/* Result items */
+.res-item{padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:6px;font-size:12px;background:var(--bg-card)}
+.res-item.correct{border-left:3px solid var(--success)}
+.res-item.wrong{border-left:3px solid var(--danger)}
+.res-item.partial{border-left:3px solid var(--warning)}
+.res-hdr{display:flex;justify-content:space-between;align-items:center}
+.res-feedback{font-size:11px;color:var(--text-tertiary);margin-top:4px}
+.res-answer{font-size:11px;color:var(--text-tertiary);margin-top:2px}
+
+/* SW section */
+.sw-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}
+.sw-box{padding:12px;border:1px solid var(--border);border-radius:var(--radius-sm)}
+.sw-title{font-size:11px;font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:4px}
+.tags{display:flex;flex-wrap:wrap;gap:3px}
+.tag{font-size:10px;padding:2px 8px;border-radius:10px}
+.tag-good{background:var(--success-bg);color:var(--success)}
+.tag-bad{background:var(--danger-bg);color:var(--danger)}
+.fb-box{padding:12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;line-height:1.6;color:var(--text-secondary)}
+
+/* Knowledge base */
+.kb-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
+.kb-card{border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-card);overflow:hidden}
+.kb-card-hdr{padding:8px 12px;background:var(--gold-dim);font-size:12px;font-weight:600;color:var(--gold)}
+.kb-card-body{padding:8px 12px}
+.kb-item{font-size:11px;color:var(--text-secondary);padding:3px 0;border-bottom:1px solid var(--border);line-height:1.5}
+.kb-item:last-child{border-bottom:none}
+
+/* Modal */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:999;justify-content:center;align-items:center;backdrop-filter:blur(4px)}
+.modal-overlay.active{display:flex}
+.modal{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:24px;width:420px;max-width:92vw;box-shadow:0 24px 80px rgba(0,0,0,0.2)}
+.modal h2{font-size:15px;font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:6px}
+.modal h2 svg{width:15px;height:15px;color:var(--gold)}
+.modal-desc{font-size:11px;color:var(--text-tertiary);margin-bottom:16px}
+.form-group{margin-bottom:10px}
+.form-group label{display:flex;align-items:center;gap:5px;font-size:11px;font-weight:500;color:var(--text-secondary);margin-bottom:3px}
+.dot{width:5px;height:5px;border-radius:50%;background:#ccc;display:inline-block}
+.dot.on{background:var(--success)}
+.form-group input,.form-group select{width:100%;padding:7px 9px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;font-family:var(--font);color:var(--text);outline:none}
+.form-group input:focus,.form-group select:focus{border-color:var(--gold)}
+.modal-actions{display:flex;gap:6px;justify-content:flex-end;margin-top:14px}
+
+/* Toast */
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--text);color:#fff;padding:8px 20px;border-radius:8px;font-size:12px;z-index:9999;opacity:0;transition:opacity .3s;white-space:nowrap}
+
+/* Empty */
+.empty{padding:60px 20px;text-align:center;color:var(--text-tertiary);font-size:13px}
+.empty svg{width:32px;height:32px;margin-bottom:8px}
+
+@media(max-width:600px){
+  .nav{padding:0 12px;height:auto;flex-wrap:wrap;gap:6px;padding:8px 12px}
+  .nav-input{width:72px}
+  .sw-grid{grid-template-columns:1fr}
+  .kb-grid{grid-template-columns:1fr}
+  .main{padding:12px 12px 40px}
+}
+</style>
+</head>
+<body>
+
+<!-- Nav -->
+<nav class="nav">
+  <a class="nav-brand" href="#"><i data-lucide="book-open"></i><span>ITO · AI 评分</span></a>
+  <div class="nav-right">
+    <div class="status-bar"><span class="status-dot"></span><span id="loadStatus">载入中</span></div>
+    <input class="nav-input" id="feishuName" placeholder="姓名">
+    <input class="nav-input" id="feishuDept" placeholder="部门">
+    <div class="nav-divider"></div>
+    <select class="nav-select" id="modelSelect">
+      <option value="deepseek">DeepSeek</option>
+      <option value="gemini">Gemini</option>
+      <option value="kimi">Kimi</option>
+      <option value="chatanywhere">ChatAnywhere</option>
+    </select>
+    <select class="nav-select" id="examTypeSelect" onchange="switchExam()">
+      <option value="random">随机抽题</option>
+      <option value="fixed">新品考试0616</option>
+    </select>
+    <button class="btn btn-ghost btn-icon" onclick="openConfig()" title="配置"><i data-lucide="settings" style="width:13px;height:13px"></i></button>
+  </div>
+</nav>
+
+<!-- Main -->
+<div class="main" id="mainContent"></div>
+
+<!-- Modal -->
+<div class="modal-overlay" id="configModal" onclick="if(event.target===this)closeConfig()">
+  <div class="modal">
+    <h2><i data-lucide="key-round"></i> 配置</h2><p class="modal-desc">API Key自动配置，无需手动填写</p>
+    <div style="border-top:1px solid var(--border);padding-top:14px;margin-top:6px">
+      <h3 style="font-size:12px;font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:5px"><i data-lucide="cloud" style="width:13px;height:13px;color:var(--gold)"></i>飞书同步</h3>
+      <div class="form-group"><label><span class="dot" id="dot-feishu-enable"></span>启用飞书写入</label>
+        <select id="feishu-enable"><option value="no">关闭</option><option value="yes">开启</option></select></div>
+      <div class="form-group"><label>App ID</label><input type="text" id="feishu-appid" placeholder="cli_xxx"></div>
+      <div class="form-group"><label>App Secret</label><input type="password" id="feishu-secret" placeholder="xxx"></div>
+    </div>
+    <div class="modal-actions"><button class="btn btn-sm" onclick="closeConfig()">取消</button><button class="btn btn-primary btn-sm" onclick="saveConfig()">保存</button></div>
+  </div>
+</div>
+
+<div class="toast" id="toastEl"></div>
+
+<script>
+// ============================================================
+//  大题库 (QUESTION_POOLS)
+// ============================================================
+var QUESTION_POOLS = {
+  single:[
+    {text:'PISTACHIO PLUS 20寸登机箱零售价？',options:['A.¥1,490','B.¥1,590','C.¥1,690','D.¥1,790'],answer:'C'},
+    {text:'PISTACHIO PLUS 25寸托运箱零售价？',options:['A.¥1,990','B.¥2,090','C.¥2,190','D.¥2,290'],answer:'C'},
+    {text:'PISTACHIO PLUS 系列正确的颜色？',options:['A.气泡粉','B.晶体绿','C.豆绿','D.液态紫'],answer:'C'},
+    {text:'PISTACHIO PLUS 20寸前仓最大容纳笔记本？',options:['A.14寸','B.15寸','C.16寸','D.17寸'],answer:'C'},
+    {text:'PISTACHIO PLUS 25/29寸采用哪种锁具？',options:['A.PEBBLE翻盖锁','B.分体集成海关锁','C.普通TSA锁','D.数字密码锁'],answer:'B'},
+    {text:'PISTACHIO PLUS 25/29寸核心创新结构？',options:['A.独立双仓','B.分体锁双模式','C.前盖快取口袋','D.PEBBLE锁'],answer:'B'},
+    {text:'TRUFFLE PRO TOTE 零售价和容量？',options:['A.¥1,190·15L','B.¥1,290·18L','C.¥1,390·20L','D.¥1,490·22L'],answer:'B'},
+    {text:'TRUFFLE PRO TOTE 主面料？',options:['A.CORDURA®Naturalle','B.camira Era英国进口','C.尼龙','D.涤纶'],answer:'B'},
+    {text:'TRUFFLE PRO BACKPACK 20L 价格和净重？',options:['A.¥1,190·1.00kg','B.¥1,290·1.05kg','C.¥1,390·1.11kg','D.¥1,490·1.20kg'],answer:'C'},
+    {text:'TRUFFLE PRO BACKPACK 12L 最大电脑兼容？',options:['A.13寸','B.14寸','C.15寸','D.16寸'],answer:'B'},
+    {text:'WEEKENDER 零售价和容量？',options:['A.¥1,290·28L','B.¥1,390·32L','C.¥1,490·34L','D.¥1,590·36L'],answer:'D'},
+    {text:'WEEKENDER 采用什么面料？',options:['A.camira Era','B.CORDURA®Naturalle','C.帆布','D.尼龙'],answer:'B'},
+    {text:'TRUFFLE PRO 包袋与WEEKENDER共有工艺？',options:['A.分体锁','B.PEBBLE锁','C.自锁五金拉链','D.双U框'],answer:'C'},
+    {text:'TRUFFLE PRO BACKPACK 快取口袋描述正确？',options:['A.需摘下背袋','B.背着单手存取','C.只能放手机','D.在背包底部'],answer:'B'},
+    {text:'TOTE和WEEKENDER背面共同功能？',options:['A.水杯袋','B.拉杆箱插袋系统','C.充电宝口袋','D.防盗暗袋'],answer:'B'},
+    {text:'PISTACHIO PLUS 售后服务正确表述？',options:['A.5年联保·功能性损坏可享','B.3年联保·人为免费','C.终身质保·不限次换新','D.1年联保'],answer:'A'},
+    {text:'ITO CARE 换新服务内容？',options:['A.180天1次免费','B.360天1次免费','C.720天不限次','D.90天1次'],answer:'B'},
+    {text:'TRUFFLE PRO TOTE 净重？',options:['A.0.6kg','B.0.8kg','C.1.0kg','D.1.2kg'],answer:'B'},
+    {text:'PISTACHIO PLUS 保修时长是？',options:['A.3年','B.5年','C.10年','D.终生'],answer:'B'},
+    {text:'PISTACHIO PLUS 29寸零售价？',options:['A.¥2,190','B.¥2,290','C.¥2,490','D.¥2,590'],answer:'C'},
+    {text:'TRUFFLE PRO BACKPACK 20L 尺寸(长×宽×高)？',options:['A.430×320×140mm','B.440×320×140mm','C.460×330×150mm','D.480×350×160mm'],answer:'C'},
+    {text:'TRUFFLE PRO BACKPACK 20L 配色？',options:['A.黑色/灰色','B.烟黑/雾灰/棕褐','C.豆绿/棕褐/炭黑','D.深蓝/米白'],answer:'B'},
+    {text:'以下哪款包袋容量最大？',options:['A.TOTE','B.BACKPACK 20L','C.BACKPACK 12L','D.WEEKENDER'],answer:'D'},
+    {text:'PISTACHIO PLUS 20寸设有几个前袋？',options:['A.1个','B.2个','C.3个','D.4个'],answer:'B'},
+    {text:'以下哪个不属于PROTECTION+三防范围？',options:['A.防泼水','B.防油污','C.防撞击','D.防指纹'],answer:'D'},
+    {text:'TRUFFLE PRO BACKPACK 12L 零售价？',options:['A.¥890','B.¥990','C.¥1,090','D.¥1,190'],answer:'C'},
+    {text:'WEEKENDER 净重？',options:['A.0.6kg','B.0.8kg','C.1.0kg','D.1.2kg'],answer:'C'},
+    {text:'PISTACHIO PLUS 系列有几个尺寸？',options:['A.2个','B.3个','C.4个','D.5个'],answer:'B'},
+    {text:'PISTACHIO PLUS 20寸行李箱重量约？',options:['A.2.8kg','B.3.0kg','C.3.2kg','D.3.5kg'],answer:'A'},
+    {text:'TRUFFLE PRO BACKPACK 20L 可容纳最大笔记本？',options:['A.14寸','B.15寸','C.16寸','D.17寸'],answer:'C'}
+  ],
+  multi:[
+    {text:'PISTACHIO PLUS 20寸设计亮点？',options:['A.独立双仓','B.前仓可放16寸电脑','C.分体集成海关锁','D.PEBBLE海关密码锁','E.前盖证件快取'],answer:'ABDE'},
+    {text:'PISTACHIO PLUS 25/29寸优势？',options:['A.分体锁上下拨双模式','B.前盖深仓通仓','C.U框隐私层','D.独立双仓','E.分类收纳口袋'],answer:'ABCE'},
+    {text:'TRUFFLE PRO TOTE 功能设计？',options:['A.自锁五金拉链','B.背面隐藏拉链仓','C.正面磁吸快取','D.左右D环','E.鞋仓'],answer:'ABCD'},
+    {text:'TRUFFLE PRO BACKPACK 通用卖点？',options:['A.正面顶部快取口袋','B.九字钩扣大开口','C.手机隐蔽袋','D.肩带D环','E.前置办公分仓'],answer:'ABCD'},
+    {text:'WEEKENDER 功能设计？',options:['A.大U框主仓','B.卸挂绳收纳包','C.鞋仓/脏衣隔离','D.侧面水杯插袋','E.超纤皮提手'],answer:'ABCE'},
+    {text:'采用camira Era面料的产品？',options:['A.PISTACHIO PLUS','B.TRUFFLE PRO TOTE','C.TRUFFLE PRO BACKPACK','D.WEEKENDER','E.无'],answer:'BC'},
+    {text:'自锁拉链正确描述？',options:['A.拉头自带锁定','B.闭合自动锁死','C.需额外挂锁','D.不会无意滑开','E.仅用于TOTE'],answer:'ABD'},
+    {text:'采用PROTECTION+三防工艺的产品？',options:['A.PISTACHIO PLUS','B.TRUFFLE PRO TOTE','C.TRUFFLE PRO BACKPACK','D.WEEKENDER','E.无'],answer:'BCD'},
+    {text:'共享烟黑/雾灰/棕褐配色的产品？',options:['A.PISTACHIO PLUS','B.TOTE','C.BACKPACK','D.WEEKENDER','E.以上全部'],answer:'BC'},
+    {text:'PISTACHIO PLUS 20寸登机箱特点？',options:['A.U型快取层','B.独立双仓','C.分体锁','D.PEBBLE锁','E.前盖证件口袋'],answer:'ABDE'},
+    {text:'WEEKENDER面料CORDURA®的特点？',options:['A.耐磨','B.防刮','C.环保','D.可回收','E.纯棉'],answer:'AB'},
+    {text:'TRUFFLE PRO TOTE的材质工艺？',options:['A.7A抗菌里布','B.英产camira Era面料','C.PROTECTION+三防','D.自锁五金拉链','E.碳纤维'],answer:'ABCD'},
+    {text:'包袋产品通用设计？',options:['A.拉杆箱插袋系统','B.7A抗菌里布','C.PROTECTION+三防','D.自锁拉链','E.分体锁'],answer:'ABCD'},
+    {text:'PISTACHIO PLUS 25/29寸结构特点？',options:['A.顶部拉杆系统','B.前盖深仓通仓','C.U框隐私层','D.U框固定系统','E.轻松翻盖'],answer:'ABCDE'},
+    {text:'以下说法正确的？',options:['A.WEEKENDER有鞋仓','B.TOTE重0.8kg','C.BP20L净重1.11kg','D.TOTE容量18L','E.WEEKENDER用camira Era'],answer:'ABCD'}
+  ],
+  fill:[
+    {text:'PISTACHIO PLUS 20寸前仓最大容纳___英寸笔记本',answer:'16'},
+    {text:'PISTACHIO PLUS 共有___种配色',answer:'4'},
+    {text:'TRUFFLE PRO TOTE 容量___L',answer:'18'},
+    {text:'TRUFFLE PRO BACKPACK 20L 零售价___元',answer:'1390'},
+    {text:'WEEKENDER 容量___L',answer:'36'},
+    {text:'WEEKENDER 零售价___元',answer:'1590'},
+    {text:'ITO CARE 无忧换新为订单完成后___天内',answer:'360'},
+    {text:'4个新品通用的三防技术简称___',answer:'PROTECTION+'},
+    {text:'4个新品内里均采用___长效抗菌里布',answer:'7A'},
+    {text:'包袋产品背面行李箱固定系统名称___',answer:'拉杆箱插袋系统'},
+    {text:'PISTACHIO PLUS 20寸行李箱重量约___kg',answer:'2.8'},
+    {text:'4新品中___款包袋产品（填数字）',answer:'4'},
+    {text:'TRUFFLE PRO BACKPACK 20L净重___kg',answer:'1.11'},
+    {text:'TRUFFLE PRO TOTE净重___kg',answer:'0.8'},
+    {text:'PISTACHIO PLUS 保修___年（填数字）',answer:'5'},
+    {text:'TRUFFLE PRO BACKPACK 12L零售价___元',answer:'1090'},
+    {text:'WEEKENDER净重___kg',answer:'1.0'},
+    {text:'PISTACHIO PLUS 29寸零售价___元',answer:'2490'},
+    {text:'PISTACHIO PLUS 瓶装水___色（填数字）',answer:'4'},
+    {text:'TRUFFLE PRO BACKPACK 20L可容纳___英寸笔记本',answer:'16'}
+  ],
+  essay:[
+    {text:'如果让你推荐 PISTACHIO PLUS 20寸，面对一位26岁经常短途出差的新锐白领，你该如何推荐？请从产品卖点与用户需求匹配的角度，说明推荐思路。',maxScore:5,points:[{p:'推荐20寸登机免托运',s:1.5},{p:'前仓独立电脑快取隐私保护',s:1.5},{p:'前盖证件快取口袋',s:0.5},{p:'颜值匹配职场形象/售后省心',s:1},{p:'结合用户场景表达',s:0.5}]},
+    {text:'直播间客户问 TOTE、BACKPACK、WEEKENDER 三个包袋怎么选？',maxScore:5,points:[{p:'WEEKENDER→周末短途旅行',s:1.5},{p:'TOTE→商务差旅/见客户',s:1.5},{p:'BACKPACK→日常通勤/电脑多',s:1.5},{p:'表达有温度有场景感',s:0.5}]},
+    {text:'一句让客户听懂 PISTACHIO PLUS 20寸和25/29寸的区别？',maxScore:5,points:[{p:'20寸独立双仓+前仓电脑+安检方便',s:2},{p:'25/29寸双模式开合+站立取物',s:2},{p:'表达简洁清晰有场景',s:1}]},
+    {text:'客户问自锁拉链和普通拉链有什么区别？有必要多花钱吗？',maxScore:5,points:[{p:'自锁拉链自动锁死不会滑开',s:1.5},{p:'场景痛点：包被拉开东西掉出',s:1.5},{p:'不需要额外挂锁',s:1},{p:'话术有说服力',s:1}]},
+    {text:'客户问 TRUFFLE PRO BACKPACK 12L和20L怎么选？',maxScore:5,points:[{p:'12L适合日常通勤/轻装',s:1.5},{p:'20L适合差旅/装更多',s:1.5},{p:'容量差=电脑尺寸差',s:1},{p:'结合用户场景推荐',s:1}]},
+    {text:'客户问 WEEKENDER 看起来就是个旅行袋，为什么卖¥1,590？',maxScore:5,points:[{p:'CORDURA®面料+三防涂层',s:1.5},{p:'大U框开口像行李箱打包',s:1.5},{p:'鞋仓隔离+电脑隔层+7A抗菌',s:1},{p:'360天换新5年维修',s:0.5},{p:'话术有说服力',s:0.5}]},
+    {text:'客户问 PISTACHIO PLUS 20寸和普通行李箱有什么不同？',maxScore:5,points:[{p:'独立双仓前仓电脑物理隔离',s:1.5},{p:'前盖证件快取/PEBBLE锁',s:1.5},{p:'5年联保360天换新',s:1},{p:'表达有场景感',s:1}]},
+    {text:'客户问 TRUFFLE PRO TOTE 和 WEEKENDER 有什么不同？',maxScore:5,points:[{p:'TOTE通勤18L轻便0.8kg',s:1.5},{p:'WEEKENDER旅行36L大U框打包',s:1.5},{p:'共用插袋系统+自锁拉链+三防',s:1},{p:'按使用场景推荐',s:1}]}
+  ]
+};
+</script>
+<script>
+// ============================================================
+//  固定考卷 0616 (EXAM_FIXED)
+// ============================================================
+var EXAM_FIXED = {title:'ITO 新品考试（0616）',totalScore:100,passScore:80,sections:[
+{type:'单选',title:'单选题',count:15,scorePerQuestion:2,totalScore:30,questions:[
+{id:'f1q1',text:'PISTACHIO PLUS 20寸登机箱的核心创新结构是什么？',options:['A.可扩展层设计','B.独立双仓结构（前仓与主仓完全独立）','C.前开式设计','D.双拉杆系统'],answer:'B'},
+{id:'f1q2',text:'TRUFFLE PRO TOTE 的零售价是多少？',options:['A.¥1,190','B.¥1,290','C.¥1,390','D.¥1,590'],answer:'B'},
+{id:'f1q3',text:'WEEKENDER 旅行袋的主仓开口设计是什么？',options:['A.一字拉链开口','B.双U框开口','C.大U框主仓开口（三面打开，像贝壳一样展开）','D.翻盖磁吸开口'],answer:'C'},
+{id:'f1q4',text:'PISTACHIO PLUS 25/29寸托运箱最核心的创新是什么？',options:['A.独立双仓结构','B.分体集成海关锁（一个锁体控制两套开合机制）','C.超轻材质','D.内置电子秤'],answer:'B'},
+{id:'f1q5',text:'以下关于TRUFFLE PRO BACKPACK 20L版本的描述，正确的是？',options:['A.零售价¥1,190，兼容最高14英寸电脑','B.零售价¥1,290，兼容最高16英寸电脑','C.零售价¥1,390，兼容最高16英寸电脑','D.零售价¥1,490，兼容最高15英寸电脑'],answer:'C'},
+{id:'f1q6',text:'TRUFFLE PRO BACKPACK 12L版本的电脑兼容尺寸为？',options:['A.最高13英寸','B.最高14英寸','C.最高15英寸','D.最高16英寸'],answer:'B'},
+{id:'f1q7',text:'以下哪个产品使用了 CORDURA® Naturalle 面料？',options:['A.PISTACHIO PLUS 行李箱','B.TRUFFLE PRO TOTE','C.TRUFFLE PRO BACKPACK','D.WEEKENDER 旅行袋'],answer:'D'},
+{id:'f1q8',text:'TRUFFLE PRO BACKPACK 最核心的差异化卖点是什么？',options:['A.大容量收纳','B.正面顶部快取口袋（不摘背包单手存取）','C.防水面料','D.超轻设计'],answer:'B'},
+{id:'f1q9',text:'TRUFFLE PRO TOTE 的净重是多少？',options:['A.0.6kg','B.0.8kg','C.1.0kg','D.1.2kg'],answer:'B'},
+{id:'f1q10',text:'PISTACHIO PLUS 25寸托运箱的零售价是？',options:['A.¥1,690','B.¥1,990','C.¥2,190','D.¥2,490'],answer:'C'},
+{id:'f1q11',text:'WEEKENDER 的容积是多少？',options:['A.18L','B.24L','C.36L','D.42L'],answer:'C'},
+{id:'f1q12',text:'以下哪个产品系列推出了"独立双仓结构"？',options:['A.TRUFFLE PRO TOTE','B.PISTACHIO PLUS','C.WEEKENDER','D.TRUFFLE PRO BACKPACK'],answer:'B'},
+{id:'f1q13',text:'PISTACHIO PLUS 25/29寸托运箱的分体集成锁，"上拨"对应什么模式？',options:['A.前开模式','B.中开模式（传统全开打包）','C.锁死模式','D.解锁模式'],answer:'B'},
+{id:'f1q14',text:'PISTACHIO PLUS 行李箱的配色方案是以下哪一项？',options:['A.气泡粉、波子绿、苏打橙','B.晶体绿、液态紫','C.豆绿、棕褐、炭黑、烟白','D.屿灰、瑾紫、羽白'],answer:'C'},
+{id:'f1q15',text:'以下哪项工艺是 TRUFFLE PRO TOTE、TRUFFLE PRO BACKPACK 和 WEEKENDER 共有的？',options:['A.TSA海关锁','B.独立双仓','C.PROTECTION+ 三防 + 7A长效抗菌里布','D.大U框开口'],answer:'C'}
+]},
+{type:'多选',title:'多选题',count:10,scorePerQuestion:3,totalScore:30,questions:[
+{id:'f2q1',text:'PISTACHIO PLUS 20寸登机箱的前仓电脑快取区包含哪些设计？',options:['A.可容纳16英寸笔记本电脑','B.独立的平板电脑隔层','C.加厚绒布内衬保护','D.内置充电宝','E.魔术贴固定扣确保稳固'],answer:'ABCE'},
+{id:'f2q2',text:'TRUFFLE PRO BACKPACK 的材质工艺包括哪些？',options:['A.camira Era面料','B.CORDURA® Naturalle','C.大金三防（防水、防油、防污）','D.7A长效抗菌里布','E.自锁拉链'],answer:'ACDE'},
+{id:'f2q3',text:'WEEKENDER 旅行袋具备以下哪些功能模块？',options:['A.鞋仓/脏衣隔离仓','B.前置办公分仓','C.独立双仓结构','D.卸挂绳收纳包','E.大U框主仓开口'],answer:'ABDE'},
+{id:'f2q4',text:'PISTACHIO PLUS 25/29寸托运箱相比20寸登机箱，独特的卖点有？',options:['A.分体集成海关锁（上拨中开/下拨前开）','B.前盖深仓通仓设计（站立取物）','C.置顶U框隐私层（仓中仓）','D.正面顶部快取口袋','E.PEBBLE锁具系统'],answer:'ABC'},
+{id:'f2q5',text:'TRUFFLE PRO BACKPACK（12L/20L 通用）的卖点包括？',options:['A.正面顶部快取口袋（背着包单手存取）','B.九字钩扣大开口','C.手机隐蔽袋','D.肩带D环','E.前置办公分仓'],answer:'ABCD'},
+{id:'f2q6',text:'TRUFFLE PRO TOTE 的功能模块中包含以下哪些？',options:['A.自锁五金拉链','B.侧面水杯插袋','C.独立双仓结构','D.左右D环系统','E.PEBBLE锁具系统'],answer:'ABD'},
+{id:'f2q7',text:'以下关于 PISTACHIO PLUS 双U框主仓的描述，正确的是？',options:['A.是20寸登机箱的独特设计','B.双U框开口比传统单拉链多出约40%开口面积','C.配备一字拉链网布袋','D.配备磁吸开口'],answer:'BC'},
+{id:'f2q8',text:'以下关于 PISTACHIO PLUS 售后政策的描述，正确的是？',options:['A.5年联保','B.3年联保','C.ITO CARE无忧换新：360天内1次免费换新','D.ITO CARE无忧换新：180天内1次免费换新'],answer:'AC'},
+{id:'f2q9',text:'以下哪些产品使用了 camira Era 面料？',options:['A.PISTACHIO PLUS','B.TRUFFLE PRO TOTE','C.TRUFFLE PRO BACKPACK','D.WEEKENDER','E.MYCENA LITE'],answer:'BC'},
+{id:'f2q10',text:'以下关于自锁拉链的描述，正确的有？',options:['A.拉头自带锁定机构','B.闭合后自动锁死','C.需要额外挂锁才能锁住','D.不会在背负或行走过程中无意滑开','E.仅用于TRUFFLE PRO TOTE产品'],answer:'ABD'}
+]},
+{type:'填空',title:'填空题',count:10,scorePerQuestion:1,totalScore:10,questions:[
+{id:'f3q1',text:'PISTACHIO PLUS 20寸登机箱的零售价是______（填写数字）',blankAnswer:'1690'},
+{id:'f3q2',text:'WEEKENDER 使用的面料品牌是______',blankAnswer:'CORDURA Naturalle'},
+{id:'f3q3',text:'TRUFFLE PRO TOTE 的容积是______L',blankAnswer:'18'},
+{id:'f3q4',text:'PISTACHIO PLUS 25/29寸托运箱中，"下拨"对应______模式',blankAnswer:'前开'},
+{id:'f3q5',text:'WEEKENDER 旅行袋的配色方案包括屿灰、______、羽白',blankAnswer:'瑾紫'},
+{id:'f3q6',text:'TRUFFLE PRO TOTE 的净重为______kg',blankAnswer:'0.8'},
+{id:'f3q7',text:'TRUFFLE PRO BACKPACK 的五金拉链全部采用______拉链',blankAnswer:'自锁'},
+{id:'f3q8',text:'WEEKENDER 的容积为______L',blankAnswer:'36'},
+{id:'f3q9',text:'PISTACHIO PLUS 25寸行李箱的锁具叫______锁',blankAnswer:'分体集成海关'},
+{id:'f3q10',text:'ITO CARE无忧换新服务，常规产品可在订单完成后______天内享受1次免费换新',blankAnswer:'360'}
+]},
+{type:'简答',title:'简答题',count:5,scorePerQuestion:6,totalScore:30,questions:[
+{id:'f4q1',text:'在云端商务直播间，如果你是ITO销售人员，面对一位26岁、经常坐飞机短途商务出差的新锐白领，你会推荐哪个行李箱？请从产品卖点与用户需求匹配的角度，说明推荐思路。',maxScore:6,scoringPoints:[{point:'推荐20寸登机免托运',score:1.5},{point:'颜值匹配职场形象（特调颜色简约高级）',score:1},{point:'前开盖仓快取电脑/文件+隐私保护',score:1.5},{point:'越负重越丝滑的轮子',score:0.5},{point:'360天换新+5年维修售后保障',score:0.5},{point:'结合用户场景表达',score:1}]},
+{id:'f4q2',text:'客户问TRUFFLE PRO TOTE、TRUFFLE PRO BACKPACK和WEEKENDER这三个包袋怎么选，你怎么回答？',maxScore:6,scoringPoints:[{point:'WEEKENDER→周末旅行/健身/短途',score:1.5},{point:'TOTE→商务差旅/见客户/职业女性',score:1.5},{point:'BACKPACK→日常通勤/电脑多/解放双手',score:1.5},{point:'看用户使用场景推荐，不强行推销',score:1.5}]},
+{id:'f4q3',text:'如果客户在两个颜色之间纠结，你会怎么帮他做决定？',maxScore:4,scoringPoints:[{point:'结合用户ID/头像/互动揣摩穿搭风格',score:1.5},{point:'推荐适合用户的颜色而非百搭色',score:1.5},{point:'接近色→推荐耐看百搭经典色',score:1}]},
+{id:'f4q4',text:'你认为 TRUFFLE PRO BACKPACK 的用户画像是怎样的（具体回答，例如年龄性别职业收入等）？他/她为什么会买这个产品？',maxScore:8,scoringPoints:[{point:'25-45岁一线/新一线高频通勤职场人',score:1.5},{point:'四快取口袋通勤转场更顺手',score:1.5},{point:'主仓分区细腻无需翻找',score:1},{point:'简约有质感多场景适配',score:1},{point:'面料三防+7A抗菌不用打理',score:1.5},{point:'售后有保障使用更安心',score:1.5}]},
+{id:'f4q5',text:'客户问 WEEKENDER 看起来就是个旅行袋，为什么卖¥1,590？你怎么回答？',maxScore:6,scoringPoints:[{point:'CORDURA面料+三防涂层（高端料子耐脏好打理）',score:1.5},{point:'大U框开口+7大分区+独立鞋仓（容量大且好找）',score:1.5},{point:'360天换新+5年免费维修',score:1},{point:'话术有说服力（好产品买时贵用起来全是好）',score:2}]}
+]}]};
+
+// ============================================================
+//  随机出题引擎
+// ============================================================
+function shuffle(arr,n){var a=[].concat(arr);for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t}return a.slice(0,n)}
+function buildExam(){var s=shuffle(QUESTION_POOLS.single,25);var m=shuffle(QUESTION_POOLS.multi,10);var f=shuffle(QUESTION_POOLS.fill,15);var e=shuffle(QUESTION_POOLS.essay,5);return{title:'ITO 随机抽题',totalScore:100,passScore:80,sections:[
+{type:'单选',title:'单选题',count:25,scorePerQuestion:1.2,totalScore:30,questions:s.map(function(q,i){return{id:'s1q'+(i+1),text:q.text,options:q.options,answer:q.answer}})},
+{type:'多选',title:'多选题',count:10,scorePerQuestion:3,totalScore:30,questions:m.map(function(q,i){return{id:'s2q'+(i+1),text:q.text,options:q.options,answer:q.answer}})},
+{type:'填空',title:'填空题',count:15,scorePerQuestion:1,totalScore:15,questions:f.map(function(q,i){return{id:'s3q'+(i+1),text:q.text,blankAnswer:q.answer}})},
+{type:'简答',title:'简答题',count:5,scorePerQuestion:5,totalScore:25,questions:e.map(function(q,i){return{id:'s4q'+(i+1),text:q.text,maxScore:q.maxScore,scoringPoints:q.points.map(function(p){return{point:p.p,score:p.s}})}})}
+]};}
+
+// ============================================================
+//  当前考卷与切屏追踪
+// ============================================================
+var EXAM_DATA = buildExam();
+var switchCount = 0;
+document.addEventListener('visibilitychange',function(){if(document.hidden){switchCount++;showToast('⚠切屏'+switchCount+'次')}});
+var WRONG_ANSWERS = [];
+var AI_ENDPOINTS = {deepseek:{url:'https://api.deepseek.com/v1/chat/completions',model:'deepseek-chat'},gemini:{urlBase:'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent'},kimi:{url:'https://api.moonshot.cn/v1/chat/completions',model:'moonshot-v1-8k'},chatanywhere:{url:'https://api.chatanywhere.tech/v1/chat/completions',model:'gpt-3.5-turbo'}};
+
+// ============================================================
+//  渲染引擎
+// ============================================================
+function showToast(m){var t=document.getElementById('toastEl');t.textContent=m;t.style.opacity='1';clearTimeout(t._timer);t._timer=setTimeout(function(){t.style.opacity='0'},3000)}
+function getExam(){return document.getElementById('examTypeSelect').value==='fixed'?EXAM_FIXED:EXAM_DATA}
+function secCls(t){return t==='单选'?'single':t==='多选'?'multi':t==='填空'?'fill':'essay'}
+
+function switchExam(){
+  EXAM_DATA = buildExam();
+  renderAll();
+  document.getElementById('sampleBtn').style.display='none';
+}
+
+function init(){
+  // 内置DeepSeek Key
+  if(!localStorage.getItem('ai_key_deepseek'))localStorage.setItem('ai_key_deepseek','sk-738f6fd966504bb98a6dc4ab27510045');
+  var p=new URLSearchParams(location.search),k=p.get('key')||p.get('api_key')||'',m=p.get('model')||'';
+  if(k){var md=m||'deepseek';localStorage.setItem('ai_key_'+md,k);document.getElementById('modelSelect').value=md}
+  if(m)document.getElementById('modelSelect').value=m;
+  ['feishuName','feishuDept'].forEach(function(id){var v=localStorage.getItem(id);if(v)document.getElementById(id).value=v});
+  document.getElementById('feishuName').addEventListener('input',function(){if(this.value.trim())localStorage.setItem('feishuName',this.value)});
+  document.getElementById('feishuDept').addEventListener('input',function(){if(this.value.trim())localStorage.setItem('feishuDept',this.value)});
+  renderAll();
+  document.getElementById('sampleBtn').style.display='none';
+  lucide.createIcons();
+}
+
+function renderAll(){renderQuestions();document.getElementById('loadStatus').textContent='考卷已加载';lucide.createIcons()}
+
+function renderQuestions(){var c=document.getElementById('mainContent'),h='',exam=getExam(),ai=exam.sections;h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><div><div style="font-size:13px;color:var(--text-secondary)">'+(exam.title||'ITO 新品考试')+' · '+exam.totalScore+'分 · '+(exam.passScore||80)+'分及格</div></div><div style="font-size:11px;color:var(--text-tertiary)">'+(ai[0].count+'单选 · '+ai[1].count+'多选 · '+ai[2].count+'填空 · '+ai[3].count+'简答')+'</div></div>';
+  ai.forEach(function(s,si){
+    var cls=secCls(s.type),icon=s.type==='单选'?'circle':s.type==='多选'?'check-square':s.type==='填空'?'edit-3':'message-square';
+    h+='<div class="sec-hdr '+cls+'"><span><i data-lucide="'+icon+'" style="width:13px;height:13px"></i> '+s.title+'</span><span class="sc">'+s.count+'题 · '+(s.totalScore||(s.count*(s.scorePerQuestion||1)))+'分</span></div>';
+    s.questions.forEach(function(q,qi){
+      var tid = secCls(s.type);
+      h+='<div class="q-card"><div class="q-card-header"><span class="q-card-tag '+tid+'">'+(s.type==='简答'?'简答'+q.maxScore+'分':s.type==='填空'?'填空':s.type==='单选'?'单选':'多选')+'</span><span style="font-size:10px;color:var(--text-tertiary)">Q'+(qi+1)+'</span></div>';
+      h+='<div class="q-card-text">'+q.text+'</div>';
+      h+='<div class="q-card-body">';
+      if(s.type==='单选'){
+        h+='<div style="font-size:11px;color:var(--gold);margin-bottom:6px">点选唯一答案（单选）</div>';
+        h+='<div class="choices" id="choices-'+q.id+'">';
+        q.options.forEach(function(o,oi){var v=String.fromCharCode(65+oi);h+='<div class="choice-item" data-q="'+q.id+'" data-val="'+v+'" onclick="clickSingle(\''+q.id+'\',\''+v+'\')" style="border-radius:20px;padding:6px 16px"><span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border:1px solid var(--border);border-radius:50%;margin-right:6px;font-size:11px" class="radio-icon">'+v+'</span>'+o.substring(2)+'</div>'});
+        h+='</div><input type="hidden" id="ans-'+q.id+'" value="">';
+      }else if(s.type==='多选'){
+        h+='<div style="font-size:11px;color:var(--danger);margin-bottom:6px">勾选多个（多选）<span class="choice-clear" onclick="clearMulti(\''+q.id+'\')" style="margin-left:10px">清空</span></div>';
+        h+='<div class="choices" id="choices-'+q.id+'">';
+        q.options.forEach(function(o,oi){var v=String.fromCharCode(65+oi);h+='<div class="choice-item" data-q="'+q.id+'" data-val="'+v+'" onclick="clickMulti(\''+q.id+'\',\''+v+'\')" style="padding:6px 16px"><span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border:1px solid var(--border);border-radius:4px;margin-right:6px;font-size:11px;background:var(--bg)" class="check-icon">'+v+'</span>'+o.substring(2)+'</div>'});
+        h+='</div><input type="hidden" id="ans-'+q.id+'" value="">';
+      }else if(s.type==='填空'){
+        h+='<div class="fill-row"><input class="fill-input" id="ans-'+q.id+'" placeholder="填写答案..." autocomplete="off"></div>';
+      }else{
+        h+='<textarea class="essay-input" id="ans-'+q.id+'" placeholder="粘贴主播回答..."></textarea>';
+      }
+      h+='</div></div>';
+    });
+  });
+  h+='<div class="actions"><button class="btn btn-primary" onclick="startGrading()" id="gradeBtn"><i data-lucide="brain" style="width:13px;height:13px"></i> AI 评分</button><button class="btn" onclick="clearAll()"><i data-lucide="trash-2" style="width:13px;height:13px"></i> 清空</button><button class="btn" id="sampleBtn" onclick="fillSample()" style="display:none"><i data-lucide="file-edit" style="width:13px;height:13px"></i> 样例</button><span class="actions-msg"><i data-lucide="info" style="width:11px;height:11px"></i> 客观题点选，简答题粘贴</span></div>';
+  h+='<div class="loading" id="loadingIndicator"><div class="spinner"></div><p>AI 评分中...</p></div>';
+  // Result area
+  h+='<div class="result" id="resultArea"><div class="r-grid" id="scoreSummary"></div>';
+  h+='<div class="tabs" id="resultTabs"><div class="tab active" data-tab="score" onclick="switchResultTab(\'score\')"><i data-lucide="clipboard-list" style="width:12px;height:12px"></i>评分结果</div><div class="tab" data-tab="wrong" onclick="switchResultTab(\'wrong\')"><i data-lucide="x-circle" style="width:12px;height:12px"></i>错题库<span id="wrongCount" style="margin-left:4px;font-size:10px;color:var(--danger)"></span></div><div class="tab" data-tab="kb" onclick="switchResultTab(\'kb\')"><i data-lucide="book" style="width:12px;height:12px"></i>知识库</div></div>';
+  h+='<div class="tab-content active" id="tab-score"><div id="resultDetails"></div><div id="swSection" style="display:none"><div class="sw-grid"><div class="sw-box"><div class="sw-title" style="color:var(--success)"><i data-lucide="sparkles" style="width:12px;height:12px"></i>优势</div><div class="tags" id="strengthsTags"></div></div><div class="sw-box"><div class="sw-title" style="color:var(--danger)"><i data-lucide="target" style="width:12px;height:12px"></i>待改进</div><div class="tags" id="weaknessesTags"></div></div></div><div class="fb-box" id="overallFeedback"></div></div><div class="actions" style="margin-top:12px"><button class="btn btn-sm" onclick="exportResult()"><i data-lucide="download" style="width:12px;height:12px"></i>导出报告</button><button class="btn btn-sm" onclick="document.getElementById(\'resultArea\').classList.remove(\'visible\')"><i data-lucide="x" style="width:12px;height:12px"></i>关闭</button></div></div>';
+  h+='<div class="tab-content" id="tab-wrong"><div id="wrongList"></div></div>';
+  h+='<div class="tab-content" id="tab-kb"><div class="kb-grid" id="kbGrid"></div></div></div>';
+  c.innerHTML = h;
+  renderKB();
+  lucide.createIcons();
+}
+
+// ============================================================
+//  点击选择（单选+多选）
+// ============================================================
+function clickSingle(qid,val){
+  document.querySelectorAll('#choices-'+qid+' .choice-item').forEach(function(e){e.classList.remove('selected')});
+  var el=document.querySelector('#choices-'+qid+' .choice-item[data-val="'+val+'"]');
+  if(el){el.classList.add('selected')}
+  document.getElementById('ans-'+qid).value = val;
+}
+function clickMulti(qid,val){
+  var el=document.querySelector('#choices-'+qid+' .choice-item[data-val="'+val+'"]');
+  if(!el)return;
+  el.classList.toggle('multi-sel');
+  var vals=[];document.querySelectorAll('#choices-'+qid+' .choice-item.multi-sel').forEach(function(e){vals.push(e.getAttribute('data-val'))});
+  document.getElementById('ans-'+qid).value = vals.sort().join('');
+}
+function clearMulti(qid){
+  document.querySelectorAll('#choices-'+qid+' .choice-item').forEach(function(e){e.classList.remove('multi-sel')});
+  document.getElementById('ans-'+qid).value = '';
+}
+
+// ============================================================
+//  收集答案 & 评分
+// ============================================================
+function collectAnswers(){var a=[],exam=getExam(),miss=0;exam.sections.forEach(function(s){s.questions.forEach(function(q){var v=(document.getElementById('ans-'+q.id)?.value||'').trim();if(!v&&s.type!=='简答')miss++;a.push({id:q.id,text:q.text.length>80?q.text.substring(0,80)+'…':q.text,type:s.type==='简答'?'subjective':'objective',answer:v||'未作答'})})});if(miss>0&&!confirm('有'+miss+'道客观题未作答，确定继续？'))return null;return a}
+function buildPrompt(answers){var p='# ITO考试评分\n\n## 评分规则\n',exam=getExam();exam.sections.forEach(function(s){if(s.type==='单选'){p+='### 单选每题1.2分共'+s.count+'题'+s.totalScore+'分\n';s.questions.forEach(function(q){p+=q.id+':'+q.answer+'\n'})}else if(s.type==='多选'){p+='### 多选每题3分共'+s.count+'题'+s.totalScore+'分\n';s.questions.forEach(function(q){p+=q.id+':'+q.answer+'\n'})}else if(s.type==='填空'){p+='### 填空每题1分共'+s.count+'题'+s.totalScore+'分\n';s.questions.forEach(function(q){p+=q.id+':'+q.blankAnswer+'\n'})}else{p+='### 简答\n';s.questions.forEach(function(q){p+=q.id+'（'+q.maxScore+'分）:';q.scoringPoints.forEach(function(sp){p+='['+sp.score+'分]'+sp.point+';'});p+='\n'})}});p+='\n## 学员答案\n';answers.forEach(function(sa){p+=sa.id+':'+sa.answer+'\n'});p+='\n## 输出JSON格式\n{"scores":{"singleChoice":{"total":'+exam.sections[0].totalScore+',"earned":0,"details":{}},"multipleChoice":{"total":'+exam.sections[1].totalScore+',"earned":0,"details":{}},"fillBlank":{"total":'+exam.sections[2].totalScore+',"earned":0,"details":{}},"essay":{"total":'+exam.sections[3].totalScore+',"earned":0,"details":{"'+exam.sections[3].questions[0].id+'":{"score":0,"feedback":"评语","missedPoints":[]}}}},"summary":{"totalEarned":0,"passed":false,"strengths":[],"weaknesses":[],"overallFeedback":""}}';return p}
+async function callAI(provider,prompt){var k=localStorage.getItem('ai_key_'+provider);if(!k)throw new Error('请先配置API Key');var ep=AI_ENDPOINTS[provider];if(!ep)throw new Error('不支持的模型');var url,body,headers;if(provider==='gemini'){url=ep.urlBase+'?key='+encodeURIComponent(k);headers={'Content-Type':'application/json'};body=JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.3,maxOutputTokens:8192}})}else{url=ep.url;headers={'Authorization':'Bearer '+k,'Content-Type':'application/json'};body=JSON.stringify({model:ep.model,messages:[{role:'system',content:'你是一个严格的考试评分专家。输出纯JSON，不要任何markdown。'},{role:'user',content:prompt}],temperature:0.3,max_tokens:8192})}var r=await fetch(url,{method:'POST',headers,body});var raw=await r.text();if(!r.ok)throw new Error('AI返回状态码'+r.status+': '+raw.substring(0,200));var j=JSON.parse(raw);var txt='';if(provider==='gemini'){txt=j.candidates?.[0]?.content?.parts?.[0]?.text||''}else{txt=j.choices?.[0]?.message?.content||''}if(!txt)throw new Error('AI返回为空');return txt}
+async function startGrading(){var a=collectAnswers();if(!a)return;var pv=document.getElementById('modelSelect').value;var btn=document.getElementById('gradeBtn'),loading=document.getElementById('loadingIndicator'),ra=document.getElementById('resultArea');btn.disabled=true;btn.textContent='评分中...';loading.classList.add('active');ra.classList.remove('visible');try{var prompt=buildPrompt(a);var txt=await callAI(pv,prompt);var clean=txt.replace(/```json\s*/gi,'').replace(/```\s*/g,'').trim();var jm=clean.match(/\{[\s\S]*\}/);if(!jm)throw new Error('AI未返回JSON');var jsonStr=jm[0].replace(/,\s*}/g,'}').replace(/,\s*\]/g,']');var result=JSON.parse(jsonStr);displayResults(result,a)}catch(e){ra.classList.add('visible');document.getElementById('scoreSummary').innerHTML='<div class="empty"><p>❌ '+e.message+'</p></div>'}finally{btn.disabled=false;btn.textContent='AI 评分';loading.classList.remove('active')}}
+function switchResultTab(id){document.querySelectorAll('#resultTabs .tab').forEach(function(t){t.classList.toggle('active',t.getAttribute('data-tab')===id)});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.toggle('active',t.id==='tab-'+id)})}
+function displayResults(data,answers){var ra=document.getElementById('resultArea');ra.classList.add('visible');WRONG_ANSWERS=[];var s=data.scores;if(!s){document.getElementById('scoreSummary').innerHTML='<div class="empty"><p>⚠ AI返回异常</p></div>';return}var total=(s.singleChoice?.earned||0)+(s.multipleChoice?.earned||0)+(s.fillBlank?.earned||0)+(s.essay?.earned||0);var passed=total>=80;document.getElementById('scoreSummary').innerHTML='<div class="r-card total"><div class="r-card-val">'+total+'</div><div class="r-card-lbl">总分</div><span class="r-pass" style="background:'+(passed?'rgba(22,163,74,0.15)':'rgba(220,38,38,0.15)')+';color:'+(passed?'var(--success)':'var(--danger)')+'">'+(passed?'✅及格':'❌不及格')+'</span></div><div class="r-card"><div class="r-card-val" style="color:#2563eb">'+(s.singleChoice?.earned||0)+'/'+(s.singleChoice?.total||0)+'</div><div class="r-card-lbl">单选</div></div><div class="r-card"><div class="r-card-val" style="color:#dc2626">'+(s.multipleChoice?.earned||0)+'/'+(s.multipleChoice?.total||0)+'</div><div class="r-card-lbl">多选</div></div><div class="r-card"><div class="r-card-val" style="color:#7c3aed">'+(s.fillBlank?.earned||0)+'/'+(s.fillBlank?.total||0)+'</div><div class="r-card-lbl">填空</div></div><div class="r-card"><div class="r-card-val" style="color:#16a34a">'+(s.essay?.earned||0)+'/'+(s.essay?.total||0)+'</div><div class="r-card-lbl">简答</div></div>';
+  var dh='',exam=getExam();
+  // 客观题详情
+  exam.sections[0].questions.forEach(function(q){var ua=(document.getElementById('ans-'+q.id)?.value||'').trim().toUpperCase(),ok=ua===q.answer;dh+='<div class="res-item '+(ok?'correct':'wrong')+'"><div class="res-hdr"><span><b>'+q.id+'</b> '+(q.text.length>50?q.text.substring(0,50)+'…':q.text)+'</span><span style="font-weight:600;color:'+(ok?'var(--success)':'var(--danger)')+'">'+(ok?'+1.2':'+0')+'</span></div><div class="res-answer">你的答案: <b>'+(ua||'未答')+'</b></div>'+(ok?'':'<div class="res-answer" style="color:var(--success)">正确答案: <b>'+q.answer+'</b></div>')+'</div>';if(!ok&&ua)WRONG_ANSWERS.push({qid:q.id,text:q.text,options:q.options,yours:ua||'未答',correct:q.answer,type:'单选'})});
+  exam.sections[1].questions.forEach(function(q){var ua=(document.getElementById('ans-'+q.id)?.value||'').trim().toUpperCase(),cs=[].concat(ua.split('')).sort().join(''),ans=[].concat(q.answer.split('')).sort().join(''),ok=ua.length>0&&cs===ans;dh+='<div class="res-item '+(ok?'correct':'wrong')+'"><div class="res-hdr"><span><b>'+q.id+'</b> '+(q.text.length>50?q.text.substring(0,50)+'…':q.text)+'</span><span style="font-weight:600;color:'+(ok?'var(--success)':'var(--danger)')+'">'+(ok?'+3':'+0')+'</span></div><div class="res-answer">你的答案: <b>'+(ua||'未答')+'</b></div>'+(ok?'':'<div class="res-answer" style="color:var(--success)">正确答案: <b>'+q.answer+'</b></div>')+'</div>';if(!ok&&ua)WRONG_ANSWERS.push({qid:q.id,text:q.text,options:q.options,yours:ua||'未答',correct:q.answer,type:'多选'})});
+  function matchFill(ua,ca){var u=ua.trim().toLowerCase(),c=ca.trim().toLowerCase();if(u===c)return true;['元','kg','g','l','个','色','次','寸','mm','cm','m','%','年','天','英寸','月'].forEach(function(unit){u=u.split(unit).join('')});if(u===c)return true;if(u.indexOf(c)>=0)return true;return false}
+  exam.sections[2].questions.forEach(function(q){var ua=(document.getElementById('ans-'+q.id)?.value||'').trim(),ok=matchFill(ua,q.blankAnswer);dh+='<div class="res-item '+(ok?'correct':'wrong')+'"><div class="res-hdr"><span><b>'+q.id+'</b> '+(q.text.length>50?q.text.substring(0,50)+'…':q.text)+'</span><span style="font-weight:600;color:'+(ok?'var(--success)':'var(--danger)')+'">'+(ok?'+1':'+0')+'</span></div><div class="res-answer">你的答案: <b>'+(ua||'未答')+'</b></div>'+(ok?'':'<div class="res-answer" style="color:var(--success)">正确答案: <b>'+q.blankAnswer+'</b></div>')+'</div>';if(!ok&&ua)WRONG_ANSWERS.push({qid:q.id,text:q.text,yours:ua||'未答',correct:q.blankAnswer,type:'填空'})});
+  // 简答题
+  if(s.essay?.details){dh+='<div class="sec-hdr essay" style="margin-top:20px"><span>简答题评分详情</span></div>';exam.sections[3].questions.forEach(function(q,i){var d=s.essay.details[q.id]||{score:0,feedback:'AI未评分',missedPoints:[]};var es=d.score||0,ef=d.feedback||'AI未评分',em=d.missedPoints||[];var cl=es/q.maxScore>=0.6?'correct':es/q.maxScore>=0.4?'partial':'wrong';dh+='<div class="res-item '+cl+'"><div class="res-hdr"><span><b>简答'+(i+1)+'（'+q.maxScore+'分）</b></span><span style="font-weight:600;color:'+(cl==='correct'?'var(--success)':cl==='partial'?'var(--warning)':'var(--danger)')+'">'+es+'/'+q.maxScore+'</span></div><div class="res-feedback"><b>AI评语：</b>'+ef+'</div>'+(em.length?'<div class="res-feedback" style="color:var(--danger)"><b>遗漏：</b>'+em.join('、')+'</div>':'')+'</div>';if(es/q.maxScore<0.6)WRONG_ANSWERS.push({qid:q.id,text:q.text,yours:'见AI评分',correct:q.scoringPoints.map(function(p){return'['+p.score+'分]'+p.point}).join('；'),type:'简答'})})}
+  document.getElementById('resultDetails').innerHTML=dh;
+  // 错题库计数
+  var wc=document.getElementById('wrongCount');if(wc)wc.textContent=WRONG_ANSWERS.length?'('+WRONG_ANSWERS.length+')':'';
+  // 综合评估
+  if(data.summary){document.getElementById('swSection').style.display='block';document.getElementById('strengthsTags').innerHTML=(data.summary.strengths||[]).map(function(s){return'<span class="tag tag-good">'+s+'</span>'}).join('')||'<span style="font-size:11px;color:var(--text-tertiary)">暂无</span>';document.getElementById('weaknessesTags').innerHTML=(data.summary.weaknesses||[]).map(function(s){return'<span class="tag tag-bad">'+s+'</span>'}).join('')||'<span style="font-size:11px;color:var(--text-tertiary)">暂无</span>';document.getElementById('overallFeedback').textContent=data.summary.overallFeedback||''}
+  switchResultTab('score');
+  // 更新错题库
+  renderWrong();
+  document.getElementById('sampleBtn').style.display='inline-flex';
+  submitToFeishu(total,passed,data.summary?.overallFeedback||'');
+}
+
+// ============================================================
+//  错题库
+// ============================================================
+function renderWrong(){var c=document.getElementById('wrongList');if(!c)return;if(!WRONG_ANSWERS.length){c.innerHTML='<div class="empty"><i data-lucide="check-circle"></i><p>本次全部答对，没有错题 🎉</p></div>';lucide.createIcons();return}var h='<div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">共 '+WRONG_ANSWERS.length+' 道错题</div>';WRONG_ANSWERS.forEach(function(w){h+='<div class="res-item wrong" style="margin-bottom:8px"><div class="res-hdr"><span style="font-size:12px;font-weight:500">'+(w.type||'题')+'</span></div><div style="font-size:12px;line-height:1.5;margin:4px 0">'+w.text+'</div>';if(w.options)h+='<div style="font-size:10px;color:var(--text-tertiary);margin-bottom:4px">'+w.options.join(' · ')+'</div>';h+='<div class="res-answer">你的答案: <b style="color:var(--danger)">'+w.yours+'</b></div><div class="res-answer" style="color:var(--success)">正确答案: <b>'+w.correct+'</b></div></div>'});c.innerHTML=h;lucide.createIcons()}
+
+// ============================================================
+//  产品知识库
+// ============================================================
+function renderKB(){var c=document.getElementById('kbGrid');if(!c)return;var kb={};
+kb['PLUS 20寸登机箱']=['零售价: ¥1,690','配色: 豆绿/棕褐/炭黑/烟白','独立双仓: 前仓(电脑)+主仓(衣物)物理隔离','前仓U型快取层+绑带,可放16寸笔记本','前盖快取证件口袋','PEBBLE翻盖式海关密码锁'];
+kb['PLUS 25/29寸托运箱']=['25寸¥2,190 / 29寸¥2,490','分体集成海关锁: 上拨中开/下拨前开','前盖深仓通仓: 站立取物不用掀','U框隐私层: 贵重物品仓中仓','分类收纳口袋系统: 弹力袋+立体袋','U框固定系统: 防止物品晃动'];
+kb['TRUFFLE PRO TOTE']=['零售价: ¥1,290','容量: 18L / 净重: 0.8kg','面料: camira Era英国进口','自锁五金拉链: 拉上即锁死','背面隐藏拉链仓/+磁吸快取口袋','左右D环可调肩带: 手提/单肩/斜挎'];
+kb['TRUFFLE PRO BACKPACK']=['12L¥1,090(装14寸电脑) / 20L¥1,390(装16寸)','正面顶部快取口袋: 背着单手存取','九字钩扣大开口: 配合U型开口流畅','手机隐蔽袋+肩带D环','配色: 烟黑/雾灰/棕褐'];
+kb['WEEKENDER']=['零售价: ¥1,590 / 容量: 36L / 净重: 1.0kg','面料: CORDURA® Naturalle','大U框主仓开口+7大分区','独立鞋仓/脏衣隔离','超纤皮提手+品牌标识+卸挂绳收纳包'];
+kb['共性工艺']=['PROTECTION+三防: 防泼水/防油污/防指纹','7A长效抗菌里布','自锁五金拉链','拉杆箱插袋系统(包袋产品背面)'];
+kb['售后政策']=['PISTACHIO PLUS: 5年联保(功能性损坏)','ITO CARE: 360天内1次免费换新'];
+var h='';for(var k in kb){h+='<div class="kb-card"><div class="kb-card-hdr">'+k+'</div><div class="kb-card-body">';kb[k].forEach(function(v){h+='<div class="kb-item">· '+v+'</div>'});h+='</div></div>'}c.innerHTML=h}
+
+// ============================================================
+//  飞书提交
+// ============================================================
+async function submitToFeishu(total,passed,fb){var en=localStorage.getItem('feishu_enable');if(en!=='yes')return;var nm=document.getElementById('feishuName').value.trim();if(!nm){showToast('请先填写主播姓名');return}var dp=document.getElementById('feishuDept').value.trim();try{var api='https://ito-ai-grading.vercel.app/api/submit-score';var r=await fetch(api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:nm,department:dp,totalScore:total,passed:passed,feedback:fb||'',duration:0,switches:switchCount})});var d=await r.json();if(d.code===0){showToast('✅ 结果已写入飞书')}else{showToast('⚠ 飞书写入失败')}}catch(e){showToast('⚠ 飞书同步失败: '+e.message)}}
+function exportResult(){var t=document.querySelector('.r-card.total .r-card-val');var d=document.getElementById('resultDetails').innerText;var fb=document.getElementById('overallFeedback').textContent;var r='ITO评分报告\n评分时间:'+new Date().toLocaleString()+'\n模型:'+document.getElementById('modelSelect').value+'\n总分:'+(t?.textContent||'N/A')+'\n\n--- 详细评分 ---\n'+d+'\n\n--- 综合评语 ---\n'+fb+'\n\n--- ITO AI评分系统 ---';var b=new Blob([r],{type:'text/plain;charset=utf-8'});var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='ITO评分报告_'+new Date().toISOString().slice(0,10)+'.txt';a.click()}
+function clearAll(){if(!confirm('确定清空？'))return;document.querySelectorAll('.q-card .fill-input,.q-card .essay-input').forEach(function(e){e.value=''});document.querySelectorAll('.choice-item').forEach(function(e){e.classList.remove('selected','multi-sel')});document.querySelectorAll('input[type="hidden"]').forEach(function(e){e.value=''})}
+function fillSample(){document.querySelectorAll('.choice-item.selected').forEach(function(e){e.classList.remove('selected')});document.querySelectorAll('.choice-item.multi-sel').forEach(function(e){e.classList.remove('multi-sel')});document.querySelectorAll('.fill-input,.essay-input').forEach(function(e){e.value=''});document.querySelectorAll('input[type="hidden"]').forEach(function(e){e.value=''});function c(qid,v){document.querySelectorAll('.choice-item[data-q="'+qid+'"]').forEach(function(e){if(e.getAttribute('data-val')===v)e.click()})}var isF=document.getElementById('examTypeSelect').value==='fixed';if(isF){var s1=['B','B','C','B','C','B','D','B','B','C','C','B','B','C','C'];for(var i=1;i<=15;i++)c('f1q'+i,s1[i-1]);var s2=['ABCE','ACDE','ABDE','ABC','ABCD','ABD','BC','AC','BC','ABD'];for(var i=1;i<=10;i++)s2[i-1].split('').forEach(function(v){c('f2q'+i,v)});var f3=['1690','CORDURA Naturalle','18','前开','瑾紫','0.8','自锁','36','分体集成海关','360'];for(var i=1;i<=10;i++)document.getElementById('ans-f3q'+i).value=f3[i-1];var f4=['推荐plus 20寸。可登机免托运；前盖快取电脑保护隐私；颜值匹配职场形象；售后360天换新省心。','WEEKENDER→周末短途；TOTE→商务差旅；BACKPACK→日常通勤。看使用场景选。','结合用户ID/头像/互动揣摩穿搭风格。推荐适合用户的颜色而非百搭色。','25-45岁高频通勤职场人。四快取口袋通勤顺手；主仓分区无需翻找；简约适配多场景。','CORDURA面料+三防涂层；大U框开口+7大分区+鞋仓。360天换新5年维修。'];for(var i=1;i<=5;i++)document.getElementById('ans-f4q'+i).value=f4[i-1]}else{var sa=['C','C','C','C','B','B','B','B','C','B','D','B','C','B','B','A','B','B','C','C','A','B','D','B','D'];for(var i=1;i<=25;i++)c('s1q'+i,sa[i-1]);var ma=['ABDE','ABCE','ABCD','ABCD','ABCE','BC','ABD','BCD','BC','ABDE'];for(var i=1;i<=10;i++)ma[i-1].split('').forEach(function(v){c('s2q'+i,v)});for(var i=1;i<=15;i++)document.getElementById('ans-s3q'+i).value=['16','4','18','1390','36','1590','360','PROTECTION+','7A','拉杆箱插袋系统','2.8','4','1.11','0.8','5'][i-1];var s4=['推荐plus 20寸。登机免托运、前仓电脑快取、证件口袋、颜值高。','周末旅行WEEKENDER、商务TOTE、通勤BACKPACK。按场景选。','20寸独立双仓装电脑；25/29寸双模式站立取物。','自锁拉链拉上锁死不怕滑开。','12L通勤14寸电脑；20L差旅16寸电脑¥1390。'];for(var i=1;i<=5;i++)document.getElementById('ans-s4q'+i).value=s4[i-1]}}
+function openConfig(){document.getElementById('configModal').classList.add('active');document.getElementById('feishu-enable').value=localStorage.getItem('feishu_enable')||'no';document.getElementById('feishu-appid').value=localStorage.getItem('feishu_appid')||'';document.getElementById('feishu-secret').value=localStorage.getItem('feishu_secret')||'';document.getElementById('dot-feishu-enable').className=localStorage.getItem('feishu_enable')==='yes'?'dot on':'dot'}
+function closeConfig(){document.getElementById('configModal').classList.remove('active')}
+function saveConfig(){localStorage.setItem('feishu_enable',document.getElementById('feishu-enable').value);var a=document.getElementById('feishu-appid').value.trim();var s=document.getElementById('feishu-secret').value.trim();if(a)localStorage.setItem('feishu_appid',a);if(s)localStorage.setItem('feishu_secret',s);showToast('已保存');closeConfig()}
+init();
+</script>
+</body>
+</html>
