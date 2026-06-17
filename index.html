@@ -394,10 +394,10 @@ function init(){
   document.getElementById('feishuDept').addEventListener('input',function(){if(this.value.trim())localStorage.setItem('feishuDept',this.value)});
   renderAll();
   document.getElementById('sampleBtn').style.display='none';
-  lucide.createIcons();
+  try{lucide.createIcons()}catch(e){}
 }
 
-function renderAll(){renderQuestions();document.getElementById('loadStatus').textContent='考卷已加载';lucide.createIcons()}
+function renderAll(){renderQuestions();document.getElementById('loadStatus').textContent='考卷已加载';try{lucide.createIcons()}catch(e){}}
 
 function renderQuestions(){var c=document.getElementById('mainContent'),h='',exam=getExam(),ai=exam.sections;h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><div><div style="font-size:13px;color:var(--text-secondary)">'+(exam.title||'ITO 新品考试')+' · '+exam.totalScore+'分 · '+(exam.passScore||80)+'分及格</div></div><div style="font-size:11px;color:var(--text-tertiary)">'+(ai[0].count+'单选 · '+ai[1].count+'多选 · '+ai[2].count+'填空 · '+ai[3].count+'简答')+'</div></div>';
   ai.forEach(function(s,si){
@@ -436,7 +436,7 @@ function renderQuestions(){var c=document.getElementById('mainContent'),h='',exa
   h+='<div class="tab-content" id="tab-kb"><div class="kb-grid" id="kbGrid"></div></div></div>';
   c.innerHTML = h;
   renderKB();
-  lucide.createIcons();
+  try{lucide.createIcons()}catch(e){}
 }
 
 // ============================================================
@@ -492,7 +492,7 @@ function displayResults(data,answers){var ra=document.getElementById('resultArea
 // ============================================================
 //  错题库
 // ============================================================
-function renderWrong(){var c=document.getElementById('wrongList');if(!c)return;if(!WRONG_ANSWERS.length){c.innerHTML='<div class="empty"><i data-lucide="check-circle"></i><p>本次全部答对，没有错题 🎉</p></div>';lucide.createIcons();return}var h='<div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">共 '+WRONG_ANSWERS.length+' 道错题</div>';WRONG_ANSWERS.forEach(function(w){h+='<div class="res-item wrong" style="margin-bottom:8px"><div class="res-hdr"><span style="font-size:12px;font-weight:500">'+(w.type||'题')+'</span></div><div style="font-size:12px;line-height:1.5;margin:4px 0">'+w.text+'</div>';if(w.options)h+='<div style="font-size:10px;color:var(--text-tertiary);margin-bottom:4px">'+w.options.join(' · ')+'</div>';h+='<div class="res-answer">你的答案: <b style="color:var(--danger)">'+w.yours+'</b></div><div class="res-answer" style="color:var(--success)">正确答案: <b>'+w.correct+'</b></div></div>'});c.innerHTML=h;lucide.createIcons()}
+function renderWrong(){var c=document.getElementById('wrongList');if(!c)return;if(!WRONG_ANSWERS.length){c.innerHTML='<div class="empty"><i data-lucide="check-circle"></i><p>本次全部答对，没有错题 🎉</p></div>';try{lucide.createIcons()}catch(e){};return}var h='<div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">共 '+WRONG_ANSWERS.length+' 道错题</div>';WRONG_ANSWERS.forEach(function(w){h+='<div class="res-item wrong" style="margin-bottom:8px"><div class="res-hdr"><span style="font-size:12px;font-weight:500">'+(w.type||'题')+'</span></div><div style="font-size:12px;line-height:1.5;margin:4px 0">'+w.text+'</div>';if(w.options)h+='<div style="font-size:10px;color:var(--text-tertiary);margin-bottom:4px">'+w.options.join(' · ')+'</div>';h+='<div class="res-answer">你的答案: <b style="color:var(--danger)">'+w.yours+'</b></div><div class="res-answer" style="color:var(--success)">正确答案: <b>'+w.correct+'</b></div></div>'});c.innerHTML=h;try{lucide.createIcons()}catch(e){}}
 
 // ============================================================
 //  产品知识库
