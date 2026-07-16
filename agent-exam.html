@@ -78,7 +78,7 @@
 <div class="container">
 <div class="header">
   <h1>ITO · <span>AI Agent</span> 培训考试</h1>
-  <div class="subtitle">题库35题·随机抽20题·测理解和应用</div>
+  <div class="subtitle">题库50题·随机抽20题·含填空+场景理解题</div>
   <div class="badge">每题5分·满分100分</div>
 </div>
 
@@ -185,6 +185,42 @@ const QUESTION_BANK = [
     options:['都做同样任务','各司其职：库存/支付/客服分开','一个总揽所有','随机分配'], answer:1 },
   { id:'s10', type:'choice', tag:'场景', text:'用户说"行李箱轮子坏了"。训练不足的Agent直接回复"去维修店修"。问题在哪？',
     options:['回复太长','未确认购买信息和保修状态，未引导售后','语气不好','回复太短'], answer:1 },
+
+  // ---- 填空题：基础 ----
+  { id:'f1', type:'fill', tag:'基础', text:'Agent 的四大核心组件包括：LLM、Tools、______ 和 Memory。',
+    answers:['工具','Tool'] },
+  { id:'f2', type:'fill', tag:'基础', text:'Agent 的工作循环流程是：感知 → ______ → 行动 → 观察 → 循环。',
+    answers:['思考','推理','Thinking'] },
+  { id:'f3', type:'fill', tag:'基础', text:'Agent 中负责设定角色、行为和约束规则的是 ______。',
+    answers:['System Prompt','系统提示','系统提示词'] },
+  { id:'f4', type:'fill', tag:'基础', text:'Agent 使用 ______ 机制来判断用户意图并选择合适的工具函数调用。',
+    answers:['Function Calling','函数调用','工具调用'] },
+  { id:'f5', type:'fill', tag:'基础', text:'Agent 的 ______ 记忆存储长期知识（如向量数据库），短期记忆是当前对话上下文。',
+    answers:['长期','长时','外部'] },
+  { id:'f6', type:'fill', tag:'基础', text:'Agent 的 ______ 负责保存当前会话历史信息，保证上下文连贯。',
+    answers:['记忆','Memory','上下文'] },
+  { id:'f7', type:'fill', tag:'基础', text:'______ 是 Agent 用来调用外部功能的接口，例如搜索、计算。',
+    answers:['工具','Tool','工具函数','Function'] },
+  // ---- 填空题：进阶 ----
+  { id:'f8', type:'fill', tag:'进阶', text:'______ 提示技术引导 Agent 逐步推理，提高复杂问题的准确性。',
+    answers:['思维链','Chain-of-Thought','CoT','chain of thought'] },
+  { id:'f9', type:'fill', tag:'进阶', text:'Agent 的 ______ 机制让它能从失败中学习并改进后续行动。',
+    answers:['反思','Self-Reflection','自我反思','self reflection'] },
+  { id:'f10', type:'fill', tag:'进阶', text:'在 Multi-Agent 系统中，Agent 间通过 ______ 解决任务冲突和资源分配。',
+    answers:['协商','协调','通信','沟通'] },
+
+  // ---- 新增选择题：基础 ----
+  { id:'c16', type:'choice', tag:'基础', text:'以下哪种情况 Agent 应该主动向用户请求更多信息？',
+    options:['每次回复前都要问','任务描述不够明确或缺少关键信息时','只在出错时','从不'], answer:1 },
+  { id:'c17', type:'choice', tag:'基础', text:'Agent 执行多步任务时，中间结果应该怎么处理？',
+    options:['忽略只保留最终','传递给下一步骤作为上下文','保存到外部文件','展示给用户'], answer:1 },
+  // ---- 新增选择题：进阶 ----
+  { id:'c18', type:'choice', tag:'进阶', text:'设计 Agent 处理退款申请，以下哪种方案最安全合理？',
+    options:['Agent直接操作退款','Agent核实后执行退款','Agent生成工单由人工审核执行','告知无法退款'], answer:2 },
+  { id:'c19', type:'choice', tag:'进阶', text:'Agent需要访问多个外部系统时，最推荐的架构是？',
+    options:['把所有API写在一个工具','每个系统封装独立工具函数，按需调用','让Agent自学API文档','手工完成'], answer:1 },
+  { id:'c20', type:'choice', tag:'进阶', text:'以下哪个是评估 Agent 性能的关键指标？',
+    options:['回复速度','代码行数','任务完成率+工具调用准确率+推理合理性','LLM版本'], answer:2 },
 ];
 
 const TOTAL_QUESTIONS = 20;
@@ -268,12 +304,22 @@ function renderQuestions() {
           <label><input type="radio" name="q_${q.id}" value="true"> ✅ 正确</label>
           <label><input type="radio" name="q_${q.id}" value="false"> ❌ 错误</label>
         </div>`;
+    } else if (q.type === 'fill') {
+      div.innerHTML = `
+        <div class="q-header">
+          <span class="q-num">${num}.</span>
+          <span class="q-text">${q.text}</span>
+          <span class="q-tag ${tagClass}">${q.tag}</span>
+        </div>
+        <div class="fill-blank">
+          <input type="text" id="fill_${q.id}" placeholder="请输入答案" autocomplete="off">
+        </div>`;
     }
 
     container.appendChild(div);
   });
 
-  // 绑定选中高亮
+  // 绑定选中高亮和进度
   container.querySelectorAll('input[type="radio"]').forEach(r => {
     r.addEventListener('change', function() {
       this.closest('.options')?.querySelectorAll('label')?.forEach(l => l.classList.remove('selected'));
@@ -282,6 +328,9 @@ function renderQuestions() {
       updateProgress();
     });
   });
+  container.querySelectorAll('.fill-blank input').forEach(inp => {
+    inp.addEventListener('input', updateProgress);
+  });
 
   updateProgress();
 }
@@ -289,8 +338,13 @@ function renderQuestions() {
 function updateProgress() {
   let done = 0;
   currentQuestions.forEach(q => {
-    const sel = document.querySelector(`input[name="q_${q.id}"]:checked`);
-    if (sel) done++;
+    if (q.type === 'fill') {
+      const inp = document.getElementById('fill_' + q.id);
+      if (inp && inp.value.trim()) done++;
+    } else {
+      const sel = document.querySelector(`input[name="q_${q.id}"]:checked`);
+      if (sel) done++;
+    }
   });
   const pct = Math.round((done / TOTAL_QUESTIONS) * 100);
   document.getElementById('progressFill').style.width = pct + '%';
@@ -312,14 +366,21 @@ function gradeExam() {
   const details = [];
 
   currentQuestions.forEach(q => {
-    const sel = document.querySelector(`input[name="q_${q.id}"]:checked`);
-    const userAnswer = sel ? sel.value : '';
     let isCorrect = false;
+    let userAnswer = '';
 
     if (q.type === 'choice') {
+      const sel = document.querySelector(`input[name="q_${q.id}"]:checked`);
+      userAnswer = sel ? sel.value : '';
       isCorrect = String(userAnswer) === String(q.answer);
     } else if (q.type === 'judge') {
+      const sel = document.querySelector(`input[name="q_${q.id}"]:checked`);
+      userAnswer = sel ? sel.value : '';
       isCorrect = (userAnswer === 'true') === q.answer;
+    } else if (q.type === 'fill') {
+      const inp = document.getElementById('fill_' + q.id);
+      userAnswer = inp ? inp.value.trim() : '';
+      isCorrect = q.answers.some(a => userAnswer.toLowerCase() === a.toLowerCase());
     }
 
     if (isCorrect) { correct++; score += SCORE_PER_QUESTION; }
