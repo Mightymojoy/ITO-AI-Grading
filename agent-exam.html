@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ITO · AI Agent 培训考试</title>
+<style>
+  :root {
+    --gold: #c9a962;
+    --gold-light: #e8d5a0;
+    --gold-dark: #a88a3e;
+    --bg: #faf8f4;
+    --card-bg: #ffffff;
+    --text: #2c2c2c;
+    --text-light: #7a7a7a;
+    --border: #eee8dd;
+    --green: #5cb85c;
+    --red: #d9534f;
+    --blue: #5b8def;
+    --shadow: 0 2px 12px rgba(0,0,0,0.06);
+    --radius: 10px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 20px;
+  }
+  .container {
+    max-width: 800px;
+    margin: 0 auto;
+  }
+
+  /* Header */
+  .header {
+    text-align: center;
+    padding: 30px 20px;
+    background: linear-gradient(135deg, #fff, var(--bg));
+    border-bottom: 2px solid var(--gold-light);
+    margin-bottom: 30px;
+  }
+  .header h1 {
+    font-size: 26px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .header h1 span { color: var(--gold); }
+  .header .subtitle {
+    color: var(--text-light);
+    font-size: 14px;
+    margin-top: 6px;
+  }
+  .header .badge {
+    display: inline-block;
+    margin-top: 10px;
+    padding: 4px 16px;
+    background: var(--gold);
+    color: #fff;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  /* Info Form */
+  .info-form {
+    background: var(--card-bg);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+    box-shadow: var(--shadow);
+    border: 1px solid var(--border);
+    margin-bottom: 24px;
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .info-form .field {
+    flex: 1;
+    min-width: 180px;
+  }
+  .info-form label {
+    display: block;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-light);
+    margin-bottom: 4px;
+  }
+  .info-form input, .info-form select {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 14px;
+    outline: none;
+    transition: border .2s;
+    background: var(--bg);
+  }
+  .info-form input:focus, .info-form select:focus {
+    border-color: var(--gold);
+  }
+
+  /* Sections */
+  .section {
+    background: var(--card-bg);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    border: 1px solid var(--border);
+    margin-bottom: 20px;
+    overflow: hidden;
+  }
+  .section-header {
+    padding: 14px 20px;
+    font-size: 15px;
+    font-weight: 600;
+    background: linear-gradient(135deg, #fdfbf7, var(--bg));
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .section-header .count {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-light);
+    margin-left: auto;
+  }
+
+  /* Questions */
+  .question {
+    padding: 16px 20px;
+    border-bottom: 1px solid #f5f0e8;
+  }
+  .question:last-child { border-bottom: none; }
+  .question .q-title {
+    font-size: 14px;
+    font-weight: 500;
+    margin-bottom: 8px;
+    display: flex;
+    gap: 6px;
+  }
+  .question .q-title .q-num {
+    color: var(--gold);
+    font-weight: 600;
+    min-width: 24px;
+  }
+  .question .q-title .q-score {
+    font-size: 12px;
+    color: var(--text-light);
+    font-weight: 400;
+    margin-left: auto;
+  }
+  .question .q-title .q-tag {
+    font-size: 11px;
+    padding: 1px 8px;
+    border-radius: 10px;
+    background: #f0ede6;
+    color: var(--text-light);
+  }
+  .question .q-desc {
+    font-size: 14px;
+    color: var(--text);
+    margin-bottom: 10px;
+    line-height: 1.7;
+  }
+
+  /* Options */
+  .options { display: flex; flex-direction: column; gap: 6px; }
+  .options label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all .15s;
+  }
+  .options label:hover { background: #fdfbf7; border-color: var(--gold-light); }
+  .options input[type="radio"] { accent-color: var(--gold); }
+  .options label.selected {
+    background: #fdf8ee;
+    border-color: var(--gold);
+  }
+
+  /* True/false */
+  .tf-options { display: flex; gap: 12px; }
+  .tf-options label {
+    flex: 1;
+    text-align: center;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all .15s;
+  }
+  .tf-options label:hover { background: #fdfbf7; border-color: var(--gold-light); }
+  .tf-options input[type="radio"] { accent-color: var(--gold); }
+  .tf-options label.selected {
+    background: #fdf8ee;
+    border-color: var(--gold);
+  }
+
+  /* Fill blank */
+  .fill-blank input {
+    width: 100%;
+    max-width: 400px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 14px;
+    outline: none;
+    transition: border .2s;
+    background: var(--bg);
+  }
+  .fill-blank input:focus { border-color: var(--gold); }
+
+  /* Submit */
+  .submit-area {
+    text-align: center;
+    padding: 30px 20px 40px;
+  }
+  .btn-submit {
+    padding: 12px 48px;
+    font-size: 16px;
+    font-weight: 600;
+    color: #fff;
+    background: var(--gold);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all .2s;
+    letter-spacing: 2px;
+  }
+  .btn-submit:hover { background: var(--gold-dark); transform: translateY(-1px); }
+  .btn-submit:disabled { background: #ccc; cursor: not-allowed; transform: none; }
+
+  /* Result Modal */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal {
+    background: var(--card-bg);
+    border-radius: 14px;
+    padding: 32px 36px;
+    max-width: 480px;
+    width: 90%;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+    text-align: center;
+    animation: modalIn .3s ease;
+  }
+  @keyframes modalIn {
+    from { transform: scale(0.9); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+  }
+  .modal .result-icon { font-size: 48px; margin-bottom: 8px; }
+  .modal h2 { font-size: 20px; margin-bottom: 4px; }
+  .modal .score-big { font-size: 52px; font-weight: 700; color: var(--gold); margin: 8px 0; }
+  .modal .score-big small { font-size: 20px; font-weight: 400; color: var(--text-light); }
+  .modal .rating {
+    display: inline-block;
+    padding: 4px 20px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 600;
+    margin: 8px 0 16px;
+  }
+  .rating.excellent { background: #e6f7e6; color: #3a9d3a; }
+  .rating.good { background: #fef6e6; color: #c9a962; }
+  .rating.pass { background: #fff3e0; color: #e68a2e; }
+  .rating.fail { background: #fde8e8; color: #d9534f; }
+
+  .modal .detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+    margin: 16px 0;
+    font-size: 13px;
+  }
+  .modal .detail-grid .item {
+    background: var(--bg);
+    padding: 8px;
+    border-radius: 6px;
+  }
+  .modal .detail-grid .item .label { color: var(--text-light); font-size: 11px; }
+  .modal .detail-grid .item .val { font-weight: 600; font-size: 15px; margin-top: 2px; }
+  .modal .btn-close {
+    padding: 8px 32px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: #fff;
+    cursor: pointer;
+    font-size: 14px;
+    margin-top: 12px;
+    transition: all .15s;
+  }
+  .modal .btn-close:hover { background: var(--bg); }
+
+  /* Progress bar */
+  .progress-bar {
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    margin: 12px 0;
+    overflow: hidden;
+  }
+  .progress-bar .fill {
+    height: 100%;
+    background: var(--gold);
+    border-radius: 2px;
+    transition: width .5s ease;
+    width: 0%;
+  }
+
+  /* Loading */
+  .loading { display: none; }
+  .loading.show { display: inline-block; }
+  .spinner {
+    display: inline-block;
+    width: 16px; height: 16px;
+    border: 2px solid #fff;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin .6s linear infinite;
+    vertical-align: middle;
+    margin-right: 6px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .error-msg {
+    color: var(--red);
+    font-size: 13px;
+    margin-top: 8px;
+    display: none;
+  }
+  .error-msg.show { display: block; }
+
+  @media (max-width: 600px) {
+    .header h1 { font-size: 20px; }
+    .info-form { flex-direction: column; }
+    .modal { padding: 24px 20px; }
+    .modal .detail-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <h1>ITO · <span>AI Agent</span> 培训考试</h1>
+    <div class="subtitle">测一测你对 AI Agent 的了解程度</div>
+    <div class="badge">满分 100 分 · 18 题</div>
+  </div>
+
+  <!-- User Info -->
+  <div class="info-form">
+    <div class="field">
+      <label for="userName">姓名 *</label>
+      <input type="text" id="userName" placeholder="请输入姓名" autocomplete="name">
+    </div>
+    <div class="field">
+      <label for="userDept">部门</label>
+      <select id="userDept">
+        <option value="">请选择</option>
+        <option value="电商部">电商部</option>
+        <option value="市场部">市场部</option>
+        <option value="产品部">产品部</option>
+        <option value="运营部">运营部</option>
+        <option value="技术部">技术部</option>
+        <option value="其他">其他</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Progress -->
+  <div class="progress-bar"><div class="fill" id="progressFill"></div></div>
+
+  <!-- Section 1: 选择题 -->
+  <div class="section">
+    <div class="section-header">
+      一、选择题 <span style="font-weight:400;color:#7a7a7a;font-size:12px">（每题 5 分，共 50 分）</span>
+      <span class="count">10 题</span>
+    </div>
+
+    <div class="question" id="q1">
+      <div class="q-title">
+        <span class="q-num">1.</span>
+        <span>以下哪个是 AI Agent 最核心的特征？</span>
+        <span class="q-tag">基础</span>
+        <span class="q-score">5分</span>
+      </div>
+      <div class="options">
+        <label><input type="radio" name="q1" value="A"> 能够联网搜索信息</label>
+        <label><input type="radio" name="q1" value="B"> 能够自主感知环境、推理决策并执行行动</label>
+        <label><input type="radio" name="q1" value="C"> 能够生成文字和图片</label>
+        <label><input type="radio" name="q1" value="D"> 能够记住历史对话</label>
+      </div>
+    </div>
+
+    <div class="question" id="q2">
+      <div class="q-title">
+        <span class="q-num">2.</span>
+        <span>Agent 与普通 LLM 对话最主要区别是什么？</span>
+        <span class="q-tag">基础</span>
+        <span class="q-score">5分</span>
+      </div>
+      <div class="options">
+        <label><input type="radio" name="q2" value="A"> Agent 回复速度更快</label>
+        <label><input type="radio" name="q2" value="B"> Agent 可以调用工具和采取行动</label>
+        <label><input type="radio" name="q2" value="C"> Agent 不需要输入提示词</label>
+        <label><input type="radio" name="q2" value="D"> Agent 支持更多语言</label>
+      </div>
+    </div>
+
+    <div class="question" id="q3">
+      <div class="q-title">
+        <span class="q-num">3.</span>
+        <span>以下哪项不属于 Agent 的四大核心组件？</span>
+        <span class="q-tag">基础</span>
+        <span class="q-score">5分</span>
+      </div>
+      <div class="options">
+        <label><input type="radio" name="q3" value="A"> LLM（大语言模型）</label>
+        <label><input type="radio" name="q3" value="B"> Tools（工具）</label>
+        <label><input type="radio" name="q3" value="C"> Memory（记忆）</label>
+        <label><input type="radio" name="q3" value="D"> GPU（图形处理器）</label>
+      </div>
+    </div>
+
+    <div class="question" id="q4">
+      <div class="q-title">
+        <span class="q-num">4.</span>
+        <span>Agent 中的"工具（Tool）"的作用是什么？</span>
+        <span class="q-tag">基础</span>
+        <span class="q-score">5分</span>
+      </div>
+      <div class="options">
+        <label><input type="radio" name="q4" value="A"> 美化 Agent 的界面</label>
+        <label><input type="radio" name="q4" value="B"> 让 Agent 能够调用外部功能（如搜索、计算、API）</label>
+        <label><input type="radio" name="q4" value="C"> 加快 Agent 的响应速度</label>
+        <label><input type="radio" name="q4" value="D"> 给 Agent 提供数据存储</label>
+      </div>
+    </div>
+
+    <div class="question" id="q5">
+      <div class="q-title">
+        <span class="q-num">5.</span>
+        <span>LLM 在 Agent 中扮演什么角色？</span>
+        <span class="q-tag">基础</span>
+        <span class="q-score">5分</span>
+      </div>
+      <div class="options">
+        <label><input type="radio" name="q5" value="A"> 输入设备</label>
+        <label><input type="radio" name="q5" value="B"> 存储设备</label>
+        <label><input type="radio" name="q5" value="C"> "大脑"——负责推理和决策</label>
+        <label><input type="radio" name="q5" value="D"> 显示设备</label>
+      </div>
+    </div>
+
+    <div class="question" id="q6">
+      <div class="q-title">
+        <span class="q-num">6.</span>
+        <span>以下哪个描述最符合 Agent 的基本工作流程？</span>
+        <span class="q-tag">基础</span>
+        <span class="q-score">5分</span>
+      </div>
+      <div class="options">
+        <label><input type="radio" name="q6" value="A"> 输入 → 输出 → 结束</label>
+        <label><input type="radio" name="q6" value="B"> 感知 → 思考 → 行动 → 观察 → 循环</label>
+        <label><input type="radio" name="q6" value="C"> 提问 → 回答</label>
+        <label><input type="radio" name="q6" value="D"> 训练 → 部署 → 使用</label>
+      </div>
+    </div>
+
+    <div class="question" id="q7">
+      <div class="q-title">
+        <span class="q-num">7.</span>
+        <span>以下哪个场景最适合使用 Agent？</span>
+        <span class="q-tag">基础</span>
+        <span class="q-score">5分</span>
+      </div>
+      <div class="options">
+        <label><input type="radio" name="q7" value="A"> 简单的问候回复</label>
+        <label><input type="radio" name="q7" value="B"> 需要多步推理并调用外部工具完成的任务</label>
+        <label><input type="radio" name="q7" value="C"> 计算 1+1 等于几</label>
+        <label><input type="radio" name="q7" value="D"> 生成一段固定格式的文字</label>
+      </div>
+    </div>
+
+    <div class="question" id="q8">
+      <div class="q-title">
+        <span class="q-num">8.</span>
+        <span>Agent 中 System Prompt 的主要作用是？</span>
+        <span class="q-tag">基础</span>
+        <span class="q-score">5分</span>
+      </div>
+      <div class="options">
+        <label><input type="radio" name="q8" value="A"> 让 Agent 自动联网</label>
+        <label><input type="radio" name="q8" value="B"> 设定 Agent 的角色、行为和约束</label>
+        <label><input type="radio" name="q8" value="C"> 加快 Agent 运行速度</label>
+        <label><input type="radio" name="q8" value="D"> 告诉 Agent 当前时间</label>
+      </div>
+    </div>
+
+    <div class="question" id="q9">
+      <div class="q-title">
+        <span class="q-num">9.</span>
+        <span>Function Calling 在 Agent 中的作用是？</span>
+        <span class="q-tag">进阶</span>
+        <span class="q-score">5分</span>
+      </div>
+      <div class="options">
+        <label><input type="radio" name="q9" value="A"> 让 Agent 能听懂用户的语音</label>
+        <label><input type="radio" name="q9" value="B"> 让 Agent 能自动选择并调用合适的工具函数</label>
+        <label><input type="radio" name="q9" value="C"> 让 Agent 能自我编程</label>
+        <label><input type="radio" name="q9" value="D"> 让 Agent 能保存对话记录</label>
+      </div>
+    </div>
+
+    <div class="question" id="q10">
+      <div class="q-title">
+        <span class="q-num">10.</span>
+        <span>以下哪种记忆类型属于 Agent 的短期记忆？</span>
+        <span class="q-tag">进阶</span>
+        <span class="q-score">5分</span>
+      </div>
+      <div class="options">
+        <label><input type="radio" name="q10" value="A"> 向量数据库中存储的知识</label>
+        <label><input type="radio" name="q10" value="B"> 当前对话的上下文</label>
+        <label><input type="radio" name="q10" value="C"> 训练数据中的知识</label>
+        <label><input type="radio" name="q10" value="D"> 用户长期偏好的存储</label>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 2: 判断题 -->
+  <div class="section">
+    <div class="section-header">
+      二、判断题 <span style="font-weight:400;color:#7a7a7a;font-size:12px">（每题 6 分，共 30 分）</span>
+      <span class="count">5 题</span>
+    </div>
+
+    <div class="question" id="q11">
+      <div class="q-title">
+        <span class="q-num">11.</span>
+        <span>AI Agent 就是普通的 LLM 聊天对话加上自动回复功能。</span>
+        <span class="q-tag">基础</span>
+        <span class="q-score">6分</span>
+      </div>
+      <div class="tf-options">
+        <label><input type="radio" name="q11" value="T"> ✅ 正确</label>
+        <label><input type="radio" name="q11" value="F"> ❌ 错误</label>
+      </div>
+    </div>
+
+    <div class="question" id="q12">
+      <div class="q-title">
+        <span class="q-num">12.</span>
+        <span>使用 Agent 必须要有网络连接。</span>
+        <span class="q-tag">基础</span>
+        <span class="q-score">6分</span>
+      </div>
+      <div class="tf-options">
+        <label><input type="radio" name="q12" value="T"> ✅ 正确</label>
+        <label><input type="radio" name="q12" value="F"> ❌ 错误</label>
+      </div>
+    </div>
+
+    <div class="question" id="q13">
+      <div class="q-title">
+        <span class="q-num">13.</span>
+        <span>Agent 在调用工具失败后，可以自动重试或选择其他方案。</span>
+        <span class="q-tag">基础</span>
+        <span class="q-score">6分</span>
+      </div>
+      <div class="tf-options">
+        <label><input type="radio" name="q13" value="T"> ✅ 正确</label>
+        <label><input type="radio" name="q13" value="F"> ❌ 错误</label>
+      </div>
+    </div>
+
+    <div class="question" id="q14">
+      <div class="q-title">
+        <span class="q-num">14.</span>
+        <span>Multi-Agent（多智能体）系统中，每个 Agent 都必须使用不同的大语言模型。</span>
+        <span class="q-tag">进阶</span>
+        <span class="q-score">6分</span>
+      </div>
+      <div class="tf-options">
+        <label><input type="radio" name="q14" value="T"> ✅ 正确</label>
+        <label><input type="radio" name="q14" value="F"> ❌ 错误</label>
+      </div>
+    </div>
+
+    <div class="question" id="q15">
+      <div class="q-title">
+        <span class="q-num">15.</span>
+        <span>Agent 的 System Prompt 只需要在第一次交互时设定，后续不会影响 Agent 的行为。</span>
+        <span class="q-tag">基础</span>
+        <span class="q-score">6分</span>
+      </div>
+      <div class="tf-options">
+        <label><input type="radio" name="q15" value="T"> ✅ 正确</label>
+        <label><input type="radio" name="q15" value="F"> ❌ 错误</label>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 3: 填空题 -->
+  <div class="section">
+    <div class="section-header">
+      三、填空题 <span style="font-weight:400;color:#7a7a7a;font-size:12px">（共 20 分）</span>
+      <span class="count">4 题</span>
+    </div>
+
+    <div class="question" id="q16">
+      <div class="q-title">
+        <span class="q-num">16.</span>
+        <span>Agent 的工作循环流程是：感知 → ______ → 行动 → 观察 → 循环</span>
+        <span class="q-tag">基础</span>
+        <span class="q-score">5分</span>
+      </div>
+      <div class="fill-blank">
+        <input type="text" id="ans16" placeholder="请输入答案" autocomplete="off">
+      </div>
+    </div>
+
+    <div class="question" id="q17">
+      <div class="q-title">
+        <span class="q-num">17.</span>
+        <span>______ 是 Agent 用来调用外部功能的接口，例如搜索、计算、API 调用等。</span>
+        <span class="q-tag">基础</span>
+        <span class="q-score">5分</span>
+      </div>
+      <div class="fill-blank">
+        <input type="text" id="ans17" placeholder="请输入答案" autocomplete="off">
+      </div>
+    </div>
+
+    <div class="question" id="q18">
+      <div class="q-title">
+        <span class="q-num">18.</span>
+        <span>在 Agent 中，______ 负责将历史对话信息传递给后续轮次，以保证上下文连贯。</span>
+        <span class="q-tag">基础</span>
+        <span class="q-score">5分</span>
+      </div>
+      <div class="fill-blank">
+        <input type="text" id="ans18" placeholder="请输入答案" autocomplete="off">
+      </div>
+    </div>
+
+    <div class="question" id="q19">
+      <div class="q-title">
+        <span class="q-num">19.</span>
+        <span>Agent 使用 ______ 机制来自动判断用户意图并选择合适的工具函数进行调用。</span>
+        <span class="q-tag">进阶</span>
+        <span class="q-score">5分</span>
+      </div>
+      <div class="fill-blank">
+        <input type="text" id="ans19" placeholder="请输入答案" autocomplete="off">
+      </div>
+    </div>
+  </div>
+
+  <!-- Submit -->
+  <div class="submit-area">
+    <button class="btn-submit" id="btnSubmit" onclick="submitExam()">
+      提交答卷
+    </button>
+    <div class="error-msg" id="errorMsg"></div>
+  </div>
+</div>
+
+<!-- Result Modal -->
+<div class="modal-overlay" id="resultModal">
+  <div class="modal">
+    <div class="result-icon" id="resultIcon">🏆</div>
+    <h2 id="resultTitle">考试完成</h2>
+    <div class="score-big"><span id="resultScore">0</span><small> / 100</small></div>
+    <div class="rating" id="resultRating">优秀</div>
+    <div class="detail-grid">
+      <div class="item">
+        <div class="label">选择题</div>
+        <div class="val" id="detailChoice">0/10</div>
+      </div>
+      <div class="item">
+        <div class="label">判断题</div>
+        <div class="val" id="detailJudge">0/5</div>
+      </div>
+      <div class="item">
+        <div class="label">填空题</div>
+        <div class="val" id="detailFill">0/4</div>
+      </div>
+    </div>
+    <div style="font-size:13px;color:#7a7a7a;margin:10px 0;" id="resultSuggestion"></div>
+    <div style="font-size:12px;color:#bbb;" id="syncStatus"></div>
+    <button class="btn-close" onclick="closeResult()">关闭</button>
+  </div>
+</div>
+
+<script>
+// ========== 标准答案 ==========
+const ANSWERS = {
+  // 选择题
+  q1: 'B', q2: 'B', q3: 'D', q4: 'B', q5: 'C',
+  q6: 'B', q7: 'B', q8: 'B', q9: 'B', q10: 'B',
+  // 判断题: T=正确, F=错误
+  q11: 'F', q12: 'F', q13: 'T', q14: 'F', q15: 'F',
+};
+
+// ========== Vercel API 地址（复用 ITO-AI-Grading 项目） ==========
+const BACKEND_URL = 'https://ito-ai-grading.vercel.app';
+
+// 填空题答案（同义答案均认可）
+const FILL_ANSWERS = {
+  q16: ['思考', '推理', 'Thinking', 'thinking'],
+  q17: ['工具', 'Tool', '工具函数', 'function'],
+  q18: ['记忆', 'Memory', 'memory', '记忆模块'],
+  q19: ['Function Calling', '函数调用', '工具调用', 'function calling', 'function_calling'],
+};
+
+const SCORES = {
+  q1:5, q2:5, q3:5, q4:5, q5:5, q6:5, q7:5, q8:5, q9:5, q10:5,
+  q11:6, q12:6, q13:6, q14:6, q15:6,
+  q16:5, q17:5, q18:5, q19:5,
+};
+
+// ========== 进度条 ==========
+function updateProgress() {
+  const total = 19;
+  let done = 0;
+  for (let i = 1; i <= 15; i++) {
+    const selected = document.querySelector(`input[name="q${i}"]:checked`);
+    if (selected) done++;
+  }
+  for (let i = 16; i <= 19; i++) {
+    const val = document.getElementById(`ans${i}`).value.trim();
+    if (val) done++;
+  }
+  const pct = Math.round((done / total) * 100);
+  document.getElementById('progressFill').style.width = pct + '%';
+}
+
+// 监听所有输入变化
+document.addEventListener('DOMContentLoaded', function() {
+  const radios = document.querySelectorAll('input[type="radio"]');
+  radios.forEach(r => {
+    r.addEventListener('change', function() {
+      // 高亮选中项
+      const group = document.querySelectorAll(`input[name="${this.name}"]`);
+      group.forEach(g => {
+        g.closest('label').classList.remove('selected');
+      });
+      this.closest('label').classList.add('selected');
+      updateProgress();
+    });
+  });
+  document.querySelectorAll('.fill-blank input').forEach(inp => {
+    inp.addEventListener('input', updateProgress);
+  });
+
+  // 回车提交
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && document.activeElement?.tagName !== 'TEXTAREA') {
+      submitExam();
+    }
+  });
+});
+
+// ========== 核心判分 ==========
+function gradeExam() {
+  const name = document.getElementById('userName').value.trim();
+  const dept = document.getElementById('userDept').value;
+
+  if (!name) {
+    document.getElementById('errorMsg').textContent = '请填写姓名';
+    document.getElementById('errorMsg').classList.add('show');
+    return null;
+  }
+  document.getElementById('errorMsg').classList.remove('show');
+
+  const detail = {};
+  let choiceCorrect = 0, judgeCorrect = 0, fillCorrect = 0;
+  let totalScore = 0;
+  const details = [];
+
+  // 选择题评分
+  for (let i = 1; i <= 10; i++) {
+    const selected = document.querySelector(`input[name="q${i}"]:checked`);
+    const answer = selected ? selected.value : '';
+    const correct = ANSWERS[`q${i}`];
+    const score = answer === correct ? SCORES[`q${i}`] : 0;
+    if (answer === correct) choiceCorrect++;
+    totalScore += score;
+    details.push({num: i, type: 'choice', answer, correct, score});
+  }
+
+  // 判断题评分
+  for (let i = 11; i <= 15; i++) {
+    const selected = document.querySelector(`input[name="q${i}"]:checked`);
+    const answer = selected ? selected.value : '';
+    const correct = ANSWERS[`q${i}`];
+    const score = answer === correct ? SCORES[`q${i}`] : 0;
+    if (answer === correct) judgeCorrect++;
+    totalScore += score;
+    details.push({num: i, type: 'judge', answer, correct, score});
+  }
+
+  // 填空题评分
+  for (let i = 16; i <= 19; i++) {
+    const answer = document.getElementById(`ans${i}`).value.trim();
+    const correctList = FILL_ANSWERS[`q${i}`];
+    const isCorrect = correctList.some(c => answer.toLowerCase() === c.toLowerCase());
+    const score = isCorrect ? SCORES[`q${i}`] : 0;
+    if (isCorrect) fillCorrect++;
+    totalScore += score;
+    details.push({num: i, type: 'fill', answer, correct: correctList[0], score});
+  }
+
+  // 评级
+  let rating, suggestion;
+  if (totalScore >= 90) { rating = '优秀'; suggestion = '基础扎实，可以尝试独立搭建 Agent 应用了！'; }
+  else if (totalScore >= 70) { rating = '良好'; suggestion = '掌握不错，建议补一下薄弱知识点再实操。'; }
+  else if (totalScore >= 50) { rating = '及格'; suggestion = '需加强基础概念理解，建议参加基础培训。'; }
+  else { rating = '需补课'; suggestion = '建议从 Agent 入门教程开始系统学习。'; }
+
+  return {
+    name, dept: dept || '未填写',
+    totalScore,
+    choiceCorrect, judgeCorrect, fillCorrect,
+    choiceScore: choiceCorrect * 5,
+    judgeScore: judgeCorrect * 6,
+    fillScore: fillCorrect * 5,
+    rating, suggestion,
+    details: JSON.stringify(details),
+    timestamp: new Date().toISOString(),
+  };
+}
+
+// ========== 提交换卷 ==========
+async function submitExam() {
+  const btn = document.getElementById('btnSubmit');
+  if (btn.disabled) return;
+
+  const result = gradeExam();
+  if (!result) return;
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>判分中...';
+
+  // 先显示本地结果
+  showResult(result);
+
+  // 提交到后端写入飞书
+  if (BACKEND_URL) {
+    try {
+      const resp = await fetch(BACKEND_URL + '/api/submit-score', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: result.name,
+          dept: result.dept,
+          totalScore: result.totalScore,
+          rating: result.rating,
+          detail: result.details || result.suggestion
+        }),
+      });
+      const data = await resp.json();
+      if (data.code === 0) {
+        document.getElementById('syncStatus').textContent = '✅ 成绩已同步到飞书';
+      } else {
+        document.getElementById('syncStatus').textContent = '⚠️ 成绩同步失败，请联系管理员';
+      }
+    } catch (e) {
+      document.getElementById('syncStatus').textContent = '⚠️ 同步失败（后端未连接）';
+    }
+  } else {
+    document.getElementById('syncStatus').textContent = '🔶 仅本地判分，成绩未同步';
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = '提交答卷';
+}
+
+function showResult(result) {
+  document.getElementById('resultScore').textContent = result.totalScore;
+  document.getElementById('detailChoice').textContent = `${result.choiceCorrect}/10（${result.choiceScore}分）`;
+  document.getElementById('detailJudge').textContent = `${result.judgeCorrect}/5（${result.judgeScore}分）`;
+  document.getElementById('detailFill').textContent = `${result.fillCorrect}/4（${result.fillScore}分）`;
+  document.getElementById('resultSuggestion').textContent = result.suggestion;
+
+  const ratingEl = document.getElementById('resultRating');
+  ratingEl.textContent = result.rating;
+  ratingEl.className = 'rating';
+  const icon = document.getElementById('resultIcon');
+  switch (result.rating) {
+    case '优秀': ratingEl.classList.add('excellent'); icon.textContent = '🏆'; break;
+    case '良好': ratingEl.classList.add('good'); icon.textContent = '👍'; break;
+    case '及格': ratingEl.classList.add('pass'); icon.textContent = '💪'; break;
+    case '需补课': ratingEl.classList.add('fail'); icon.textContent = '📚'; break;
+  }
+
+  document.getElementById('resultTitle').textContent = `${result.name}，考试完成！`;
+  document.getElementById('resultModal').classList.add('show');
+}
+
+function closeResult() {
+  document.getElementById('resultModal').classList.remove('show');
+}
+</script>
+</body>
+</html>
