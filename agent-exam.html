@@ -233,26 +233,22 @@ function shuffle(arr) {
 }
 
 function pickQuestions() {
-  // 确保每种类型至少抽到一定数量
   const choices = QUESTION_BANK.filter(q => q.type === 'choice' && q.tag !== '场景');
   const scenes = QUESTION_BANK.filter(q => q.tag === '场景');
   const judges = QUESTION_BANK.filter(q => q.type === 'judge');
+  const fills = QUESTION_BANK.filter(q => q.type === 'fill');
 
   const pick = [];
-  // 至少5道选择、5道判断、3道场景
-  const choiceCount = Math.min(8, choices.length);
-  const judgeCount = Math.min(7, judges.length);
-  const sceneCount = Math.min(5, scenes.length);
+  // 每种题型至少抽到的数量
+  pick.push(...shuffle([...fills]).slice(0, 4));      // 填空至少4题
+  pick.push(...shuffle([...scenes]).slice(0, 3));       // 场景至少3题
+  pick.push(...shuffle([...judges]).slice(0, 5));       // 判断至少5题
+  pick.push(...shuffle([...choices]).slice(0, 5));      // 选择至少5题
 
-  pick.push(...shuffle([...choices]).slice(0, choiceCount));
-  pick.push(...shuffle([...judges]).slice(0, judgeCount));
-  pick.push(...shuffle([...scenes]).slice(0, sceneCount));
-
-  // 剩余名额从所有题型中补满
-  const remaining = TOTAL_QUESTIONS - pick.length;
+  // 从所有已抽到的补满20题
   const pickedIds = new Set(pick.map(q => q.id));
   const rest = shuffle(QUESTION_BANK.filter(q => !pickedIds.has(q.id)));
-  pick.push(...rest.slice(0, remaining));
+  pick.push(...rest.slice(0, TOTAL_QUESTIONS - pick.length));
 
   return shuffle(pick);
 }
