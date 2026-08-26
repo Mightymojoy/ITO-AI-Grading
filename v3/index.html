@@ -1,0 +1,2787 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>主播讲解评分系统 v2.1 · V2 能力矩阵</title>
+<style>
+  :root{
+    --gold:#c9a962; --gold-dim:#f1e9d8; --bg:#f6f5f2; --card:#ffffff;
+    --text:#2b2b28; --text2:#6b6a63; --text3:#9a998f;
+    --border:#e4e1d8; --danger:#c0533f; --ok:#3f7d5c; --warn:#9a7b2d;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:"Microsoft YaHei","PingFang SC",sans-serif;background:var(--bg);color:var(--text);line-height:1.6;padding:28px 20px 60px}
+  .wrap{max-width:1100px;margin:0 auto}
+  .top{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+  .logo{width:10px;height:10px;background:var(--gold);border-radius:2px}
+  .brand{font-size:14px;font-weight:600;letter-spacing:.5px}
+  .badge{margin-left:auto;font-size:11px;color:var(--gold);background:var(--gold-dim);padding:2px 10px;border-radius:10px;font-weight:500}
+  h1{font-size:22px;font-weight:600;letter-spacing:1px}
+  .sub{font-size:12px;color:var(--text2);margin-bottom:20px}
+  /* 输入区 */
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px 20px;margin-bottom:16px}
+  .panel h3{font-size:13px;font-weight:600;margin-bottom:10px;color:var(--gold);display:flex;align-items:center;gap:6px}
+  .panel h3::before{content:"";width:14px;height:2px;background:var(--gold)}
+  .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+  .row label{font-size:12px;color:var(--text2);min-width:64px}
+  select,input[type=text]{padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:12.5px;background:var(--card);color:var(--text);font-family:inherit}
+  select:focus,input:focus{outline:none;border-color:var(--gold)}
+  .btn{padding:8px 22px;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;background:var(--gold);color:#fff;transition:all .15s}
+  .btn:hover{opacity:.88}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .btn-ghost{background:var(--card);border:1px solid var(--border);color:var(--text2)}
+  .file-hint{font-size:11px;color:var(--text3);margin-top:4px}
+  /* 概览 */
+  .overview{display:grid;grid-template-columns:180px 1fr;gap:14px;margin-bottom:16px}
+  .score-card{background:var(--card);border:1px solid var(--gold);border-radius:10px;padding:18px;text-align:center}
+  .score-val{font-size:42px;font-weight:700;color:var(--gold);letter-spacing:-1px}
+  .score-lbl{font-size:12px;color:var(--text2);margin-top:2px}
+  .grade{display:inline-block;margin-top:8px;padding:3px 14px;border-radius:12px;font-size:14px;font-weight:700;color:#fff}
+  .gA{background:#b0855a}.gB{background:#c9a962}.gC{background:#8fa476}.gD{background:#7a7a72}.gE{background:#c0533f}
+  .ov-notes{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px 18px;font-size:12.5px}
+  .ov-notes .it{margin-bottom:8px}
+  .ov-notes .lb{color:var(--text2);font-weight:600}
+  .ov-notes .lb.ok{color:var(--ok)} .ov-notes .lb.bad{color:var(--danger)}
+  /* 表格 */
+  table{width:100%;border-collapse:collapse;font-size:12.5px;background:var(--card);border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:10px}
+  th{background:#efece2;font-weight:600;padding:7px 10px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap}
+  td{padding:7px 10px;border-bottom:1px solid #f0ede5;vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  .mod{font-size:13px;font-weight:600;margin:22px 0 8px;padding-bottom:6px;border-bottom:2px solid var(--border);display:flex;align-items:center;gap:8px}
+  .mod .w{font-size:11px;color:var(--text3);font-weight:400}
+  .mod .ms{margin-left:auto;font-size:12px;color:var(--gold);font-weight:600}
+  /* 子标准行 */
+  .std{border:1px solid var(--border);border-radius:8px;background:var(--card);margin-bottom:8px;overflow:hidden}
+  .std-hd{display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;user-select:none}
+  .std-hd:hover{background:#faf8f3}
+  .std-id{font-size:11px;font-weight:700;color:var(--gold);min-width:30px}
+  .std-nm{font-size:12.5px;font-weight:600;flex:1}
+  .chip{font-size:11px;padding:1px 8px;border-radius:8px;font-weight:600;white-space:nowrap}
+  .c-1{background:#e8ece4;color:var(--ok)} .c-05{background:var(--gold-dim);color:var(--warn)} .c-0{background:#f6e3dd;color:var(--danger)}
+  .q{color:var(--text2);font-size:12px}
+  .sc{font-size:14px;font-weight:700;min-width:44px;text-align:right}
+  .sc.hi{color:var(--ok)} .sc.mid{color:var(--warn)} .sc.lo{color:var(--danger)}
+  .std-bd{padding:0 12px 10px;font-size:12px;color:var(--text2);border-top:1px dashed #f0ede5}
+  .std-desc{margin:8px 0 6px;color:var(--text);background:#faf8f3;border-radius:6px;padding:6px 10px;font-size:11.5px}
+  .ev{background:var(--gold-dim);border-radius:4px;padding:1px 6px;font-size:11px;color:#9a7b2d;font-weight:600;margin-right:6px}
+  .evt{background:#f0ede5;border-radius:4px;padding:1px 6px;font-size:10.5px;color:var(--text3);margin-right:6px}
+  .evctx{color:var(--text2);font-size:11.5px;line-height:1.5}
+  .miss{color:var(--danger);font-size:11px}
+  .miss b{font-weight:600}
+  .missed-words{margin-top:4px;font-size:11px;color:var(--text3)}
+  .missed-words b{color:var(--warn);font-weight:600}
+  /* 汇总 */
+  .summary-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:16px}
+  .s-cell{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 12px;text-align:center}
+  .s-cell .n{font-size:11px;color:var(--text2);margin-bottom:4px}
+  .s-cell .v{font-size:18px;font-weight:700;color:var(--gold)}
+  .s-cell .v.hi{color:var(--ok)} .s-cell .v.lo{color:var(--danger)}
+  .s-cell .w{font-size:10.5px;color:var(--text3)}
+  /* 卖点表 */
+  .sp-y{color:var(--ok);font-weight:700} .sp-n{color:var(--danger);font-weight:700}
+  /* baseline */
+  .b-ok{color:var(--ok);font-weight:700} .b-bad{color:var(--danger);font-weight:700}
+  /* 折叠区 */
+  details{border:1px solid var(--border);border-radius:8px;background:var(--card);margin-bottom:8px}
+  summary{padding:9px 14px;font-size:12.5px;font-weight:600;cursor:pointer;color:var(--text)}
+  summary:hover{background:#faf8f3}
+  .fold-bd{padding:6px 14px 12px}
+  .case{background:#faf8f3;border-radius:6px;padding:8px 12px;margin-bottom:6px;font-size:12px}
+  .case .ct{font-weight:600;color:var(--gold);font-size:11.5px}
+  .case p{color:var(--text2);margin-top:3px}
+  .errbar{display:none;background:#fdecea;color:var(--danger);border:1px solid #f5c6bd;border-radius:8px;padding:10px 16px;font-size:12.5px;margin-bottom:12px}
+  .ft{margin-top:26px;font-size:11px;color:var(--text3);text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div class="logo"></div>
+    <span class="brand">ITO · 主播讲解评分</span>
+    <span class="badge">v3.0 · 飞书 TOP1 同步</span>
+  </div>
+  <h1>主播讲解评分系统 v2</h1>
+  <div class="sub">V2 日报标准：主播能力矩阵 8 项（5 计分 + 3 分析）｜ 每个评分点 = 可执行评判标准 + 原文证据（时间戳）</div>
+
+  <div class="errbar" id="errbar"></div>
+
+  <div class="panel">
+    <h3>视频转写（本地 SenseVoice · 先启动 <b>node server-asr.js</b>）</h3>
+    <div class="row">
+      <input type="file" id="videoInput" accept=".mkv,.mp4,.avi,.flv,.mov,.wmv,.ts" style="font-size:12px">
+      <button class="btn" id="transBtn" onclick="transcribeVideo()">上传视频 · 自动转写评分</button>
+      <span id="transStatus" style="font-size:12px;color:var(--gold);display:none"></span>
+    </div>    <div class="file-hint">视频转写走本地 SenseVoice 引擎（先启动转写服务：asr 目录运行 <b>node server-asr.js</b>）；10 分钟切片约 1-3 分钟出稿，长场（2-4h）本地较慢，后续可切云端引擎</div>
+  </div>
+
+  <div class="panel" style="margin-top:14px">
+    <h3>画面报告 · 完整日报（服化道 25 分 + 5 项能力 75 分）</h3>
+    <div class="file-hint" style="margin-bottom:8px">一键生成《主播综合评估日报》——视频 → 自动转写（SenseVoice）+ 抽帧视觉分析（Qwen2.5-VL）→ 服化道 25 分 + 产品定位/表达流畅/内容延展/产品展示/情绪感染 5 项能力 75 分 = 100 分。需先启动两个服务：<b>node server-asr.js</b>（3712 转写）与 <b>node vision-server.js</b>（3713 视觉）</div>
+    <div class="row">
+      <label>主播名</label>
+      <input type="text" id="visionHostInput" placeholder="如：曲姝锜" style="width:120px">
+      <label style="margin-left:10px">视频</label>
+      <input type="file" id="visionVideoInput" accept=".mkv,.mp4,.avi,.flv,.mov,.wmv,.ts" style="font-size:12px">
+      <button class="btn" id="visionAutoBtn" onclick="autoFullReport()" style="background:var(--gold);border-color:var(--gold);color:#fff">一键完整日报</button>
+      <span id="visionStatus" style="font-size:12px;color:var(--gold);display:none"></span>
+    </div>
+    <div class="row" style="margin-top:4px">
+      <label>画面描述（手动 · 仅服化道）</label>
+      <input type="text" id="visionDescInput" placeholder="粘贴画面描述：如「黑色低饱和通勤西装，妆发完整，低马尾，皮鞋」" style="width:400px">
+      <button class="btn" onclick="judgeVisionByText()">手动服化道评分</button>
+    </div>
+    <div id="visionReportBlock" style="margin-top:8px;font-size:12px;color:var(--text3)">暂无日报——选视频+填主播名点「一键完整日报」（约 3-8 分钟，CPU 推理）；或手动粘贴画面描述仅评服化道</div>
+  </div>
+
+  <div class="panel" style="margin-top:14px;border:1.5px solid var(--gold);background:linear-gradient(180deg,#fffdf6,var(--card))">
+    <h3 style="color:var(--gold)">多主播批量 · 当日 TOP1 评选</h3>
+    <div class="file-hint" style="margin-bottom:8px">一次选 <b>N 个主播</b>的逐字稿（每人一个文件，Ctrl/Shift 多选）→ 系统逐个评分 → 评选当日 TOP1 候选人 + 每人改善闭环（能力缺口→训练动作→下周验证）。文件名自动识别主播/直播间/日期</div>
+    <div class="row">
+      <label>批量文件</label>
+      <input type="file" id="batchInput" accept=".txt,.srt" multiple style="font-size:12px" onchange="batchHint(this)">
+      <span id="batchHint" style="font-size:11px;color:var(--text3)">未选择文件</span>
+    </div>
+    <div class="row" style="margin-top:4px">
+      <button class="btn" id="batchBtn" onclick="batchRun()" style="background:var(--gold);border-color:var(--gold);color:#fff;font-weight:700">批量评分 · TOP1 评选</button>
+      <span id="batchStatus" style="font-size:12px;color:var(--gold);display:none"></span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>单主播评分</h3>
+    <div class="row">
+      <label>逐字稿</label>
+      <input type="file" id="fileInput" accept=".txt,.srt" style="font-size:12px" onchange="autoFillMeta(this)">
+      <span style="font-size:11px;color:var(--text3)">支持 SRT（带时间戳）/ txt（含 [HH:MM] 或纯文本）；多主播请用上方批量入口</span>
+    </div>
+    <div class="row">
+      <label>考核标准</label>
+      <select id="productSelect" onchange="onManualKeySelect(this.value)">
+        <option value="auto" selected>自动识别（上传即识别，无需选择）</option>
+        <optgroup label="── 高级选项：手动指定考核标准 ──">
+          <optgroup label="&nbsp;&nbsp;行李箱（6）">
+            <option value="pistachio_2">PISTACHIO 2（摩登新贵女）</option>
+            <option value="pistachio_plus">PISTACHIO Plus（云端商务家 · 主推）</option>
+            <option value="pistachio_1">开心果一代 P1</option>
+            <option value="ginkgo4">GINKGO 4（银杏4）</option>
+            <option value="wedding">开运红婚箱（好运箱）</option>
+            <option value="wave">WAVE</option>
+          </optgroup>
+          <optgroup label="&nbsp;&nbsp;包袋（6）">
+            <option value="truffle_2">truffle二代 空气双肩包（轻熟质享客）</option>
+            <option value="truffle_pro_tote">TRUFFLE PRO TOTE（托特包）</option>
+            <option value="truffle_pro_backpack">TRUFFLE PRO BACKPACK（双肩包）</option>
+            <option value="mycena_tote">MYCENA TOTE（托特包）</option>
+            <option value="porcini_tote">porcini 托特包（云端商务家）</option>
+            <option value="porcini_backpack">porcini 双肩包（云端商务家）</option>
+          </optgroup>
+        </optgroup>
+      </select>
+      <span id="manualKeyHint" style="font-size:11px;color:var(--text3);display:none">⚠ 手动指定后端到端自动化改为基于您选的品评分——手动选品不再"参照'auto 识别不到'问题"，仅在自动识别明显错误时使用</span>
+      <label style="margin-left:12px">直播间</label>
+      <select id="studioSelect">
+        <option>摩登新贵女</option><option>轻熟质享客</option><option>云端商务家</option><option>综合</option>
+      </select>
+      <label style="margin-left:12px">主播</label>
+      <input type="text" id="hostInput" placeholder="主播姓名（自动识别失败时可手填）" style="width:200px">
+      <label style="margin-left:12px">日期</label>
+      <input type="text" id="dateInput" placeholder="2026-08-18" style="width:110px">
+    </div>
+    <div class="row">
+      <button class="btn" id="runBtn" onclick="run()">开始评分</button>
+      <button class="btn btn-ghost" onclick="loadSample()">载入样例</button>
+      <span id="loading" style="font-size:12px;color:var(--gold);display:none">评分中…</span>
+    </div>
+  </div>
+
+  <div id="result" style="display:none">
+    <div id="singleReport" style="display:none">
+    <div class="overview">
+      <div class="score-card">
+        <div class="score-val" id="totalScore">—</div>
+        <div class="score-lbl">综合得分 / 100</div>
+        <div class="grade" id="gradeBadge">—</div>
+      </div>
+      <div class="ov-notes">
+        <div class="it"><span class="lb">核心优势：</span><span id="strength"></span></div>
+        <div class="it"><span class="lb bad">核心问题：</span><span id="problem"></span></div>
+        <div class="it"><span class="lb">最优能力：</span><span id="best"></span></div>
+        <div class="it"><span class="lb bad">最弱能力：</span><span id="worst"></span></div>
+        <div class="it"><span class="lb">一句话总评：</span><span id="tagline"></span></div>
+      </div>
+    </div>
+
+    <div class="summary-grid" id="moduleSummary"></div>
+
+    <div id="modules"></div>
+
+    <details>
+      <summary>7 大核心卖点覆盖表</summary>
+      <div class="fold-bd"><div id="sellpointTable"></div></div>
+    </details>
+    <details>
+      <summary>信息准确性 · 基准库对照（1.6）</summary>
+      <div class="fold-bd"><div id="baselineTable"></div></div>
+    </details>
+    <details>
+      <summary>优秀案例 TOP3 / 不足案例 TOP3</summary>
+      <div class="fold-bd"><div id="caseBlock"></div></div>
+    </details>
+    <details>
+      <summary>产品识别与讲品分析（多品 · 10 分钟窗口卖点覆盖）</summary>
+      <div class="fold-bd"><div id="productBlock"></div></div>
+    </details>
+    <details>
+      <summary>今日金句话术提炼（黄金话术库 · 只提 3 星及以上）</summary>
+      <div class="fold-bd"><div id="goldenBlock"></div></div>
+    </details>
+    <details>
+      <summary>话术库累计（按能力标签沉淀，每日自动入库）</summary>
+      <div class="fold-bd"><div id="goldenLibBlock"></div></div>
+    </details>
+    <details>
+      <summary>改进建议（按低分能力）</summary>
+      <div class="fold-bd"><div id="trainBlock"></div></div>
+    </details>
+    <details>
+      <summary>讲品问题库（自动沉淀 · 1对1培训清单 · 跨主播共性问题 · 周月聚合）</summary>
+      <div class="fold-bd">
+        <div id="problemLibBlock"></div>
+        <div id="problemDetailBlock" style="margin-top:8px"></div>
+      </div>
+    </details>
+    <details id="historyLibFold">
+      <summary>历史评分库（TOP1 评选"历史进步"标准数据源 · 每次评分自动累积）</summary>
+      <div class="fold-bd">
+        <div id="historyLibBlock"></div>
+      </div>
+    </details>
+
+    <div class="panel" style="margin-top:14px">
+      <h3>导出</h3>
+      <div class="row">
+        <button class="btn btn-ghost" onclick="exportReport('txt')">导出报告（txt）</button>
+        <button class="btn btn-ghost" onclick="exportReport('json')">导出数据（json）</button>
+      </div>
+    </div>
+    </div>
+
+    <div id="batchCompare" style="display:none"></div>
+  </div>
+
+  <div class="ft">ITO · 主播讲解评分系统 v2.0 ｜ 评分标准还原自人工流程（2026-08-19） ｜ 原系统 v0.10 不受影响</div>
+</div>
+
+<script src="standard.js"></script>
+<script src="outfit.js"></script>
+<script>
+// ================= 工具 =================
+function $(id){return document.getElementById(id)}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function toastErr(m){var e=$('errbar');e.style.display='block';e.textContent=m;setTimeout(function(){e.style.display='none'},6000)}
+
+// 云端/本地飞书写回端点（部署版 = Vercel Serverless；本地 = asr 服务 3712）
+// 可通过 localStorage('feishu_fill_url') 覆盖
+var FEISHU_FILL_URL = 'http://127.0.0.1:3712/api/feishu-fill';
+try{
+  // 云端部署版：显式指向 Vercel 函数（GitHub Pages 无 /api）
+  FEISHU_FILL_URL = localStorage.getItem('feishu_fill_url') || 'https://cloud-five-pi.vercel.app/api/feishu-fill';
+  if(typeof location !== 'undefined' && (location.protocol === 'file:' || location.hostname === '127.0.0.1' || location.hostname === 'localhost')){
+    FEISHU_FILL_URL = localStorage.getItem('feishu_fill_url') || 'http://127.0.0.1:3712/api/feishu-fill';
+  }
+}catch(e){}
+
+// V3.2：评分完成后自动调 /api/feishu-fill 回填（失败/未配置仅 toast，不阻塞评分）
+function autoFillFeishu(r){
+  try{
+    if(typeof r.total !== 'number') return;
+    if(!r.host || r.host === '未识别' || r.host === '未填') return;
+    if(!r.date || r.date === '未填') return;
+    fetch(FEISHU_FILL_URL, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ host: r.host, date: r.date, studio: r.studio, result: r })
+    }).then(function(rs){ return rs.json(); }).then(function(j){
+      if(j.ok){
+        toastErr('✓ 已回填飞书：' + r.host + ' ' + r.date + '（' + r.total + ' 分 / ' + j.fieldsWritten + ' 字段）');
+      } else if(j.skipped){
+        // 跳过不报错，仅短提示
+        toastErr('ⓘ 飞书回填跳过：' + j.reason);
+      } else {
+        toastErr('✗ 飞书回填失败：' + (j.reason || j.error || '未知错误'));
+      }
+    }).catch(function(e){
+      // 服务未启/网络断，不阻塞评分
+      console.log('飞书回填异常（不影响评分）:', e.message);
+    });
+    // V3.3：同步折叠块数据（金句/问题/历史评分）到飞书同步表
+    syncFeishuLibs(r);
+  }catch(e){ console.log('autoFillFeishu 包装异常:', e.message); }
+}
+
+// V3.3：把本场金句/问题/历史评分同步到飞书对应表（黄金话术库/问题话术库/历史评分）
+function syncFeishuLibs(r){
+  try{
+    var payload = {golden: [], problems: [], history: [], cases: []};
+    // 金句（4星+）
+    if(r.golden && r.golden.items){
+      for(var i=0;i<r.golden.items.length;i++){
+        var g = r.golden.items[i];
+        if(g.star >= 4){
+          payload.golden.push({host:r.host, date:r.date, studio:r.studio, tags:g.tags||[], star:g.star, text:g.text});
+        }
+      }
+    }
+    // 问题（从训练/问题收集）
+    if(r.training && r.training.length){
+      for(var j=0;j<r.training.length;j++){
+        var t = r.training[j];
+        payload.problems.push({host:r.host, date:r.date, studio:r.studio, type:t.mod||'能力缺口', desc:t.gap||'', prio:''});
+      }
+    }
+    // 历史评分
+    var c1s = null;
+    if(r.modules) for(var k=0;k<r.modules.length;k++){ if(r.modules[k].key==='c1') c1s = r.modules[k].score; }
+    payload.history.push({host:r.host, date:r.date, studio:r.studio, product:r.product||'', total:r.total, grade:r.grade, c1:c1s});
+    if(!payload.golden.length && !payload.problems.length && !payload.history.length) return;
+    // 云端部署版暂不支持 sync（需单独端点），仅本地 3712 时同步
+    var isLocal = true;
+    try{ isLocal = (typeof location === 'undefined' || location.protocol === 'file:' || location.hostname === '127.0.0.1' || location.hostname === 'localhost'); }catch(e){}
+    if(isLocal){
+      fetch('http://127.0.0.1:3712/api/feishu-sync', {
+        method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)
+      }).then(function(rs){ return rs.json(); }).then(function(j){
+        if(j.ok && j.total > 0){
+          toastErr('✓ 飞书同步：写入 ' + j.written + ' / 去重 ' + j.skipped + (j.failed ? ' / 失败 ' + j.failed : ''));
+        }
+      }).catch(function(e){ console.log('飞书同步异常:', e.message); });
+    }
+  }catch(e){ console.log('syncFeishuLibs 异常:', e.message); }
+}
+
+// V3.4：批量评分完成后，把 TOP1 评选结果同步到飞书 TOP1 表
+function syncTop1ToFeishu(results, top1){
+  try{
+    if(!top1 || !top1.host) return;
+    var valid = results.filter(function(r){ return typeof r.total === 'number'; });
+    if(!valid.length) return;
+    // 第二名（候选池内）
+    var candidates = valid.filter(function(r){ return !c1HasZero(r); });
+    var second = null;
+    for(var i=0;i<candidates.length;i++){
+      if(candidates[i] !== top1 && (!second || candidates[i].total > second.total)) second = candidates[i];
+    }
+    var criteria = [];
+    try{
+      var met = checkTop1Criteria(top1, candidates);
+      for(var j=0;j<met.length;j++) criteria.push(met[j].label);
+    }catch(e){}
+    // 产品理解检查
+    var c1Chk = c1HasZero(top1) ? '✗ 未通过' : '✓ 通过';
+    // 推荐依据（取三标准描述）
+    var reason = '';
+    try{
+      var met2 = checkTop1Criteria(top1, candidates);
+      reason = met2.map(function(c){return c.desc;}).join('；');
+    }catch(e){}
+    if(!reason) reason = '总分最高，综合表现最优';
+    var payload = {top1: [{
+      date: top1.date || '', studio: top1.studio || '', host: top1.host,
+      total: top1.total, grade: top1.grade, criteria: criteria, reason: reason,
+      second: second ? second.host : '', diff: second ? Math.round((top1.total - second.total)*10)/10 : '',
+      c1Check: c1Chk
+    }]};
+    fetch('http://127.0.0.1:3712/api/feishu-sync', {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)
+    }).then(function(rs){ return rs.json(); }).then(function(j){
+      if(j.ok && j.total > 0){
+        toastErr('✓ TOP1 已同步飞书：' + top1.host + '（' + top1.total + ' 分）' + (j.written ? ' 新建' : ' 更新'));
+      }
+    }).catch(function(e){ console.log('TOP1 飞书同步异常:', e.message); });
+  }catch(e){ console.log('syncTop1ToFeishu 异常:', e.message); }
+}
+
+// ================= 1. 解析器（SRT / [HH:MM] / 纯文本 → 段落） =================
+function parseTranscript(text){
+  text = text.replace(/^\uFEFF/,'').replace(/\r/g,'');
+  var segs = [];
+  // SRT: 序号 + 时间轴 + 文本
+  var isSrt = /^\d+\s*\n\d{1,2}:\d{2}:\d{2}[,.]\d{3}\s*-->\s*\d{1,2}:\d{2}:\d{2}/m.test(text);
+  if(isSrt){
+    var blocks = text.split(/\n\s*\n/);
+    for(var i=0;i<blocks.length;i++){
+      var b = blocks[i].trim(); if(!b) continue;
+      var m = b.match(/(\d{1,2}:\d{2}:\d{2})[,.]\d{3}\s*-->/);
+      var lines = b.split('\n');
+      var body = lines.filter(function(l){return !/^\d+$/.test(l.trim()) && !/-->\s*$/.test(l) && !/^\d{1,2}:\d{2}:\d{2}/.test(l)}).join(' ');
+      body = body.trim(); if(!body) continue;
+      segs.push({ts:m?m[1]:'', text:body});
+    }
+  } else {
+    // 通用 TXT 多格式：说话人+时间戳（"销售同事 00:00:00"）｜ [HH:MM] 前缀 ｜ 纯文本
+    // 先探测是否含"说话人 时间戳"模式
+    var hasSpeakerTs = /^[^\n]*\s\d{1,2}:\d{2}:\d{2}\s*$/m.test(text);
+    var lines = text.split('\n');
+    var buf = [], cur = null;
+    for(var i=0;i<lines.length;i++){
+      var l = lines[i].trim(); if(!l) continue;
+      // 过滤标题行（如"【字幕】"）
+      if(/^【.*】$/.test(l)) continue;
+      // 说话人 + HH:MM:SS（独立行）：如 "销售同事 00:00:00"
+      var mS = l.match(/^(.+?)\s+(\d{1,2}):(\d{2}):(\d{2})$/);
+      if(mS && hasSpeakerTs){
+        if(cur){ buf.push(cur); }
+        cur = {ts: mS[2]+':'+mS[3]+':'+mS[4], text: ''};
+        continue;
+      }
+      // [HH:MM] 或 HH:MM 前缀 + 文本
+      var m = l.match(/^\[?(\d{1,2}:\d{2}(?::\d{2})?)\]?\s*(.*)$/);
+      if(m && m[2]){
+        if(cur){buf.push(cur);cur=null}
+        cur = {ts:m[1], text:m[2]};
+        continue;
+      }
+      // 纯文本：并入当前段（有 ts 则追加），无 ts 则新开
+      if(cur){
+        cur.text += (cur.text ? ' ' : '') + l;
+      } else {
+        buf.push({ts:'', text:l});
+      }
+    }
+    if(cur) buf.push(cur);
+    segs = buf;
+  }
+  return segs;
+}
+
+// 全文（供关键词全局匹配）
+function fullText(segs){return segs.map(function(s){return s.text}).join('\n')}
+
+// 关键词命中 → 证据（时间戳 + 上下文）
+function hitEvidence(segs, kw, ctxLen){
+  ctxLen = ctxLen || 36;
+  var lower = kw.toLowerCase();
+  var isRegex = /[*+?^${}()|[\]\\.]/.test(kw);
+  for(var i=0;i<segs.length;i++){
+    var t = segs[i].text;
+    var idx;
+    if(isRegex){ try{ var m = t.match(new RegExp(kw,'i')); idx = m ? m.index : -1 }catch(e){ idx=-1 } }
+    else { idx = t.toLowerCase().indexOf(lower); }
+    if(idx >= 0){
+      var s = Math.max(0, idx-ctxLen), e = Math.min(t.length, idx+kw.length+ctxLen);
+      var ctx = (s>0?'…':'') + t.slice(s,e) + (e<t.length?'…':'');
+      return {kw: kw, ts: segs[i].ts, ctx: ctx};
+    }
+  }
+  return null;
+}
+
+// 批量命中检测：返回 {hitList:[{kw,ts,ctx}], missList:[kw], count}
+function matchKeywords(segs, keywords){
+  var hit = [], miss = [];
+  for(var i=0;i<keywords.length;i++){
+    var ev = hitEvidence(segs, keywords[i]);
+    if(ev) hit.push(ev); else miss.push(keywords[i]);
+  }
+  return {hits: hit, misses: miss, count: hit.length};
+}
+
+// ================= 2. 完成度 + 质量 双层引擎 =================
+function evalComplete(rule, segs, ctx){
+  ctx = ctx || {};
+  switch(rule.type){
+    case 'always': return {level:1, detail:'基础项（按质量因子判断）', hits:[], misses:[]};
+    case 'count': {
+      // mergeKnowledge：合并当前考核产品的专属知识词（1.1 产品知识，包袋参数词从 xlsx 标准话术提炼）
+      var kw = rule.keywords;
+      var extra = [];
+      if(rule.mergeKnowledge && ctx.productKey){
+        var kp = GRADING_STANDARD.sellpoints[ctx.productKey];
+        if(kp && kp.knowledge) extra = kp.knowledge;
+      }
+      var kwAll = kw.concat(extra);
+      var r = matchKeywords(segs, kwAll);
+      var n = r.count;
+      var level = n >= rule.minFull ? 1 : (n >= rule.minHalf ? 0.5 : 0);
+      return {level:level, detail:'命中 ' + n + '/' + kwAll.length + ' 个关键词（满≥' + rule.minFull + '，半≥' + rule.minHalf + '）', hits:r.hits, misses:r.misses};
+    }
+    case 'step': {
+      var hitSteps = [];
+      for(var i=0;i<rule.steps.length;i++){
+        var stepKw = STEP_WORDS[rule.steps[i]] || [];
+        var r2 = matchKeywords(segs, stepKw);
+        if(r2.count >= (r2.misses.length===0?1:1) && r2.count>0) hitSteps.push(rule.steps[i]);
+      }
+      var n2 = hitSteps.length;
+      var lv = n2 >= rule.minFull ? 1 : (n2 >= rule.minHalf ? 0.5 : 0);
+      return {level:lv, detail:'标准顺序命中 ' + n2 + '/' + rule.steps.length + ' 步（' + hitSteps.join('→') + '）', hits:[], misses:rule.steps.filter(function(s){return hitSteps.indexOf(s)<0}).map(function(s){return '未命中步骤：'+s})};
+    }
+    case 'sellpoint': {
+      var sp = ctx.sellpointResult || {covered:0, total:0};
+      var lv2 = sp.covered >= rule.minFull ? 1 : (sp.covered >= rule.minHalf ? 0.5 : 0);
+      return {level:lv2, detail:'7 大核心卖点覆盖 ' + sp.covered + '/' + sp.total, hits:[], misses:sp.missNames || []};
+    }
+    case 'baseline': {
+      var bl = ctx.baselineResult || {errors:0};
+      var lv3 = bl.errors === 0 ? 1 : (bl.errors === 1 ? 0.5 : 0);
+      // hits/misses 转为可渲染的字符串结构（对象数组直接 join 会显示 [object Object]）
+      var errText = (bl.errorItems||[]).map(function(e){
+        var ev = e.ev || {};
+        return {kw: e.field, ts: ev.ts || '', ctx: '命中错误表述「' + e.wrong.join(' / ') + '」' + (ev.ctx ? '：' + ev.ctx : '')};
+      });
+      var okText = (bl.okItems||[]).map(function(o){ return o.field; });
+      return {level:lv3, detail:'基准库错误 ' + bl.errors + ' 处（0 处=满，1 处=半，≥2=0）', hits: errText, misses: okText};
+    }
+    default: return {level:0, detail:'未定义规则', hits:[], misses:[]};
+  }
+}
+
+function evalQuality(factors, segs, ctx){
+  var score = 3; // 基础 3 分
+  var applied = [];
+  for(var i=0;i<factors.length;i++){
+    var f = factors[i];
+    var ok = false;
+    if(f.test === 'baseline') ok = (ctx.baselineResult && ctx.baselineResult.errors === 0);
+    else if(f.test === 'baselineZero') ok = (ctx.baselineResult && ctx.baselineResult.errors === 0);
+    else if(f.test === 'baselineExact') ok = (ctx.baselineResult && ctx.baselineResult.errors === 0 && ctx.baselineResult.checked > 0);
+    else if(f.test === 'sellpointAll') ok = (ctx.sellpointResult && ctx.sellpointResult.covered === ctx.sellpointResult.total);
+    else if(f.test === 'sellpointQuality') ok = (ctx.sellpointResult && ctx.sellpointResult.qualityHits >= 2);
+    else if(f.test === 'stepAll') ok = (ctx.stepAll || false);
+    else if(f.test === 'stepOrder') ok = (ctx.stepOrdered || false);
+    else if(f.test === 'fluency') ok = !ctx.fluencyIssue;
+    else if(f.test === 'askChain') ok = (ctx.askChain || false);
+    else if(f.test === 'functionBenefit') ok = (ctx.functionBenefit || false);
+    else if(f.test === 'earlyEngage') ok = (ctx.earlyEngage || false);
+    else if(f.test === 'repeatAsk') ok = (ctx.repeatAsk || false);
+    else if(f.test === 'reasonChain') ok = (ctx.reasonChain || false);
+    else if(f.test === 'priceNumber') ok = /[0-9]+(\.[0-9]+)?\s*(元|块)/.test(ctx.raw);
+    else if(f.test === 'pause') ok = /\n\n+/.test(ctx.raw) || (ctx.segCount > 30);
+    else if(f.test === 'rhythm') ok = (ctx.rhythm || false);
+    else if(f.test === 'loopCount') ok = (ctx.loopCount || 0) >= 2;
+    else if(f.words){
+      var r = matchKeywords(segs, f.words);
+      ok = r.count > 0;
+      if(ok) applied.push(f.words[0] + (r.hits[0]?' @'+(r.hits[0].ts||''):''));
+    }
+    if(ok && score < 5){ score++; }
+  }
+  return {score: score, applied: applied};
+}
+
+// 步骤词表（V2 标准逻辑：用户需求→产品定位→核心卖点→使用价值→购买建议）
+var STEP_WORDS = {
+  '用户需求': ['几天', '几个人', '需求', '装什么', '出差', '旅行', '出行', '适合你', '你平时'],
+  '产品定位': ['适合', '为.*设计', '定位', '人群', '差旅', '商务', '家庭', '女生'],
+  '核心卖点': ['材质', '轮', '拉杆', '容量', '抗菌', 'PC', '锁', '收纳', '承重', '轻'],
+  '使用价值': ['省心', '方便', '放心', '不用', '轻松', '值得', '不拖后腿', '安心', '耐用'],
+  '购买建议': ['推荐', '建议', '选.*寸', '拍', '下单', '链接', '适合你', '直接'],
+  '讲解': ['讲', '看', '这款', '这个'],
+  '互动': ['扣1', '公屏', '评论区', '问我', '刚.*问'],
+  '促单': ['拍', '下单', '链接', '加购', '购物车', '直接买']
+};
+
+// ================= 3. 主评分 =================
+// ASR 纠错（借鉴 GPT：转写错误校正，评分前替换；不改写原始文件）
+function applyAsrFix(segs){
+  var fixes = GRADING_STANDARD.asrFix || [];
+  if(!fixes.length) return segs;
+  var out = [];
+  for(var i=0;i<segs.length;i++){
+    var t = segs[i].text, changed = false;
+    for(var j=0;j<fixes.length;j++){
+      if(t.indexOf(fixes[j][0]) >= 0){ t = t.split(fixes[j][0]).join(fixes[j][1]); changed = true; }
+    }
+    // 中文数字归一化（SenseVoice 转写常把"90%"写为"百分之九十"、"6系"写为"六系"，
+    // 数值口径校验 numCheck 依赖阿拉伯数字——归一化后评分与原始 SRT 口径一致）
+    var cn = t;
+    cn = cn.replace(/百分之(\d+)/g, '$1%');
+    cn = cn.replace(/百分之([一二三四五六七八九十两]+)/g, function(m, s){ return cnToAr(s) + '%'; });
+    // 小数（一点二厘米 → 1.2厘米）
+    cn = cn.replace(/([一二三四五六七八九十]+)点([零一二三四五六七八九]+)/g, function(m, a, b){
+      var d = {'零':'0','一':'1','二':'2','两':'2','三':'3','四':'4','五':'5','六':'6','七':'7','八':'8','九':'9'};
+      return cnToAr(a) + '.' + b.split('').map(function(c){ return d[c]!==undefined?d[c]:c; }).join('');
+    });
+    cn = cn.replace(/([一二三四五六七八九十]+)系/g, function(m, s){ return cnToAr(s) + '系'; });
+    cn = cn.replace(/([一二三四五六七八九十]+)厘米/g, function(m, s){ return cnToAr(s) + '厘米'; });
+    cn = cn.replace(/([一二三四五六七八九十]+)公斤/g, function(m, s){ return cnToAr(s) + '公斤'; });
+    cn = cn.replace(/([一二三四五六七八九十]+)升/g, function(m, s){ return cnToAr(s) + '升'; });
+    cn = cn.replace(/([一二三四五六七八九十]+)寸/g, function(m, s){ return cnToAr(s) + '寸'; });
+    cn = cn.replace(/([一二三四五六七八九十]+)kg/g, function(m, s){ return cnToAr(s) + 'kg'; });
+    if(cn !== t){ t = cn; changed = true; }
+    out.push(changed ? {ts: segs[i].ts, text: t, asrFixed: true} : segs[i]);
+  }
+  return out;
+}
+// 中文数字 → 阿拉伯数字（支持一到九十九）
+function cnToAr(s){
+  var digits = {'零':0,'一':1,'二':2,'两':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9};
+  if(s.length === 1) return (digits[s] !== undefined ? String(digits[s]) : s);
+  var n = 0;
+  if(s.indexOf('十') === 0){ n = 10; var r1 = s.slice(1); if(r1) n += (digits[r1]||0); }
+  else if(s.indexOf('十') > 0){
+    var parts = s.split('十');
+    n = (digits[parts[0]]||0) * 10 + (parts[1] ? (digits[parts[1]]||0) : 0);
+  } else {
+    for(var i=0;i<s.length;i++){ n = n*10 + (digits[s[i]]||0); }
+  }
+  return String(n);
+}
+
+function runGrading(segs, productKey){
+  var STD = GRADING_STANDARD;
+  segs = applyAsrFix(segs);
+  var raw = fullText(segs);
+  // 3.0a 自动识别考核标准：productKey==='auto' 时按"讲品匹配"自动选主产品
+  // 主品判定综合分 = 该品专属词命中数×1000（最强"在讲这个品"信号）+ 窗口话术量（讲得多）→ 降序
+  var autoMatch = null;
+  var productsResult = analyzeProducts(segs);
+  if(productKey === 'auto'){
+    // A 兜底拦截：整场无任何产品特征（专属词 0 命中 且 卖点关键词 0 命中）→ 禁止出分
+    // 主品判定：全品遍历（不限于 analyzeProducts 别名识别——宿浩淇场无品名但含 plus 特征词如袁泉/顶开盖/隐私）
+    // 打分 = 专属词命中×1000 + 卖点关键词命中（最强"在讲这个品"信号优先）
+    var pxConf = STD.productExclusive || {};
+    var bestKey = null, bestScore = -1;
+    for(var pk in STD.products){
+      var exHits = 0;
+      var px = pxConf[pk];
+      if(px && px.length){ for(var w=0;w<px.length;w++){ if(raw.indexOf(px[w]) >= 0) exHits++; } }
+      var sellHits = 0;
+      var spk = STD.sellpoints[pk];
+      if(spk && spk.list) for(var li=0; li<spk.list.length; li++){
+        for(var wi=0; wi<spk.list[li].keywords.length; wi++){
+          if(raw.indexOf(spk.list[li].keywords[wi]) >= 0){ sellHits++; break; }
+        }
+      }
+      var score = exHits * 1000 + sellHits;
+      if(score > bestScore){ bestScore = score; bestKey = pk; }
+    }
+    if(bestScore <= 0){
+      return { noProduct: true, pkgHint: detectBagHint(raw), meta: {segCount: segs.length, chars: raw.length} };
+    }
+    var useKey = bestKey;
+    autoMatch = {auto: true, fromKey: useKey, mainFormal: 0, totalFormal: productsResult.products.length, detected: productsResult.products.length};
+    productKey = useKey;
+  }
+  var ctx = { raw: raw, segs: segs, segCount: segs.length, productKey: productKey };
+
+  // 3.0 预计算：卖点覆盖 + baseline + 上下文因子
+  var sp = STD.sellpoints[productKey] || STD.sellpoints['pistachio_2'];
+  var spRes = {covered:0, total:sp.list.length, items:[], qualityHits:0, missNames:[]};
+  for(var i=0;i<sp.list.length;i++){
+    var p = sp.list[i];
+    var r = matchKeywords(segs, p.keywords);
+    var qualityHits = r.count >= 2;
+    if(qualityHits) spRes.qualityHits++;
+    // 卖点质量分级：≥2 词命中=讲全；讲全且带场景/利益词=5 分；仅提及=2；未覆盖=0
+    var scenCnt = matchKeywords(segs, ['方便', '可以', '场景', '比如', '所以', '放心', '就能']).count;
+    var q = r.count >= 2 ? (scenCnt > 0 ? 5 : 3) : (r.count > 0 ? 2 : 0);
+    spRes.items.push({name:p.name, covered:r.count>0, kwHits:r.count, keywords:p.keywords, ev:r.hits.slice(0,2), quality:q});
+    if(r.count>0) spRes.covered++; else spRes.missNames.push(p.name);
+  }
+  ctx.sellpointResult = spRes;
+
+  var bl = {errors:0, checked:0, items:[], errorItems:[], okItems:[]};
+  // baseline 全局化（B 修复）：整场扫描所有错误口径，与 productKey 无关——
+  // 即便选错 productKey，文本里"90%抗菌率""6系铝""3公斤包"这类错误也会被抓到，不再出现"选错品 baseline 0 错"的假象
+  // 来源 1）全局 baseline.facts（行李箱 PC/科思创/拉杆等）；2）当前品的 baselineFacts（包袋面料/自重/分区等），后者是补充
+  var seenFields = {};
+  function pushFact(f){
+    if(!f || !f.field) return;
+    if(seenFields[f.field]) return;  // 同 field 已查过不重复
+    seenFields[f.field] = 1;
+    bl.checked++;
+    var wrongHits = [];
+    for(var j=0;j<(f.wrong||[]).length;j++){
+      var ev = hitEvidence(segs, f.wrong[j]);
+      if(ev) wrongHits.push(ev);
+    }
+    var isError = wrongHits.length > 0;
+    var numEv = null;
+    if(!isError && f.numCheck){
+      var nc = f.numCheck;
+      var badRe = new RegExp('(' + nc.bad.join('|') + ')');
+      if(badRe.test(raw)){
+        var ctxRe = new RegExp('(' + nc.ctx + ').{0,24}(' + nc.bad.join('|') + ')|(' + nc.bad.join('|') + ').{0,24}(' + nc.ctx + ')');
+        var cm = raw.match(ctxRe);
+        if(cm){ isError = true; numEv = {ts:'', ctx:'数值口径错误：' + cm[0].slice(0,40)}; }
+      }
+    }
+    var errInfo = wrongHits.length > 0 ? {wrong: f.wrong, ev: wrongHits[0]} : (numEv ? {wrong:['数值口径错误'], ev: numEv} : null);
+    if(isError){ bl.errors++; bl.errorItems.push({field:f.field, wrong:(errInfo&&errInfo.wrong)||f.wrong, ev:(errInfo&&errInfo.ev)||null}); }
+    else { bl.okItems.push({field:f.field}); }
+    bl.items.push({field:f.field, standard:f.standard, wrong:f.wrong, error:isError, ev:(errInfo&&errInfo.ev)||null, numErr: !!numEv});
+  }
+  // 先查全局（行李箱口径）——防止选错品时该品的错误词被忽略
+  var globalFacts = (STD.baseline && STD.baseline.facts) || [];
+  for(var i=0;i<globalFacts.length;i++) pushFact(globalFacts[i]);
+  // 再叠加当前品的 baselineFacts（包袋品专属）
+  var ownFacts = (STD.sellpoints[productKey] && STD.sellpoints[productKey].baselineFacts) || [];
+  for(var j=0;j<ownFacts.length;j++) pushFact(ownFacts[j]);
+  ctx.baselineResult = bl;
+
+  // 额外上下文因子
+  var askWords = ['几天', '几个人', '飞机', '高铁', '装什么'];
+  ctx.askChain = matchKeywords(segs, askWords).count >= 3;
+  ctx.repeatAsk = matchKeywords(segs, ['扣1', '打在公屏', '评论区', '问我']).count >= 2;
+  ctx.functionBenefit = /(材质|轮|容量|锁|抗菌|售后).{0,18}(省心|方便|放心|不用|轻松)/.test(raw);
+  ctx.reasonChain = /(PC|抗菌|轮|快取|售后|隐私|耐用).{0,10}(PC|抗菌|轮|快取|售后|隐私|耐用).{0,10}(所以|综合|就是)/.test(raw);
+  ctx.fluencyIssue = (raw.match(/这个/g)||[]).length > 12 || (raw.match(/然后/g)||[]).length > 10;
+  ctx.earlyEngage = (segs.length > 3) && matchKeywords(segs.slice(0, Math.max(3, Math.floor(segs.length*0.2))), ['刚.*问', '有朋友问', '评论区']).count > 0;
+  ctx.loopCount = matchKeywords(segs, ['再讲', '再说', '回到', '重点', '前面说', '还有']).count;
+  // 节奏：讲解/互动/促单三类是否都出现且分散
+  var interPos = matchKeywords(segs, STEP_WORDS['互动']);
+  var promoPos = matchKeywords(segs, STEP_WORDS['促单']);
+  ctx.rhythm = interPos.count > 0 && promoPos.count > 0;
+
+  // 3.1 逐能力逐子标准（V2 能力矩阵 c1-c8）
+  var moduleResults = [];
+  var order = ['c1','c2','c3','c4','c5','c6','c7','c8'];
+  for(var mi=0; mi<order.length; mi++){
+    var mk = order[mi];
+    var mod = STD.modules[mk];
+    var stdRes = [];
+    var sum = 0;
+    for(var si=0; si<mod.standards.length; si++){
+      var s = mod.standards[si];
+      var cRes = evalComplete(s.complete, segs, ctx);
+      var qRes = evalQuality(s.quality.factors, segs, ctx);
+      // 证据契约收紧：完成度不足时质量封顶（0.5 封顶 3 分，0 封顶 1 分）——"找不到证据不给分"人工口径
+      if(cRes.level === 0.5 && qRes.score > 3) qRes.score = 3;
+      if(cRes.level === 0) qRes.score = 1;
+      var score = Math.round(cRes.level * qRes.score * 20);
+      sum += score;
+      stdRes.push({id:s.id, name:s.name, desc:s.desc, complete:cRes, quality:qRes, score:score});
+    }
+    var modScore = stdRes.length ? Math.round(sum / stdRes.length) : 0;
+    moduleResults.push({key:mk, name:mod.name, weight:mod.weight, analyze:!!mod.analyze, score:modScore, weighted: mod.weight>0 ? Math.round(modScore*mod.weight/100*10)/10 : null, standards:stdRes});
+  }
+
+  // 3.2 总分 + 等级（只计权重>0 的能力）
+  var total = 0;
+  for(var i=0;i<moduleResults.length;i++){
+    if(moduleResults[i].weight > 0) total += moduleResults[i].score * moduleResults[i].weight / 100;
+  }
+  // baseline 信息准确性红旗扣分：每处错误 -4 分（人工将信息准确性作为重扣项），封顶 -12
+  var blPenalty = Math.min(12, bl.errors * 4);
+  total = Math.round((total - blPenalty) * 10) / 10;
+  if(total < 0) total = 0;
+  var grade = 'E';
+  for(var g=0;g<STD.grades.length;g++){ if(total >= STD.grades[g].min){ grade = STD.grades[g].name; break; } }
+
+  // 3.3 概览信息（最优/最弱只从计分能力中选）
+  var scored = moduleResults.filter(function(m){return m.weight>0});
+  var sorted = scored.slice().sort(function(a,b){return b.score-a.score});
+  var best = sorted[0], worst = sorted[sorted.length-1];
+  var strength = '', problem = '';
+  // 核心优势：模块内最高分子标准（≥80）
+  var bestStd = null;
+  for(var i=0;i<moduleResults.length;i++) for(var j=0;j<moduleResults[i].standards.length;j++){
+    var s2 = moduleResults[i].standards[j];
+    if(!bestStd || s2.score > bestStd.score) bestStd = s2;
+  }
+  if(bestStd && bestStd.score >= 80) strength = bestStd.name + ' ' + bestStd.score + '分（' + (bestStd.complete.hits[0]?bestStd.complete.hits[0].ctx:'') + '）';
+  else strength = (best?best.name+' '+best.score+'分':'—');
+  // 核心问题：最低分子标准（≤40）
+  var worstStd = null;
+  for(var i=0;i<moduleResults.length;i++) for(var j=0;j<moduleResults[i].standards.length;j++){
+    var s3 = moduleResults[i].standards[j];
+    if(!worstStd || s3.score < worstStd.score) worstStd = s3;
+  }
+  problem = worstStd ? worstStd.name + ' ' + worstStd.score + '分' : '—';
+
+  // 案例：优秀 TOP3（质量 5 分或得分 100 的标准证据）+ 不足 TOP3（完成度 0 或得分≤20）
+  var goodCases = [], badCases = [];
+  for(var i=0;i<moduleResults.length;i++) for(var j=0;j<moduleResults[i].standards.length;j++){
+    var s4 = moduleResults[i].standards[j];
+    var evTxt = (s4.complete.hits[0]||{}).ctx || (s4.complete.hits[0]||{}).kw || '';
+    var ts = (s4.complete.hits[0]||{}).ts || '';
+    if(s4.score >= 90 && evTxt) goodCases.push({std:s4.id+' '+s4.name, ev:evTxt, ts:ts, mod:moduleResults[i].name});
+    if(s4.score <= 20) badCases.push({std:s4.id+' '+s4.name, miss:(s4.complete.misses||[]).slice(0,2).join('、'), ev:evTxt, mod:moduleResults[i].name});
+  }
+  // baseline 错误也进不足案例
+  for(var i=0;i<bl.errorItems.length;i++){
+    var e = bl.errorItems[i];
+    badCases.push({std:'1.6 信息准确性·'+e.field, ev:'基准：「'+e.wrong.join(' / ')+'」', ts:e.ev?e.ev.ts:'', mod:'产品知识', base:true});
+  }
+  goodCases = goodCases.slice(0,3); badCases = badCases.slice(0,3);
+
+  // 一句话总评
+  var tagline = '';
+  if(best && best.score >= 75 && worst && worst.score <= 30) tagline = '「会讲产品，但还没形成完整成交闭环」——' + best.name + ' 明显强于 ' + worst.name;
+  else if(worst && worst.score <= 30) tagline = '「' + worst.name + '是最大短板」——需优先补齐再谈整体提升';
+  else if(total >= 80) tagline = '「整体表现优秀，保持并精细化」';
+  else tagline = '「整体处于' + grade + '级，需按改进建议逐项训练」';
+
+  // 改进建议：计分能力中最低分 3 个映射训练模板（V2 改善闭环四要素：能力缺口→问题→训练动作→下周验证）
+  var train = [];
+  var s5 = moduleResults.filter(function(m){return m.weight>0}).sort(function(a,b){return a.score-b.score});
+  for(var i=0;i<Math.min(3, s5.length);i++){
+    var m = s5[i];
+    if(m.score >= 80) continue;
+    // 能力缺口：该能力内低分子标准（score<=40）提取未命中词作为"问题证据"
+    var probs = [];
+    for(var j=0;j<m.standards.length;j++){
+      var ss = m.standards[j];
+      if(ss.score <= 40){
+        var miss = (ss.complete.misses||[]).slice(0,3).join('、');
+        probs.push(ss.name + (miss ? '（未命中：' + miss + '）' : ''));
+      }
+    }
+    var target = m.score < 45 ? 60 : 70;
+    train.push({
+      mod: m.name, score: m.score, key: m.key,
+      gap: probs.join('；') || '整体表现低于合格线（' + m.score + ' 分）',
+      action: STD.training[m.key] || '',
+      verify: '下次评分该能力 ≥ ' + target + ' 分'
+    });
+  }
+
+  return {
+    meta: {segCount: segs.length, chars: raw.length},
+    total: total, grade: grade,
+    modules: moduleResults,
+    sellpoints: {product: sp.name, items: spRes.items, covered: spRes.covered, total: spRes.total},
+    autoMatch: autoMatch,
+    baseline: {errors: bl.errors, items: bl.items},
+    overview: {strength: strength, problem: problem, best: best.name+' '+best.score+'分', worst: worst.name+' '+worst.score+'分', tagline: tagline},
+    cases: {good: goodCases, bad: badCases},
+    training: train,
+    golden: analyzeGolden(segs, productKey),
+    products: productsResult
+  };
+}
+
+// ================= 3.6 多品识别 + 10 分钟窗口卖点覆盖引擎 =================
+// 3.6.1 单轮/窗口级八维计分（三级评分层级：单轮评分用；信息准确性 baseline 按整场不计入单轮）
+function gradeWindow(segs, productKey){
+  var STD = GRADING_STANDARD;
+  var raw = fullText(segs);
+  if(!raw || !raw.trim()) return null;
+  var ctx = { raw: raw, segs: segs, segCount: segs.length, productKey: productKey };
+  // 窗口级卖点覆盖
+  var sp = STD.sellpoints[productKey] || STD.sellpoints['pistachio_2'];
+  var spRes = {covered:0, total:sp.list.length, items:[], qualityHits:0, missNames:[]};
+  for(var i=0;i<sp.list.length;i++){
+    var p = sp.list[i];
+    var r = matchKeywords(segs, p.keywords);
+    if(r.count >= 2) spRes.qualityHits++;
+    spRes.items.push({name:p.name, covered:r.count>0, kwHits:r.count, keywords:p.keywords, ev:r.hits.slice(0,2)});
+    if(r.count>0) spRes.covered++; else spRes.missNames.push(p.name);
+  }
+  ctx.sellpointResult = spRes;
+  // 上下文因子（窗口级）
+  ctx.askChain = matchKeywords(segs, ['几天','几个人','飞机','高铁','装什么']).count >= 3;
+  ctx.repeatAsk = matchKeywords(segs, ['扣1','打在公屏','评论区','问我']).count >= 2;
+  ctx.functionBenefit = /(材质|轮|容量|锁|抗菌|售后).{0,18}(省心|方便|放心|不用|轻松)/.test(raw);
+  ctx.reasonChain = /(PC|抗菌|轮|快取|售后|隐私|耐用).{0,10}(PC|抗菌|轮|快取|售后|隐私|耐用).{0,10}(所以|综合|就是)/.test(raw);
+  ctx.fluencyIssue = (raw.match(/这个/g)||[]).length > 12 || (raw.match(/然后/g)||[]).length > 10;
+  ctx.earlyEngage = (segs.length > 3) && matchKeywords(segs.slice(0, Math.max(3, Math.floor(segs.length*0.2))), ['刚.*问','有朋友问','评论区']).count > 0;
+  ctx.loopCount = matchKeywords(segs, ['再讲','再说','回到','重点','前面说','还有']).count;
+  var interPos = matchKeywords(segs, STEP_WORDS['互动']);
+  var promoPos = matchKeywords(segs, STEP_WORDS['促单']);
+  ctx.rhythm = interPos.count > 0 && promoPos.count > 0;
+  // 八维计分（与 runGrading 3.1 同逻辑；无 baseline 扣分）
+  var moduleResults = [];
+  var order = ['c1','c2','c3','c4','c5','c6','c7','c8'];
+  for(var mi=0; mi<order.length; mi++){
+    var mk = order[mi];
+    var mod = STD.modules[mk];
+    var stdRes = [];
+    var sum = 0;
+    for(var si=0; si<mod.standards.length; si++){
+      var s = mod.standards[si];
+      var cRes = evalComplete(s.complete, segs, ctx);
+      var qRes = evalQuality(s.quality.factors, segs, ctx);
+      if(cRes.level === 0.5 && qRes.score > 3) qRes.score = 3;
+      if(cRes.level === 0) qRes.score = 1;
+      var score = Math.round(cRes.level * qRes.score * 20);
+      sum += score;
+      stdRes.push({id:s.id, name:s.name, desc:s.desc, complete:cRes, quality:qRes, score:score});
+    }
+    var modScore = stdRes.length ? Math.round(sum / stdRes.length) : 0;
+    moduleResults.push({key:mk, name:mod.name, weight:mod.weight, score:modScore, weighted: mod.weight>0 ? Math.round(modScore*mod.weight/100*10)/10 : null, standards:stdRes});
+  }
+  var total = 0;
+  for(var i=0;i<moduleResults.length;i++){ if(moduleResults[i].weight>0) total += moduleResults[i].score * moduleResults[i].weight / 100; }
+  total = Math.round(total*10)/10;
+  var grade = 'E';
+  for(var g=0;g<STD.grades.length;g++){ if(total >= STD.grades[g].min){ grade = STD.grades[g].name; break; } }
+  return {total: total, grade: grade, modules: moduleResults, sellpoint: {covered: spRes.covered, total: spRes.total, missNames: spRes.missNames}};
+}
+
+function tsToSec(ts){
+  if(!ts) return null;
+  var p = String(ts).split(':');
+  if(p.length < 2) return null;
+  var h = Number(p[p.length-3]||0), m = Number(p[p.length-2]||0), s = Number(p[p.length-1]||0);
+  if(isNaN(h)||isNaN(m)||isNaN(s)) return null;
+  return h*3600 + m*60 + s;
+}
+function analyzeProducts(segs){
+  var PRODS = GRADING_STANDARD.products || {};
+  var SELLS = GRADING_STANDARD.sellpoints || {};
+  var results = [];
+  // 1) 扫描：逐段文本，匹配所有产品别名 → 收集所有最长命中候选（多 product 同长度时全部入库，后续消歧）
+  // 弱别名黑名单：单字符/通用版本词不参与多品识别（防泛匹配误判——如 "P"→"p" 匹配 tra pro/IP、"一代二代" 匹配任何系列）
+  var WEAK_ALIAS = ['p','plus','一代','二代','一','二'];
+  var hitsMap = {};
+  for(var key in PRODS){ hitsMap[key] = []; }
+  for(var i=0;i<segs.length;i++){
+    var t = segs[i].text.toLowerCase();
+    var maxLen = 0;
+    for(var key in PRODS){
+      var prod = PRODS[key];
+      for(var a=0;a<prod.aliases.length;a++){
+        var al = prod.aliases[a].toLowerCase();
+        if(WEAK_ALIAS.indexOf(al) >= 0) continue;  // 弱别名跳过
+        if(t.indexOf(al) >= 0 && al.length > maxLen) maxLen = al.length;
+      }
+    }
+    if(maxLen === 0) continue;
+    var sec = tsToSec(segs[i].ts);
+    for(var key2 in PRODS){
+      var prod2 = PRODS[key2];
+      for(var a2=0;a2<prod2.aliases.length;a2++){
+        var al2 = prod2.aliases[a2].toLowerCase();
+        if(WEAK_ALIAS.indexOf(al2) >= 0) continue;
+        if(al2.length === maxLen && t.indexOf(al2) >= 0){
+          hitsMap[key2].push({sec: sec, ts: segs[i].ts, idx: i});
+        }
+      }
+    }
+  }
+  // 1.5) 全局包型消歧：truffle_pro_tote vs truffle_pro_backpack 同命中时（"truffle pro" 共用别名），
+  //   按整篇文本包型信号（双肩包/背包 vs 托特）决胜——避免单段无包型词时漏消歧
+  if(hitsMap['truffle_pro_tote'].length > 0 && hitsMap['truffle_pro_backpack'].length > 0){
+    var rawAll = segs.map(function(s){return s.text;}).join('\n');
+    var bagAll = (rawAll.match(/双肩包|背包/g)||[]).length;
+    var toteAll = (rawAll.match(/托特/g)||[]).length;
+    if(bagAll > toteAll){ hitsMap['truffle_pro_tote'] = []; }
+    else if(toteAll > bagAll){ hitsMap['truffle_pro_backpack'] = []; }
+  }
+  // 1.6 专属词兜底识别：别名零命中时（主播全程未喊产品名，如"这个包/这款"），
+  //   用 productExclusive 专属词（与 runGrading auto 同源）识别主品——保证"多品识别"模块不空白
+  var anyHit = false;
+  for(var k0 in hitsMap){ if(hitsMap[k0].length > 0){ anyHit = true; break; } }
+  if(!anyHit){
+    var rawLower = segs.map(function(s){return s.text;}).join('\n').toLowerCase();
+    var exclConf = GRADING_STANDARD.productExclusive || {};
+    var bestKey = null, bestExHits = 0, bestSellHits = 0;
+    for(var ek in GRADING_STANDARD.products){
+      var exH = 0;
+      var pxArr = exclConf[ek];
+      if(pxArr && pxArr.length){ for(var w=0;w<pxArr.length;w++){ if(rawLower.indexOf(pxArr[w].toLowerCase()) >= 0) exH++; } }
+      var sH = 0;
+      var spk = SELLS[ek];
+      if(spk && spk.list){ for(var li=0; li<spk.list.length; li++){
+        for(var wi=0; wi<spk.list[li].keywords.length; wi++){
+          if(rawLower.indexOf(spk.list[li].keywords[wi].toLowerCase()) >= 0){ sH++; break; }
+        }
+      }}
+      if(exH * 1000 + sH > bestExHits * 1000 + bestSellHits){ bestExHits = exH; bestSellHits = sH; bestKey = ek; }
+    }
+    if(bestKey && bestExHits * 1000 + bestSellHits > 0){
+      // 兜底：整场视为一轮（从第一段开始），标记 touchOnly=false（整场话术量足够）
+      var firstSec = tsToSec(segs[0] ? segs[0].ts : '');
+      hitsMap[bestKey].push({sec: firstSec === null ? 0 : firstSec, ts: segs[0] ? segs[0].ts : '', idx: 0, fallback: true});
+    }
+  }
+  for(var key in PRODS){
+    var prod = PRODS[key];
+    var hits = hitsMap[key];
+    if(hits.length === 0) continue;
+    // 2) 去抖合并：同一品命中间隔 < 60 秒视为同一轮讲品
+    var rounds = [];
+    for(var j=0;j<hits.length;j++){
+      var h = hits[j];
+      var last = rounds[rounds.length-1];
+      if(last && h.sec !== null && last.t0sec !== null && h.sec - last.t0sec < 60){
+        continue;  // 同一轮内的连续提及
+      }
+      rounds.push({t0sec: h.sec, t0: h.ts, idx: h.idx});
+    }
+    // 3) 每轮 10 分钟窗口卖点覆盖
+    var sell = SELLS[prod.sellKey];
+    var sellList = sell ? sell.list : [];
+    var unionCovered = {}, unionMissed = {};
+    for(var r=0;r<rounds.length;r++){
+      var rnd = rounds[r];
+      var winText = '', winSegs = [];
+      for(var i=0;i<segs.length;i++){
+        if(rnd.t0sec === null){ winText += segs[i].text + ' '; winSegs.push(segs[i]); continue; }
+        var sec2 = tsToSec(segs[i].ts);
+        if(sec2 === null) continue;
+        if(sec2 >= rnd.t0sec && sec2 < rnd.t0sec + 600){ winText += segs[i].text + ' '; winSegs.push(segs[i]); }
+      }
+      winText = winText.toLowerCase();
+      // 顺带提及过滤：窗口内有效话术 < 80 字 → 视为顺带提及，不计入正式讲品考核
+      var winChars = winText.replace(/\s/g,'').length;
+      var touchOnly = winChars < 80;
+      var covered = [], missed = [];
+      for(var k=0;k<sellList.length;k++){
+        var sp = sellList[k];
+        var ok = false;
+        for(var w=0;w<sp.keywords.length;w++){
+          if(winText.indexOf(sp.keywords[w].toLowerCase()) >= 0){ ok = true; break; }
+        }
+        if(ok){ covered.push(sp.name); if(!touchOnly) unionCovered[sp.name]=1; }
+        else { missed.push(sp.name); if(!touchOnly) unionMissed[sp.name]=1; }
+      }
+      rnd.covered = covered; rnd.missed = missed;
+      rnd.touchOnly = touchOnly;
+      rnd.winChars = winChars;
+      rnd.pct = touchOnly ? null : (sellList.length ? Math.round(covered.length / sellList.length * 100) : 0);
+      rnd.windowEnd = rnd.t0sec !== null ? fmtTs(rnd.t0sec + 600) : '';
+      // 三级评分：单轮八维计分（窗口级，无 baseline 扣分）
+      rnd.grade = gradeWindow(winSegs, prod.sellKey);
+    }
+    // 正式讲品次数 = 非顺带提及轮次
+    var formalRounds = rounds.filter(function(x){return !x.touchOnly});
+    var touchCount = rounds.length - formalRounds.length;
+    // 单品整体评分 = 正式轮次单轮评分平均（三级评分层级：单品级）
+    var fg = formalRounds.map(function(x){return x.grade}).filter(Boolean);
+    var overallScore = fg.length ? Math.round(fg.reduce(function(s,g){return s+g.total},0) / fg.length * 10) / 10 : null;
+    var overallGrade = null;
+    if(fg.length){
+      var og = GRADING_STANDARD.grades;
+      for(var g0=0; g0<og.length; g0++){ if(overallScore >= og[g0].min){ overallGrade = og[g0].name; break; } }
+    }
+    results.push({
+      key: key, name: prod.name,
+      rounds: rounds, totalRounds: formalRounds.length, touchCount: touchCount,
+      overallScore: overallScore, overallGrade: overallGrade,
+      sellTotal: sellList.length,
+      unionCovered: Object.keys(unionCovered), unionMissed: Object.keys(unionMissed),
+      unionPct: sellList.length ? Math.round(Object.keys(unionCovered).length / sellList.length * 100) : 0
+    });
+  }
+  // 按讲品轮次数排序
+  results.sort(function(a,b){return b.totalRounds - a.totalRounds});
+  return {products: results, totalRounds: results.reduce(function(s,p){return s+p.totalRounds},0)};
+}
+function fmtTs(sec){
+  var h = Math.floor(sec/3600), m = Math.floor(sec%3600/60), s = sec%60;
+  return (h<10?'0':'')+h+':'+(m<10?'0':'')+m+':'+(s<10?'0':'')+s;
+}
+// ================= 3.55 讲品问题库（自动沉淀 + 人工标记 + 周月聚合） =================
+// C 方案：评分后自动收集问题入库（A），人工可标记优先级 P0/P1/P2（B）
+var PROBLEM_LS_KEY = 'grading_problem_lib_v1';
+function getProblemLib(){ try{ return JSON.parse(localStorage.getItem(PROBLEM_LS_KEY) || '[]'); }catch(e){ return []; } }
+function saveProblemLib(lib){ try{ localStorage.setItem(PROBLEM_LS_KEY, JSON.stringify(lib)); }catch(e){} }
+
+// 收集问题：从评分结果 r 提取四类问题 → 入库
+function collectProblems(r){
+  try{
+    if(!r || typeof r.total !== 'number') return;
+    var lib = getProblemLib();
+    var added = 0;
+    var ts = Date.now();
+    var host = r.host || '未识别', date = r.date || '', studio = r.studio || '';
+    var product = r.product || '';
+    var dedupKey = host + '|' + date + '|' + product;
+
+    // ① 10 分钟窗口未覆盖卖点（产品识别轮次缺失）
+    try{
+      if(r.products && r.products.products){
+        for(var i=0;i<r.products.products.length;i++){
+          var p = r.products.products[i];
+          if(!p.rounds) continue;
+          for(var j=0;j<p.rounds.length;j++){
+            var rd = p.rounds[j];
+            if(rd.touchOnly || !rd.missed || !rd.missed.length) continue;
+            var missTxt = rd.missed.join('、');
+            var key = dedupKey + '|miss|' + p.name + '|' + missTxt;
+            if(lib.some(function(x){return x.key === key;})) continue;
+            lib.push({
+              key: key, ts: ts, host: host, studio: studio, date: date, product: product,
+              type: 'sellpoint_miss', cat: '讲品覆盖',
+              text: '10分钟窗口未讲：' + missTxt,
+              detail: p.name + ' · 第' + (j+1) + '轮 ' + (rd.t0||'') + '~' + (rd.windowEnd||'') + ' 覆盖' + (rd.pct!=null?rd.pct+'%':'') + '（' + (rd.covered?rd.covered.length:0) + '/' + p.sellTotal + '）',
+              evidence: (rd.missed||[]).join('、'),
+              priority: null
+            });
+            added++;
+          }
+        }
+      }
+    }catch(e){}
+
+    // ② 基准库错误（信息准确性红旗）
+    try{
+      if(r.baseline && r.baseline.errorItems && r.baseline.errorItems.length){
+        for(var k=0;k<r.baseline.errorItems.length;k++){
+          var ei = r.baseline.errorItems[k];
+          var key2 = dedupKey + '|baseline|' + ei.field;
+          if(lib.some(function(x){return x.key === key2;})) continue;
+          lib.push({
+            key: key2, ts: ts, host: host, studio: studio, date: date, product: product,
+            type: 'baseline_error', cat: '信息准确性',
+            text: '讲错：' + ei.field + '（' + ((ei.wrong||[]).join('/')||'') + '）',
+            detail: (ei.ev && ei.ev.ctx ? ei.ev.ctx : ei.field) + ' —— 基准：' + (r.baseline.items&&r.baseline.items[k]?r.baseline.items[k].standard:''),
+            evidence: (ei.ev && ei.ev.ctx) || '',
+            priority: null
+          });
+          added++;
+        }
+      }
+    }catch(e){}
+
+    // ③ 低分能力（<60 的计分能力）
+    try{
+      if(r.modules){
+        for(var m=0;m<r.modules.length;m++){
+          var mod = r.modules[m];
+          if(!mod || mod.weight <= 0) continue;
+          if(mod.score < 60){
+            var key3 = dedupKey + '|low|' + mod.key;
+            if(lib.some(function(x){return x.key === key3;})) continue;
+            lib.push({
+              key: key3, ts: ts, host: host, studio: studio, date: date, product: product,
+              type: 'low_ability', cat: '能力短板',
+              text: mod.name + ' ' + mod.score + ' 分',
+              detail: '低于 60 分线（权重 ' + mod.weight + '%）' + (mod.standards ? '；薄弱子项：' + mod.standards.filter(function(s){return s.score<60;}).map(function(s){return s.name;}).join('、') : ''),
+              evidence: mod.standards ? mod.standards.filter(function(s){return s.score<60;}).map(function(s){return s.name+'='+s.score;}).join('、') : '',
+              priority: null
+            });
+            added++;
+          }
+        }
+      }
+    }catch(e){}
+
+    if(added > 0){ saveProblemLib(lib); }
+    return added;
+  }catch(e){ return 0; }
+}
+
+// 问题库聚合：按主播/类型/时间
+function summarizeProblems(lib){
+  var out = {total: lib.length, byHost: {}, byType: {}, byDate: {}, common: [], oneOnOne: []};
+  var typeNames = {sellpoint_miss:'讲品覆盖', baseline_error:'信息准确性', low_ability:'能力短板'};
+  // 按主播聚合（1对1培训清单）
+  for(var i=0;i<lib.length;i++){
+    var p = lib[i];
+    if(!out.byHost[p.host]) out.byHost[p.host] = {total:0, items:[], counts:{}};
+    var h = out.byHost[p.host];
+    h.total++;
+    h.items.push(p);
+    if(!h.counts[p.cat]) h.counts[p.cat] = 0;
+    h.counts[p.cat]++;
+    if(!out.byType[p.cat]) out.byType[p.cat] = 0;
+    out.byType[p.cat]++;
+    var d = (p.date || '未填').slice(0,7);
+    if(!out.byDate[d]) out.byDate[d] = 0;
+    out.byDate[d]++;
+  }
+  // 共性问题：同类型同 text 出现在 ≥2 个不同主播
+  var seen = {};
+  for(var j=0;j<lib.length;j++){
+    var pj = lib[j];
+    var ck = pj.cat + '|' + pj.text;
+    if(!seen[ck]) seen[ck] = {cat: pj.cat, text: pj.text, hosts: {}, count: 0, items: []};
+    if(!seen[ck].hosts[pj.host]){ seen[ck].hosts[pj.host] = 1; seen[ck].count++; }
+    seen[ck].items.push(pj);
+  }
+  for(var ck2 in seen){
+    var c = seen[ck2];
+    if(c.count >= 2) out.common.push({cat: c.cat, text: c.text, count: c.count, hosts: Object.keys(c.hosts), items: c.items});
+  }
+  out.common.sort(function(a,b){ return b.count - a.count; });
+  return out;
+}
+
+// 问题库面板渲染
+function renderProblemLib(){
+  var box = $('problemLibBlock');
+  if(!box) return;
+  var lib = getProblemLib();
+  var sum = summarizeProblems(lib);
+  var h = '<div style="font-size:12px;color:var(--text2);margin-bottom:8px">共沉淀 <b style="color:var(--gold)">' + sum.total + '</b> 条问题 · 覆盖 <b>' + Object.keys(sum.byHost).length + '</b> 位主播 · 跨主播共性问题 <b>' + sum.common.length + '</b> 条</div>';
+  // 共性问题（培训价值最高）
+  if(sum.common.length){
+    h += '<div style="font-weight:700;font-size:12.5px;margin:8px 0 4px">跨主播共性问题（≥2 人同现 · 共性培训素材）</div>';
+    h += '<table><tr><th style="width:34%">问题</th><th style="width:12%">类型</th><th style="width:10%">涉及主播</th><th>涉及主播明细</th></tr>';
+    for(var i=0;i<sum.common.length;i++){
+      var c = sum.common[i];
+      h += '<tr><td><b>' + esc(c.text) + '</b></td><td><span class="chip c-05">' + esc(c.cat) + '</span></td><td>' + c.count + ' 人</td><td>' + esc(c.hosts.join('、')) + '</td></tr>';
+    }
+    h += '</table>';
+  }
+  // 1对1培训清单（按主播）
+  var hosts = Object.keys(sum.byHost).sort(function(a,b){ return sum.byHost[b].total - sum.byHost[a].total; });
+  if(hosts.length){
+    h += '<div style="font-weight:700;font-size:12.5px;margin:10px 0 4px">1 对 1 培训清单（按主播）</div>';
+    h += '<table><tr><th style="width:14%">主播</th><th style="width:10%">问题数</th><th>问题分布</th><th style="width:16%">P0 重点</th></tr>';
+    for(var i2=0;i2<hosts.length;i2++){
+      var hh = sum.byHost[hosts[i2]];
+      var p0 = hh.items.filter(function(x){return x.priority==='P0';}).length;
+      var dist = Object.keys(hh.counts).map(function(k){return k+'×'+hh.counts[k];}).join('、');
+      h += '<tr><td><b>' + esc(hosts[i2]) + '</b></td><td><b>' + hh.total + '</b></td><td>' + esc(dist) + '</td><td style="color:var(--danger)">' + (p0? p0+' 条' : '—') + '</td></tr>';
+    }
+    h += '</table>';
+  }
+  // 按时间聚合（周/月视角）
+  var dates = Object.keys(sum.byDate).sort();
+  if(dates.length){
+    h += '<div style="font-weight:700;font-size:12.5px;margin:10px 0 4px">按月份趋势（周/月聚合基础）</div>';
+    h += '<table><tr><th style="width:20%">月份</th><th>问题数</th></tr>';
+    for(var i3=0;i3<dates.length;i3++){
+      h += '<tr><td>' + esc(dates[i3]) + '</td><td>' + sum.byDate[dates[i3]] + ' 条</td></tr>';
+    }
+    h += '</table>';
+  }
+  box.innerHTML = h;
+}
+
+// 标记优先级
+function markProblemPriority(key, priority){
+  var lib = getProblemLib();
+  for(var i=0;i<lib.length;i++){
+    if(lib[i].key === key){ lib[i].priority = priority; break; }
+  }
+  saveProblemLib(lib);
+  renderProblemLib();
+  renderProblemDetail(lib);
+}
+
+// 问题库明细（含标记按钮）
+function renderProblemDetail(lib){
+  var box = $('problemDetailBlock');
+  if(!box) return;
+  lib = lib || getProblemLib();
+  var sorted = lib.slice().sort(function(a,b){ return (b.priority==='P0'?3:(b.priority==='P1'?2:(b.priority==='P2'?1:0))) - (a.priority==='P0'?3:(a.priority==='P1'?2:(a.priority==='P2'?1:0))); });
+  var h = '<table><tr><th style="width:10%">优先级</th><th style="width:12%">主播</th><th style="width:10%">日期</th><th style="width:10%">类型</th><th>问题 / 证据</th><th style="width:22%">操作</th></tr>';
+  for(var i=0;i<Math.min(100, sorted.length);i++){
+    var p = sorted[i];
+    var pr = p.priority ? '<b style="color:' + (p.priority==='P0'?'var(--danger)':(p.priority==='P1'?'var(--warn)':'var(--gold)')) + '">' + p.priority + '</b>' : '—';
+    h += '<tr><td>' + pr + '</td><td><b>' + esc(p.host) + '</b></td><td>' + esc(p.date||'') + '</td><td><span class="chip c-05">' + esc(p.cat) + '</span></td><td><b>' + esc(p.text) + '</b><div style="font-size:11px;color:var(--text3)">' + esc(p.detail) + '</div></td><td>' +
+      '<button class="btn btn-ghost" style="font-size:11px;padding:2px 6px;margin-right:3px" onclick="markProblemPriority(\'' + p.key + '\',\'P0\')">P0</button>' +
+      '<button class="btn btn-ghost" style="font-size:11px;padding:2px 6px;margin-right:3px" onclick="markProblemPriority(\'' + p.key + '\',\'P1\')">P1</button>' +
+      '<button class="btn btn-ghost" style="font-size:11px;padding:2px 6px" onclick="markProblemPriority(\'' + p.key + '\',null)">清除</button></td></tr>';
+  }
+  h += '</table>';
+  box.innerHTML = h;
+}
+
+function analyzeGolden(segs, productKey){
+  var G = GRADING_STANDARD.golden;
+  var raw = fullText(segs);
+  // 切句：按句号/问号/感叹号/换行切
+  var sentences = [];
+  for(var i=0;i<segs.length;i++){
+    var parts = segs[i].text.split(/[。！？!?\n]/);
+    for(var j=0;j<parts.length;j++){
+      var s = parts[j].trim();
+      if(s.length >= 8) sentences.push({text: s, ts: segs[i].ts});
+    }
+  }
+  var results = [];
+  for(var i=0;i<sentences.length;i++){
+    var sent = sentences[i];
+    // 分类
+    var type = null, tags = [];
+    for(var t=0;t<G.types.length;t++){
+      var tp = G.types[t];
+      var hit = false;
+      for(var k=0;k<tp.detect.length;k++){
+        var isRe = /[*+?^${}()|[\]\\.]/.test(tp.detect[k]);
+        try{
+          if(isRe){ if(new RegExp(tp.detect[k],'i').test(sent.text)){ hit=true; break; } }
+          else { if(sent.text.indexOf(tp.detect[k])>=0){ hit=true; break; } }
+        }catch(e){}
+      }
+      if(hit){
+        type = tp.name;
+        tags = tp.tags.slice();
+        break;
+      }
+    }
+    if(!type) continue;  // 无分类 = 普通表达，跳过
+    // 特征计数（功能/利益/场景/记忆点）
+    var feats = 0;
+    // 价值词（四判据①）
+    for(var v=0;v<G.valueWords.length;v++){ if(sent.text.indexOf(G.valueWords[v])>=0){ feats++; break; } }
+    // 记忆点：数字
+    if(G.memory.numbers.test(sent.text)) feats++;
+    // 记忆点：对比
+    if(G.memory.contrast.test(sent.text)) feats++;
+    // 记忆点：短句
+    if(sent.text.length <= G.memory.shortSentence) feats++;
+    // 功能词
+    if(/(材质|轮|拉杆|容量|锁|抗菌|售后|PC|轴承|分区|承重|轻)/.test(sent.text)) feats++;
+    // 场景词
+    if(/(机场|高铁|酒店|出差|托运|转盘|旅游|通勤|商务|家庭)/.test(sent.text)) feats++;
+    // 星评
+    var star;
+    if(feats >= 4) star = 5;
+    else if(feats >= 3) star = 4;
+    else if(feats >= 2) star = 3;
+    else star = 2;
+    if(star >= 3){
+      results.push({text: sent.text, ts: sent.ts, type: type, star: star, tags: tags, feats: feats});
+    }
+  }
+  // 去重（同一句可能多次出现）
+  var seen = {}, uniq = [];
+  for(var i=0;i<results.length;i++){
+    var key = results[i].text;
+    if(!seen[key]){ seen[key]=1; uniq.push(results[i]); }
+  }
+  // 按星级排序
+  uniq.sort(function(a,b){return b.star-a.star});
+  return {total: uniq.length, items: uniq.slice(0, 20), star5: uniq.filter(function(x){return x.star>=5}).length};
+}
+
+// 话术库 localStorage 累计（黄金话术库：按标签分类沉淀）
+function getGoldenLib(){
+  try{ return JSON.parse(localStorage.getItem('grading_v2_golden_lib') || '{"items":[]}'); }
+  catch(e){ return {items:[]}; }
+}
+function saveGoldenLib(lib){ localStorage.setItem('grading_v2_golden_lib', JSON.stringify(lib)); }
+function addGoldenToLib(host, studio, date, product, golden){
+  if(!golden || !golden.items || !golden.items.length) return 0;
+  var lib = getGoldenLib();
+  var added = 0;
+  for(var i=0;i<golden.items.length;i++){
+    var g = golden.items[i];
+    // 3 星以上入库（V2：日报完成后自动提取 3 星及以上）
+    if(g.star < 3) continue;
+    // 去重（同主播同句不入两次）
+    var dup = lib.items.some(function(x){ return x.host===host && x.text===g.text; });
+    if(dup) continue;
+    lib.items.push({date: date, host: host, studio: studio, product: product, text: g.text, ts: g.ts, type: g.type, star: g.star, tags: g.tags});
+    added++;
+  }
+  saveGoldenLib(lib);
+  return added;
+}
+function renderGoldenLib(){
+  var lib = getGoldenLib();
+  var h = '<div style="font-size:12px;color:var(--text2);margin-bottom:8px">话术库累计 <b>' + lib.items.length + '</b> 条（按能力标签分类，不按日期）｜ 来源：每日日报自动提取 3 星及以上金句</div>';
+  if(lib.items.length === 0){
+    h += '<div class="evctx" style="color:var(--text3)">暂无累计金句——完成一次评分后，3 星以上金句会自动入库</div>';
+  } else {
+    // 按标签分组展示
+    var groups = {};
+    for(var i=0;i<lib.items.length;i++){
+      var it = lib.items[i];
+      var key = it.type || '未分类';
+      if(!groups[key]) groups[key] = [];
+      groups[key].push(it);
+    }
+    for(var type in groups){
+      h += '<div style="font-size:12px;font-weight:600;color:var(--gold);margin:10px 0 4px">' + type + '（' + groups[type].length + '）</div>';
+      h += '<table><tr><th>主播</th><th>日期</th><th>评分</th><th>金句</th><th>标签</th></tr>';
+      for(var j=0;j<groups[type].length;j++){
+        var g = groups[type][j];
+        h += '<tr><td>' + g.host + '</td><td>' + g.date + '</td><td><b style="color:var(--gold)">' + '★'.repeat(g.star) + '</b></td><td>' + (g.ts?'<span class="evt">'+g.ts+'</span>':'') + esc(g.text) + '</td><td>' + (g.tags||[]).join('·') + '</td></tr>';
+      }
+      h += '</table>';
+    }
+    h += '<div style="margin-top:8px"><button class="btn btn-ghost" onclick="if(confirm(\'确认清空话术库？\')){localStorage.removeItem(\'grading_v2_golden_lib\');renderGoldenLib()}">清空话术库</button></div>';
+  }
+  var el = document.getElementById('goldenLibBlock');
+  if(el) el.innerHTML = h;
+}
+
+// ================= 4. 渲染 =================
+function renderResult(r){
+  $('result').style.display = 'block';
+  // V3 UX：评分完成后回填识别结果到输入框（让"自动识别"可见）
+  // 每次都覆盖（避免上次评分的旧值残留；用户在评分前手填的值也会被 r.host 覆盖，因为评分用的是文件实际内容）
+  try{
+    if(r.host && r.host !== '未识别' && r.host !== '未填'){ $('hostInput').value = r.host; }
+    if(r.studio && r.studio !== '未填'){ $('studioSelect').value = r.studio; }
+    if(r.date && r.date !== '未填'){ $('dateInput').value = r.date; }
+  }catch(e){}
+  // V3.2：评分完成后自动回填飞书（按 主播+日期 匹配，失败不阻塞评分）
+  autoFillFeishu(r);
+  // 单主播模式：显示单人报告，隐藏批量对比区
+  $('singleReport').style.display = 'block';
+  $('batchCompare').style.display = 'none';
+  $('totalScore').textContent = r.total;
+  var gb = $('gradeBadge');
+  gb.textContent = r.grade + ' 级';
+  gb.className = 'grade g' + r.grade;
+  // 产品匹配度警示（不扣分，仅提示）：A 修复后 1.5 移出加权，此处仅做参考标识
+  if(r.autoMatch && r.autoMatch.fromKey){
+    var am = r.autoMatch;
+    var exConf = GRADING_STANDARD.productExclusive && GRADING_STANDARD.productExclusive[am.fromKey];
+    var exHits = 0;
+    if(exConf) for(var i=0;i<exConf.length;i++){ if((r.baseline && r.baseline.raw && r.baseline.raw.indexOf(exConf[i])>=0)) exHits++; }
+    var matched = exHits >= 5 ? '✓ 讲对产品' : (exHits >= 2 ? '· 部分匹配' : '⚠ 未识别主讲品');
+    if(!am.auto) matched += '（手动指定）';
+    var exEl = $('extraTag');
+    if(!exEl){
+      exEl = document.createElement('div');
+      exEl.id = 'extraTag';
+      exEl.style.cssText = 'font-size:12px;color:var(--gold);margin-top:4px';
+      $('productMeta') && $('productMeta').appendChild(exEl);
+    }
+  }
+  $('strength').textContent = r.overview.strength;
+  $('problem').textContent = r.overview.problem;
+  $('best').textContent = r.overview.best;
+  $('worst').textContent = r.overview.worst;
+  $('tagline').textContent = r.overview.tagline;
+
+  // 模块汇总（能力矩阵 8 格，0% 标记"分析"）
+  var ms = '';
+  for(var i=0;i<r.modules.length;i++){
+    var m = r.modules[i];
+    var wLabel = m.weight > 0 ? m.weight + '%' : '分析';
+    ms += '<div class="s-cell"><div class="n">' + m.name + ' · ' + wLabel + '</div><div class="v ' + (m.weight>0 ? (m.score>=75?'hi':(m.score<45?'lo':'')) : '') + '">' + m.score + '</div><div class="w">' + (m.weight>0 ? '加权 ' + m.weighted : '不计入总分') + '</div></div>';
+  }
+  $('moduleSummary').innerHTML = ms;
+
+  // 能力明细（V2 日报结构：得分/做的好/金句/欠缺/改善建议）
+  var h = '';
+  for(var i=0;i<r.modules.length;i++){
+    var m = r.modules[i];
+    var wLabel = m.weight > 0 ? '权重 ' + m.weight + '% · 能力分 ' + m.score + ' · 加权 ' + m.weighted : '权重 0% · 只分析不计分（同分仲裁用）';
+    var bestStd = null, worstStd = null, goldStd = null;
+    for(var j=0;j<m.standards.length;j++){
+      var ss = m.standards[j];
+      if(!bestStd || ss.score > bestStd.score) bestStd = ss;
+      if(!worstStd || ss.score < worstStd.score) worstStd = ss;
+      if(!goldStd && ss.score >= 90) goldStd = ss;
+    }
+    h += '<div class="mod">' + m.name + ' <span class="w">' + wLabel + '</span><span class="ms">' + (m.score>=75?'✓':(m.score<45?'⚠':'·')) + '</span></div>';
+    // V2 日报四要素：做的好 / 金句 / 欠缺 / 改善建议
+    h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:11.5px">';
+    h += '<span style="background:#e8ece4;color:var(--ok);padding:2px 10px;border-radius:8px">做的好：' + (bestStd && bestStd.score>=75 ? esc(bestStd.name + ' ' + bestStd.score + '分') : '无明显亮点') + '</span>';
+    h += '<span style="background:var(--gold-dim);color:#9a7b2d;padding:2px 10px;border-radius:8px">金句：' + (goldStd && goldStd.complete.hits[0] ? esc((goldStd.complete.hits[0].ctx||'').slice(0,32)) : '未发现3星以上金句') + '</span>';
+    h += '<span style="background:#f6e3dd;color:var(--danger);padding:2px 10px;border-radius:8px">欠缺：' + (worstStd && worstStd.score<=45 ? esc(worstStd.name + ' ' + worstStd.score + '分') : '无明显短板') + '</span>';
+    h += '<span style="background:#efece2;color:var(--text2);padding:2px 10px;border-radius:8px">建议：' + esc(GRADING_STANDARD.training[m.key] || '—') + '</span>';
+    h += '</div>';
+    for(var j=0;j<m.standards.length;j++){
+      var s = m.standards[j];
+      var cl = s.complete.level === 1 ? 'c-1' : (s.complete.level === 0.5 ? 'c-05' : 'c-0');
+      var scCl = s.score >= 80 ? 'hi' : (s.score >= 45 ? 'mid' : 'lo');
+      var evHtml = '';
+      for(var k=0;k<s.complete.hits.length && k<3;k++){
+        var ev = s.complete.hits[k];
+        evHtml += '<div style="margin-top:4px"><span class="ev">' + esc(ev.kw) + '</span>' + (ev.ts?'<span class="evt">'+esc(ev.ts)+'</span>':'') + '<span class="evctx">' + esc(ev.ctx) + '</span></div>';
+      }
+      if(evHtml === '' && s.quality.score >= 4 && s.complete.hits.length===0){
+        evHtml = '<div class="evctx" style="margin-top:4px;color:var(--warn)">完成度不足但质量因子有贡献（' + s.quality.applied.join('、') + '）</div>';
+      }
+      var missHtml = '';
+      if(s.complete.misses.length){
+        missHtml = '<div class="missed-words">未命中：<b>' + esc(s.complete.misses.slice(0,5).join(' / ')) + '</b>' + (s.complete.misses.length>5?' 等':'' ) + '</div>';
+      }
+      h += '<div class="std"><div class="std-hd"><span class="std-id">' + s.id + '</span><span class="std-nm">' + s.name + '</span><span class="chip ' + cl + '">完成度 ' + s.complete.level + '</span><span class="q">质量 ' + s.quality.score + '/5</span><span class="sc ' + scCl + '">' + s.score + '</span></div>' +
+        '<div class="std-bd"><div class="std-desc">评判标准：' + esc(s.desc) + '（' + esc(s.complete.detail) + '）</div>' + evHtml + missHtml + '</div></div>';
+    }
+  }
+  $('modules').innerHTML = h;
+
+  // 卖点表
+  var sp = r.sellpoints;
+  var sh = '<table><tr><th style="width:28%">核心卖点</th><th>覆盖</th><th style="width:8%">质量</th><th style="width:9%">命中</th><th>证据</th></tr>';
+  for(var i=0;i<sp.items.length;i++){
+    var it = sp.items[i];
+    var evTxt = it.ev.map(function(e){return (e.ts?e.ts+' ':'')+e.ctx}).join('；');
+    var qCl = it.quality >= 4 ? 'color:var(--ok);font-weight:700' : (it.quality === 3 ? 'color:var(--warn);font-weight:700' : 'color:var(--text3)');
+    sh += '<tr><td>' + it.name + '</td><td>' + (it.covered?'<span class="sp-y">✅ 覆盖</span>':'<span class="sp-n">❌ 缺失</span>') + '</td><td style="' + qCl + '">' + it.quality + '/5</td><td>' + it.kwHits + '/' + it.keywords.length + '</td><td>' + esc(evTxt) + '</td></tr>';
+  }
+  sh += '<tr style="background:#faf8f3"><td><b>覆盖合计</b></td><td><b>' + sp.covered + '/' + sp.total + '</b></td><td colspan="3">' + (sp.covered===sp.total?'全部覆盖，无漏讲问题':'存在漏讲卖点，需补讲') + '</td></tr></table>';
+  $('sellpointTable').innerHTML = sh;
+
+  // baseline 表
+  var bh = '<table><tr><th>基准项</th><th>标准口径</th><th style="width:20%">判定</th><th>主播表述证据</th></tr>';
+  for(var i=0;i<r.baseline.items.length;i++){
+    var b = r.baseline.items[i];
+    bh += '<tr><td>' + esc(b.field) + '</td><td>' + esc(b.standard) + '</td><td>' + (b.error?'<span class="b-bad">❌ 错误</span>':'<span class="b-ok">✅ 无误</span>') + '</td><td>' + (b.ev?esc(b.ev.ctx):'<span style="color:var(--text3)">未出现错误表述</span>') + '</td></tr>';
+  }
+  bh += '<tr style="background:#faf8f3"><td colspan="2"><b>信息准确性结论</b></td><td colspan="2"><b class="' + (r.baseline.errors===0?'b-ok':'b-bad') + '">' + (r.baseline.errors===0?'基准库 0 错误':'发现 ' + r.baseline.errors + ' 处错误口径') + '</b></td></tr></table>';
+  $('baselineTable').innerHTML = bh;
+
+  // 案例
+  var ch = '<div class="case"><div class="ct">优秀案例 TOP' + r.cases.good.length + '</div>';
+  if(r.cases.good.length===0) ch += '<p>未发现 ≥90 分的高质量证据段落</p>';
+  for(var i=0;i<r.cases.good.length;i++){
+    var g = r.cases.good[i];
+    ch += '<p>【' + g.mod + ' · ' + g.std + '】' + (g.ts?'<span class="evt">'+esc(g.ts)+'</span>':'') + esc(g.ev) + '</p>';
+  }
+  ch += '</div><div class="case"><div class="ct">不足案例 TOP' + r.cases.bad.length + '</div>';
+  if(r.cases.bad.length===0) ch += '<p>未发现 ≤20 分的明显不足</p>';
+  for(var i=0;i<r.cases.bad.length;i++){
+    var b = r.cases.bad[i];
+    ch += '<p>【' + b.mod + ' · ' + b.std + '】' + (b.ts?'<span class="evt">'+esc(b.ts)+'</span>':'') + esc(b.ev || ('缺失：' + b.miss)) + '</p>';
+  }
+  ch += '</div>';
+  $('caseBlock').innerHTML = ch;
+
+  // 训练建议（V2 改善闭环四要素）
+  var th = '<table><tr><th style="width:14%">低分能力</th><th style="width:8%">能力分</th><th style="width:30%">能力缺口（问题证据）</th><th>训练动作（可执行）</th><th style="width:14%">下周验证</th></tr>';
+  for(var i=0;i<r.training.length;i++){
+    var t = r.training[i];
+    th += '<tr><td><b>' + t.mod + '</b></td><td><b class="' + (t.score<45?'lo':'mid') + '">' + t.score + '</b></td><td style="font-size:12px;color:var(--warn)">' + esc(t.gap) + '</td><td style="font-size:12px">' + esc(t.action) + '</td><td style="font-size:12px;color:var(--ok)">' + esc(t.verify) + '</td></tr>';
+  }
+  th += '</table>';
+  $('trainBlock').innerHTML = th;
+
+  // 产品识别与讲品分析
+  var ph = '';
+  if(r.products && r.products.products && r.products.products.length){
+    ph += '<div style="font-size:12px;color:var(--text2);margin-bottom:8px">整场识别到 <b>' + r.products.products.length + '</b> 个产品、共 <b>' + r.products.totalRounds + '</b> 次讲品｜考核规则：<b>提到品名即计时，10 分钟窗口内须讲完全部规则卖点；窗口内未讲完的卖点单独整理（不因后续补讲免责）</b></div>';
+    for(var i=0;i<r.products.products.length;i++){
+      var p = r.products.products[i];
+      var hasMiss = p.unionMissed.length > 0;
+      ph += '<div style="border:1px solid ' + (hasMiss ? '#f5c6bd' : 'var(--border)') + ';border-radius:8px;background:var(--card);margin-bottom:10px;overflow:hidden">';
+      ph += '<div style="padding:9px 14px;background:#faf8f3;display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-bottom:1px solid var(--border)"><b style="font-size:13px">' + p.name + '</b><span style="font-size:11px;color:var(--text2)">正式讲品 <b>' + p.totalRounds + '</b> 次' + (p.touchCount ? '（另有顺带提及 ' + p.touchCount + ' 次，不计考核）' : '') + '</span>' + (p.overallScore !== null ? '<span style="font-size:12px;font-weight:700;color:' + (p.overallScore>=75?'var(--ok)':(p.overallScore<45?'var(--danger)':'var(--warn)')) + '">单品整体 ' + p.overallScore + ' 分（' + p.overallGrade + '级）</span>' : '') + '<span style="margin-left:auto;font-size:12px;font-weight:600;color:' + (p.unionPct>=90?'var(--ok)':(p.unionPct<70?'var(--danger)':'var(--warn)')) + '">整体覆盖 ' + p.unionPct + '%</span></div>';
+      ph += '<div style="padding:10px 14px">';
+      ph += '<table><tr><th style="width:13%">讲品轮次</th><th style="width:16%">起始</th><th style="width:11%">10分钟覆盖</th><th style="width:13%">单轮评分</th><th>10 分钟内未讲到的卖点（待改进）</th></tr>';
+      for(var j=0;j<p.rounds.length;j++){
+        var rd = p.rounds[j];
+        if(rd.touchOnly){
+          ph += '<tr style="opacity:.55"><td>顺带提及</td><td>' + (rd.t0||'—') + '</td><td colspan="3" style="font-size:11px;color:var(--text3)">窗口内话术仅 ' + rd.winChars + ' 字（&lt;80 字阈值），不计入考核</td></tr>';
+          continue;
+        }
+        var rc = rd.pct >= 90 ? 'var(--ok)' : (rd.pct < 70 ? 'var(--danger)' : 'var(--warn)');
+        var rg = rd.grade ? '<b style="color:' + (rd.grade.total>=75?'var(--ok)':(rd.grade.total<45?'var(--danger)':'var(--warn)')) + '">' + rd.grade.total + '分</b><span style="font-size:10px;color:var(--text3)">(' + rd.grade.grade + '级)</span>' : '—';
+        ph += '<tr><td>第 ' + (j+1) + ' 轮</td><td>' + (rd.t0||'—') + (rd.windowEnd?' ~ ' + rd.windowEnd:'') + '</td><td><b style="color:' + rc + '">' + rd.pct + '%</b>（' + rd.covered.length + '/' + p.sellTotal + '）</td><td>' + rg + '</td><td>' + (rd.missed.length ? '<span class="miss">' + esc(rd.missed.join('、')) + '</span>' : '<span class="b-ok">全部覆盖 ✓</span>') + '</td></tr>';
+      }
+      if(p.totalRounds > 1){
+        ph += '<tr style="background:#faf8f3"><td><b>合并汇总</b></td><td>所有轮次</td><td><b>' + p.unionPct + '%</b>（' + p.unionCovered.length + '/' + p.sellTotal + '）</td><td>' + (p.unionMissed.length ? '<span class="miss">' + esc(p.unionMissed.join('、')) + '</span>' : '<span class="b-ok">全部覆盖 ✓</span>') + '</td></tr>';
+      }
+      ph += '</table>';
+      if(hasMiss){
+        ph += '<div style="margin-top:8px;font-size:11.5px;color:var(--danger);background:#fdecea;border-radius:6px;padding:6px 10px">⚠ 该品存在 10 分钟窗口内未讲完的卖点：' + esc(p.unionMissed.join('、')) + '——整理为讲品改进项，后续优化讲品顺序与完整性</div>';
+      }
+      ph += '</div></div>';
+    }
+  } else {
+    ph = '<div class="evctx" style="color:var(--text3)">未识别到产品讲解片段（逐字稿需含产品名/别名）</div>';
+  }
+  $('productBlock').innerHTML = ph;
+
+  // 今日金句
+  var gh2 = '';
+  if(r.golden && r.golden.items && r.golden.items.length){
+    gh2 += '<div style="font-size:12px;color:var(--text2);margin-bottom:8px">今日提炼 <b>' + r.golden.total + '</b> 句（3 星以上 <b>' + r.golden.items.length + '</b> 句展示，5 星 <b>' + r.golden.star5 + '</b> 句）——已自动入库话术库</div>';
+    gh2 += '<table><tr><th style="width:14%">话术分类</th><th style="width:8%">评分</th><th>金句（时间戳）</th><th style="width:16%">标签</th></tr>';
+    for(var i=0;i<r.golden.items.length;i++){
+      var g = r.golden.items[i];
+      var starCl = g.star >= 5 ? 'style="color:var(--danger);font-weight:700"' : 'style="color:var(--gold);font-weight:700"';
+      gh2 += '<tr><td>' + g.type + '</td><td><span ' + starCl + '>' + '★'.repeat(g.star) + '</span></td><td>' + (g.ts?'<span class="evt">'+esc(g.ts)+'</span>':'') + esc(g.text) + '</td><td>' + (g.tags||[]).join('·') + '</td></tr>';
+    }
+    gh2 += '</table>';
+  } else {
+    gh2 = '<div class="evctx" style="color:var(--text3)">本场未发现 3 星及以上金句话术（话术均为普通表达）</div>';
+  }
+  $('goldenBlock').innerHTML = gh2;
+
+  // 话术库累计
+  renderGoldenLib();
+}
+
+// ================= 5. 主流程 =================
+var LAST_RESULT = null;
+
+// 通用包词检测（C 增强识别：识别到包袋类但无法确定具体款时，提示更精确）
+function detectBagHint(raw){
+  var bagWords = ['双肩包', '托特', '托特包', '背包', '通勤包', '上班包', '手提包', '单肩包', '斜挎包', '挎包'];
+  for(var i=0;i<bagWords.length;i++){ if(raw.indexOf(bagWords[i]) >= 0) return '包袋类内容（含"' + bagWords[i] + '"），但未匹配到具体包袋名'; }
+  return '';
+}
+
+// 从文件名识别产品（回退方案：逐字稿未口播产品名时，用文件名里的产品名/别名匹配）
+// 歧义消解：文件名匹配长度相同时（如 "truffle pro" → tote/backpack），用文本中该品卖点关键词命中数投票
+function detectProductFromName(filename, raw){
+  var base = String(filename || '').toLowerCase();
+  var PRODS = GRADING_STANDARD.products || {};
+  var best = null;
+  for(var key in PRODS){
+    var prod = PRODS[key];
+    var names = [prod.name.toLowerCase()].concat(prod.aliases.map(function(a){ return a.toLowerCase(); }));
+    var matchLen = 0;
+    for(var n=0;n<names.length;n++){
+      var nm = names[n];
+      if(nm.length >= 2 && base.indexOf(nm) >= 0 && nm.length > matchLen) matchLen = nm.length;
+    }
+    if(matchLen === 0) continue;
+    // 内容投票：文本中该品卖点关键词命中数（歧义消解）
+    var vote = 0;
+    if(raw){
+      var low = String(raw).toLowerCase();
+      var sp = GRADING_STANDARD.sellpoints[key];
+      if(sp && sp.list) for(var li=0; li<sp.list.length; li++){
+        var it = sp.list[li];
+        for(var wi=0; wi<it.keywords.length; wi++){
+          if(low.indexOf(it.keywords[wi].toLowerCase()) >= 0){ vote++; break; }
+        }
+      }
+      // 包型硬信号（backpack vs tote 歧义时最高权重）
+      var isBack = low.indexOf('双肩包') >= 0 || low.indexOf('背包') >= 0 || low.indexOf('扩容') >= 0;
+      var isTote = low.indexOf('托特') >= 0;
+      if(isBack && !isTote && /backpack/.test(key)) vote += 100;
+      if(isTote && !isBack && /tote/.test(key)) vote += 100;
+      if(isBack && isTote){
+        var bc = (low.match(/双肩包|背包/g) || []).length;
+        var tc = (low.match(/托特/g) || []).length;
+        if(bc > tc && /backpack/.test(key)) vote += 100;
+        if(tc > bc && /tote/.test(key)) vote += 100;
+      }
+    }
+    if(!best || matchLen > best.len || (matchLen === best.len && vote > best.vote)){
+      best = {key: key, len: matchLen, vote: vote};
+    }
+  }
+  return best ? best.key : null;
+}
+
+// 手动指定考核标准时的提示（高级选项）
+function onManualKeySelect(v){
+  var hint = $('manualKeyHint');
+  if(v === 'auto'){ hint.style.display = 'none'; }
+  else { hint.style.display = 'inline'; toastErr('⚠ 已手动指定为 ' + v + '——这将覆盖自动识别结果。选错品将影响评分，请确认'); }
+}
+
+// 从文件名自动识别 直播间/主播/日期（如"云端商务家程都兰2026-07-21"）
+function autoDetectMeta(filename){
+  var meta = {studio:'', host:'', date:''};
+  var base = String(filename || '').replace(/\.[^.]*$/, '');
+  // 日期：2026-07-21 / 2026.7.21 / 2026-8-20 / 20260820（年份与日月之间分隔可选）
+  var dm = base.match(/(\d{4})[-_.年]?(\d{1,2})[-_.月]?(\d{1,2})/);
+  if(dm) meta.date = dm[1] + '-' + dm[2] + '-' + dm[3];
+  // 直播间：匹配四直播间名（精确或简写"云端"=云端商务家）
+  var studios = [['云端商务家', '云端'], '摩登新贵女', '轻熟质享客', '综合'];
+  var studioMatched = '';
+  for(var i=0;i<studios.length;i++){
+    var matches = Array.isArray(studios[i]) ? studios[i] : [studios[i]];
+    for(var j=0;j<matches.length;j++){
+      if(base.indexOf(matches[j]) >= 0){ meta.studio = matches[0]; studioMatched = matches[j]; break; }
+    }
+    if(meta.studio) break;
+  }
+  // 主播：去掉直播间名 + 日期 + 常见直播修饰词 + 已知产品名，剩余中文 1-5 字符
+  var rest = base;
+  if(studioMatched) rest = rest.split(studioMatched).join('');
+  // 移除所有日期变体
+  rest = rest.replace(/(\d{4})[-_.年]?(\d{1,2})[-_.月]?(\d{1,2})/g, '');
+  // 先剥产品名/别名（在剥分隔符之前，避免"Truffle Pro"→"TrufflePro"后匹配不到）
+  // 大小写不敏感：先 lowercase 找位置，再从原字符串剔
+  try{
+    if(typeof GRADING_STANDARD !== 'undefined' && GRADING_STANDARD && GRADING_STANDARD.products){
+      var restLower = rest.toLowerCase();
+      for(var pk in GRADING_STANDARD.products){
+        var prod = GRADING_STANDARD.products[pk];
+        var names = [prod.name].concat(prod.aliases || []);
+        for(var n=0;n<names.length;n++){
+          var nm = names[n]; if(!nm || nm.length < 2) continue;
+          var idx = restLower.indexOf(nm.toLowerCase());
+          if(idx >= 0){ rest = rest.slice(0, idx) + rest.slice(idx + nm.length); restLower = restLower.slice(0, idx) + restLower.slice(idx + nm.length); }
+        }
+      }
+    }
+  }catch(e){}
+  rest = rest.replace(/[-_.年月日\s()（）\[\]【】]+/g, '').replace(/\d+/g, '');
+  // 常见直播/视频修饰词（按需扩充）—— 必须整词
+  rest = rest.replace(/(综合|直播|切片|原文|字幕|对话|纯享|完整版?|早场|晚场|午场|上午|下午|晚间|深夜|清晨|高清|标清|回放|录播|实况|全程|精简版?|精华版?|预告|加长版?|完整版?|主播|点评|讲解|介绍|叙述|话术|稿件|脚本|精选|合集|集锦|回放视频|重播|复盘|无水印|参考|合订)/gi, '');
+  if(rest && rest.length >= 1 && rest.length <= 5 && /^[一-龥]+$/.test(rest)) meta.host = rest;
+  return meta;
+}
+
+// 宽松兜底：autoDetectMeta 失败时，从文件名提取中文候选（允许混合字符，取最长连续中文段）
+function fallbackHostFromFile(filename){
+  var base = String(filename || '').replace(/\.[^.]*$/, '');
+  var m = base.match(/[\u4e00-\u9fa5]{2,4}/g);
+  if(!m) return '';
+  // 剔除直播间名/常见词后，取最长的中文段
+  var skip = /(综合|直播|切片|原文|字幕|对话|纯享|完整版?|早场|晚场|午场|上午|下午|晚间|深夜|清晨|高清|标清|回放|录播|实况|全程|主播|点评|讲解|介绍|叙述|话术|稿件|脚本|精选|合集|集锦|复盘|无水印|参考|合订|摩登新贵女|轻熟质享客|云端商务家|云端|综合)/;
+  var best = '';
+  for(var i=0;i<m.length;i++){
+    var w = m[i];
+    if(skip.test(w)) continue;
+    if(w.length > best.length) best = w;
+  }
+  // 若仍空（全部被跳过），取第一个非直播间段——兜底词表必须与 skip 一致（否则"原文"会被误当主播）
+  if(!best){
+    for(var j=0;j<m.length;j++){
+      var w2 = m[j];
+      if(!skip.test(w2)){ best = w2; break; }
+    }
+  }
+  return best;
+}
+
+// ================= 5.5 画面报告模块（A 方案：着装标准 + 抽帧 + 服化道评分，独立输出不计入总分） =================
+// 参考 GPT Codex 日报口径：服装10/妆发5/鞋履配饰3/道具场景4/整体3 = 25 分
+// 当前实现：规则版判定（基于视觉描述文本命中词表）；后续接本地 Qwen2.5-VL 时复用 OUTFIT_STANDARD.dims
+var VISION_URL = localStorage.getItem('vision_url') || 'http://127.0.0.1:3713';  // 本地视觉服务（Qwen2.5-VL）
+
+// 从评分结果 r 或文件名/文本中识别主播
+function detectHostFromText(host, studio){
+  // 匹配着装标准表（支持别名/模糊：取最接近的主播名）
+  if(!host || host === '未识别') return null;
+  var hosts = OUTFIT_STANDARD.hosts || {};
+  if(hosts[host]) return host;
+  // 模糊匹配：2-3 字主播名
+  for(var k in hosts){
+    if(host.indexOf(k) >= 0 || k.indexOf(host) >= 0) return k;
+  }
+  return null;
+}
+
+// 服化道判定：视觉描述文本 → 25 分（规则版）
+// 逻辑：命中任一 good 词 = 该维满分；命中 bad 词（无 good）= 半档；bad+good 并存 = 0.6 档；无描述/未入镜 = 0.6 基准
+function judgeOutfit(desc, hostKey){
+  var dims = OUTFIT_STANDARD.dims || {};
+  var result = {total: 0, max: 25, dims: [], gradeLimit: false};
+  var dimOrder = ['outfit', 'makeup', 'shoes', 'props', 'overall'];
+  var low = String(desc || '').toLowerCase();
+  for(var i=0;i<dimOrder.length;i++){
+    var dk = dimOrder[i];
+    var d = dims[dk];
+    var goodHits = [], badHits = [];
+    for(var g=0; g<d.good.length; g++){
+      if(low.indexOf(d.good[g].toLowerCase()) >= 0) goodHits.push(d.good[g]);
+    }
+    for(var b=0; b<d.bad.length; b++){
+      if(low.indexOf(d.bad[b].toLowerCase()) >= 0) badHits.push(d.bad[b]);
+    }
+    var score, reasons = [];
+    if(!desc || !desc.trim() || low.indexOf(d.none.toLowerCase()) >= 0){
+      // 未入镜/无描述：给 0.6 基准（不冤枉，标注待复核）
+      score = Math.round(d.max * 0.6);
+      reasons.push(d.none || '画面未提供该维度信息');
+    } else if(goodHits.length > 0 && badHits.length === 0){
+      score = d.max;  // 命中达标词 = 满分
+      reasons.push('达标：' + goodHits.slice(0,3).join('、'));
+    } else if(goodHits.length > 0 && badHits.length > 0){
+      score = Math.round(d.max * 0.6);  // 达标但存在负面 → 0.6 档
+      reasons.push('达标：' + goodHits.slice(0,3).join('、') + '；但有负面：' + badHits.slice(0,3).join('、'));
+    } else if(badHits.length > 0){
+      score = Math.round(d.max * 0.3);  // 纯负面 → 0.3 档
+      reasons.push('负面：' + badHits.slice(0,3).join('、'));
+    } else {
+      score = Math.round(d.max * 0.5);  // 无明确信息 → 0.5 中档
+      reasons.push('无明确达标/负面信息');
+    }
+    result.dims.push({key: dk, name: d.name, max: d.max, score: score, hits: goodHits, reasons: reasons});
+    result.total += score;
+  }
+  result.gradeLimit = result.total < 18;  // <18 触发等级上限 B
+  return result;
+}
+
+// 画面报告主流程：上传视频 → 抽帧（预留视觉描述）→ 服化道评分 → 报告
+// 当前阶段：因视觉模型未接入，先提供"手动输入画面描述"模式 + 抽帧接口骨架
+function generateVisionReport(videoFile, host, studio){
+  var report = {
+    host: host || '未识别', studio: studio || '',
+    outfitStandard: null,   // 着装标准（来自 OUTFIT_STANDARD.hosts）
+    outfit: null,           // 服化道评分结果
+    frames: [],             // 抽帧清单（预留）
+    source: '规则模式（视觉模型待接入）',
+    generatedAt: new Date().toISOString()
+  };
+  // 匹配着装标准
+  var hostKey = detectHostFromText(host, studio);
+  if(hostKey){
+    report.outfitStandard = OUTFIT_STANDARD.hosts[hostKey];
+    report.outfitStandard.hostKey = hostKey;
+    report.outfitStandard.studioStyle = (OUTFIT_STANDARD.studios[report.outfitStandard.studio] || {}).style || '';
+  }
+  return report;
+}
+
+// 渲染画面报告
+function renderVisionReport(report){
+  var box = $('visionReportBlock');
+  if(!box) return;
+  if(!report){ box.innerHTML = '<div style="color:var(--text3)">暂无画面报告</div>'; return; }
+  var h = '<div style="font-size:12px;color:var(--text2);margin-bottom:6px">画面报告 · ' + esc(report.host || '未识别') + (report.studio ? ' · ' + esc(report.studio) : '') + ' ｜ ' + esc(report.source) + '</div>';
+  // 着装标准
+  if(report.outfitStandard){
+    var os = report.outfitStandard;
+    var stColor = os.status === '确认' ? 'var(--ok)' : (os.status === '不合适' ? 'var(--danger)' : 'var(--warn)');
+    h += '<table><tr><th style="width:16%">着装标准（V4）</th><th style="width:12%">直播间</th><th style="width:10%">状态</th><th>注意事项</th></tr>';
+    h += '<tr><td><b>' + esc(os.hostKey) + '</b></td><td>' + esc(os.studio) + '</td><td><b style="color:' + stColor + '">' + esc(os.status) + '</b></td><td>' + esc(os.note || '—') + '</td></tr></table>';
+  } else {
+    h += '<div style="color:var(--warn);font-size:12px;margin:6px 0">⚠ 未匹配到主播着装标准（主播名不在 V4 表内）</div>';
+  }
+  // 服化道评分
+  if(report.outfit){
+    var o = report.outfit;
+    h += '<div style="font-weight:700;font-size:12.5px;margin:8px 0 4px">服化道评分（' + o.total + '/25 分' + (o.gradeLimit ? ' · <span style="color:var(--danger)">低于 18 分，综合等级最高 B 级</span>' : '') + '）</div>';
+    h += '<table><tr><th>维度</th><th style="width:10%">得分</th><th>命中/依据</th></tr>';
+    for(var i=0;i<o.dims.length;i++){
+      var d = o.dims[i];
+      var scCl = d.score >= d.max * 0.8 ? 'var(--ok)' : (d.score < d.max * 0.5 ? 'var(--danger)' : 'var(--warn)');
+      h += '<tr><td>' + d.name + '（' + d.max + '）</td><td><b style="color:' + scCl + '">' + d.score + '</b></td><td style="font-size:11px">' + (d.hits.length ? '命中：' + esc(d.hits.join('、')) : '') + (d.reasons.length ? ' <span style="color:var(--text3)">' + esc(d.reasons.join('；')) + '</span>' : '') + '</td></tr>';
+    }
+    h += '</table>';
+  }
+  box.innerHTML = h;
+}
+
+// 手动输入画面描述 → 服化道评分（当前阶段：视觉模型未接入，先用手动描述验证判定逻辑）
+// 自动画面报告：选视频 → 抽帧（调后端 extract-frames）→ 逐帧视觉描述 → 服化道评分
+async function autoVisionReport(){
+  var f = $('visionVideoInput') && $('visionVideoInput').files[0];
+  if(!f){ toastErr('请先选择视频文件（画面报告用）'); return; }
+  var host = $('visionHostInput').value.trim();
+  if(!host){ toastErr('请填写主播名'); return; }
+  var btn = $('visionAutoBtn'), st = $('visionStatus');
+  btn.disabled = true;
+  st.style.display = 'inline';
+  st.textContent = '抽帧 + 视觉分析中…（10 分钟视频约 2-5 分钟，CPU 推理）';
+  try{
+    // 1) 上传视频 → 后端抽帧（复用 asr 服务加抽帧接口；无则用 fetch 到 vision 服务）
+    // 视觉服务先提供抽帧：上传视频 → 服务端 ffmpeg 抽帧 → 返回帧清单
+    var resp = await fetch(VISION_URL + '/api/extract', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/octet-stream', 'X-File-Name': encodeURIComponent(f.name)},
+      body: f
+    });
+    var d = await resp.json();
+    if(!d.ok) throw new Error(d.error || '抽帧失败');
+    var frames = d.frames || [];
+    if(!frames.length) throw new Error('未抽到帧');
+    st.textContent = '抽帧 ' + frames.length + ' 张，视觉分析中…';
+    // 2) 逐帧视觉描述（串行，避免 CPU 过载）
+    var descs = [];
+    for(var i=0;i<frames.length;i++){
+      st.textContent = '视觉分析 ' + (i+1) + '/' + frames.length + '…';
+      var vr = await fetch(VISION_URL + '/api/vision', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({image: frames[i].file, prompt: ''})
+      });
+      var vd = await vr.json();
+      descs.push({ts: frames[i].tsSec, file: frames[i].file, desc: vd.desc || '', ok: !!vd.ok});
+    }
+    // 3) 合并描述 → 服化道评分
+    var combined = descs.map(function(x){ return (x.ts!=null?'['+x.ts+'s] ':'') + x.desc; }).join('\n');
+    var report = generateVisionReport(null, host, '');
+    report.outfit = judgeOutfit(combined, host);
+    report.source = '自动模式（Qwen2.5-VL 视觉模型，' + frames.length + ' 帧）';
+    report.frames = descs;
+    renderVisionReport(report);
+    toastErr('画面报告完成：' + frames.length + ' 帧 → 服化道 ' + report.outfit.total + '/25');
+  }catch(e){
+    toastErr('画面报告失败：' + e.message);
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+function judgeVisionByText(){
+  var host = $('visionHostInput').value.trim();
+  var desc = $('visionDescInput').value.trim();
+  if(!host){ toastErr('请填写主播名'); return; }
+  if(!desc){ toastErr('请粘贴画面描述（或先接视觉模型自动生成）'); return; }
+  var report = generateVisionReport(null, host, '');
+  report.outfit = judgeOutfit(desc, host);
+  report.source = '手动描述模式';
+  renderVisionReport(report);
+}
+
+// ============ GPT Codex 日报风格 · 完整自动日报（C 方案：前端一键） ============
+// 链路：视频 → ①SenseVoice 转写（能力评估）②抽帧+Qwen2.5-VL（服化道）→ 5项能力+25分服化道 → 完整日报
+// GPT 评分口径：产品定位准确度20 / 表达流畅度15 / 内容延展性15 / 产品展示能力15 / 情绪感染力10 + 服化道25 = 100
+var GPT_ABS_WORDS = ['不会进水','不会淋','随便背','不用担心淋','不用担心雨水','不可能掉色','不会掉色','不滋生细菌','不会有异味','不会滋生','绝对不会','百分之百'];
+var GPT_OVERRIDE_KW = {
+  c3: ['通勤','见客户','出差','旅游','快取','电脑尺寸','身高','性别','休闲穿搭','建议','差旅','上班','场景'],
+  c4: ['展示','演示','看一下','给大家看','上身','对比','打开','放进去','同步','分区','侧取','试一下','现场'],
+  c5: ['促单','种草','颜色','下单','好看','喜欢','放心','节奏','真的','划算','推荐','值得','安心']
+};
+function gptFindHits(segs, raw, kws){
+  var hits = [];
+  for(var i=0;i<kws.length;i++){
+    var w = kws[i];
+    var idx = raw.indexOf(w);
+    if(idx >= 0){
+      var ts = '';
+      for(var j=0;j<segs.length;j++){ if(segs[j].text.indexOf(w) >= 0){ ts = segs[j].ts; break; } }
+      hits.push({kw:w, ts:ts, ctx:raw.slice(Math.max(0,idx-18), idx+w.length+18)});
+    }
+  }
+  return hits;
+}
+function gptAbilityFromModule(mod, maxScore, absHits, absDeduct){
+  var base = Math.round(mod.score / 100 * maxScore);
+  var deduct = 0;
+  if(absDeduct && absHits.length) deduct = Math.min(absDeduct, absHits.length * 3);
+  var score = Math.max(0, base - deduct);
+  return {score:score, max:maxScore, level:Math.max(1,Math.min(5,Math.round(score/maxScore*5))), base:base, deduct:deduct};
+}
+function gptAbilityOverride(segs, raw, key, maxScore){
+  var hits = gptFindHits(segs, raw, GPT_OVERRIDE_KW[key] || []);
+  var n = hits.length;
+  var ratio = n >= 3 ? 1 : (n === 2 ? 0.85 : (n === 1 ? 0.7 : 0.45));
+  var score = Math.round(maxScore * ratio);
+  return {score:score, max:maxScore, level:Math.max(1,Math.min(5,Math.round(score/maxScore*5))), base:score, deduct:0, hits:hits};
+}
+// 完整日报渲染（GPT 风格：综合判断/代表画面/服化道表/5能力/次日必做）
+function renderGptDaily(rd){
+  var box = $('visionReportBlock');
+  if(!box) return;
+  var G = rd.grade, gCl = G==='A' ? 'var(--gold)' : (G==='B' ? '#d4a94c' : 'var(--danger)');
+  var h = '<div style="border:1.5px solid var(--gold);border-radius:10px;padding:14px;background:linear-gradient(180deg,#fffdf6,#fff)">';
+  h += '<div style="font-size:15px;font-weight:700;color:var(--text1)">主播综合评估日报 · ' + esc(rd.host) + '</div>';
+  h += '<div style="font-size:11.5px;color:var(--text3);margin:2px 0 8px">' + esc(rd.studio) + ' 直播间 · 完整自动生成（转写 + 视觉双引擎）· ' + esc(rd.video) + '</div>';
+  h += '<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">';
+  h += '<div><span style="font-size:34px;font-weight:700;color:' + gCl + '">' + rd.total + '</span><span style="font-size:12px;color:var(--text3)">/100 · ' + G + '级</span></div>';
+  h += '<div style="font-size:12.5px;color:var(--text2);flex:1;min-width:220px;background:#faf8f3;border:1px solid var(--line);border-radius:6px;padding:6px 10px">' + esc(rd.judgment) + '</div></div>';
+  // 代表画面
+  if(rd.repB64){
+    h += '<div style="font-size:12.5px;font-weight:700;margin:10px 0 4px;color:var(--text1)">代表画面（[' + rd.repTs + 's]）</div>';
+    h += '<img src="' + rd.repB64 + '" style="max-width:100%;border-radius:8px;border:1px solid var(--line)">';
+  }
+  // 服化道表
+  h += '<div style="font-size:12.5px;font-weight:700;margin:10px 0 4px;color:var(--text1)">服化道与品牌适配（' + rd.outfit.total + '/25）</div>';
+  h += '<table><tr><th>维度</th>';
+  var dimN = {outfit:'服装10',makeup:'妆发5',shoes:'鞋履3',props:'道具4',overall:'整体3'};
+  for(var k in dimN){ h += '<th style="width:14%">' + dimN[k] + '</th>'; }
+  h += '</tr><tr><td>得分</td>';
+  for(var k2 in dimN){ var dv = rd.outfit.dims.find(function(x){return x.key===k2}); h += '<td style="text-align:center;font-weight:700;color:var(--gold)">' + (dv?dv.score:'—') + '</td>'; }
+  h += '</tr></table>';
+  // 5项能力
+  var aNames = {pos:'产品定位准确度',flu:'表达流畅度',ext:'内容延展性',dis:'产品展示能力',emo:'情绪感染力'};
+  for(var ak in aNames){
+    var a = rd.abilities[ak];
+    var ac = a.score >= a.max*0.8 ? 'var(--ok)' : (a.score < a.max*0.5 ? 'var(--danger)' : 'var(--warn)');
+    h += '<div style="border:1px solid var(--line);border-radius:8px;margin:8px 0;overflow:hidden">';
+    h += '<div style="background:#faf8f3;padding:6px 10px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--line)">';
+    h += '<b style="font-size:12.5px;flex:1">' + aNames[ak] + '</b>';
+    h += '<span style="font-size:15px;font-weight:700;color:' + ac + '">' + a.score + '/' + a.max + '</span>';
+    h += '<span style="font-size:10.5px;background:var(--text1);color:var(--gold);border-radius:3px;padding:0 6px">L' + a.level + '</span></div>';
+    h += '<div style="padding:6px 10px;font-size:11.5px;color:var(--text2)">';
+    var evs = a.hits || [];
+    if(evs.length) h += '证据：' + esc(evs.slice(0,3).map(function(x){return (x.ts?x.ts+' ':'')+x.ctx;}).join('；')) + '<br>';
+    h += '</div></div>';
+  }
+  // 次日必做
+  if(rd.nextDo && rd.nextDo.length){
+    h += '<div style="font-size:12.5px;font-weight:700;margin:10px 0 4px">次日必做</div>';
+    for(var i=0;i<rd.nextDo.length;i++) h += '<div style="font-size:12px;background:#faf8f3;border-radius:5px;padding:4px 8px;margin:3px 0">● ' + esc(rd.nextDo[i]) + '</div>';
+  }
+  h += '</div>';
+  box.innerHTML = h;
+}
+// 完整自动日报主流程：视频 → 并行转写 + 抽帧视觉 → 双引擎 → GPT 风格日报
+async function autoFullReport(){
+  var f = $('visionVideoInput') && $('visionVideoInput').files[0];
+  if(!f){ toastErr('请先选择视频文件（完整日报用）'); return; }
+  var host = $('visionHostInput').value.trim();
+  if(!host){ toastErr('请填写主播名'); return; }
+  var btn = $('visionAutoBtn'), st = $('visionStatus');
+  btn.disabled = true; st.style.display = 'inline';
+  st.textContent = '完整日报生成中：上传+转写+抽帧+视觉分析…（10 分钟视频约 3-8 分钟）';
+  try{
+    // 1) 并行：转写（能力评估）+ 抽帧（服化道）
+    st.textContent = '上传视频 + 转写 + 抽帧中…';
+    var [trResp, exResp] = await Promise.all([
+      fetch(ASR_URL + '/api/transcribe', {method:'POST', headers:{'Content-Type':'application/octet-stream','X-File-Name':encodeURIComponent(f.name)}, body:f}),
+      fetch(VISION_URL + '/api/extract', {method:'POST', headers:{'Content-Type':'application/octet-stream','X-File-Name':encodeURIComponent(f.name)}, body:f})
+    ]);
+    var tr = await trResp.json(), ex = await exResp.json();
+    if(!tr.ok) throw new Error('转写失败：' + (tr.error||'').slice(0,120));
+    if(!ex.ok) throw new Error('抽帧失败：' + (ex.error||'').slice(0,120));
+    var segs = parseTranscript(tr.srt || '');
+    if(!segs.length) throw new Error('转写结果为空');
+    var frames = ex.frames || [];
+    st.textContent = '转写 ' + segs.length + ' 段 ✓，抽帧 ' + frames.length + ' 张 ✓，视觉分析中…';
+    // 2) 逐帧视觉描述
+    var descs = [];
+    for(var i=0;i<frames.length;i++){
+      st.textContent = '视觉分析 ' + (i+1) + '/' + frames.length + '…';
+      var vr = await fetch(VISION_URL + '/api/vision', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({image:frames[i].file, prompt:''})});
+      var vd = await vr.json();
+      descs.push({ts:frames[i].tsSec, file:frames[i].file, desc:vd.desc||'', ok:!!vd.ok, b64:vd.image_b64||''});
+    }
+    var combined = descs.map(function(x){ return (x.ts!=null?'['+x.ts+'s] ':'') + x.desc; }).join('\n');
+    // 3) 文本评分（能力评估）→ GPT 5项映射
+    var r = runGrading(segs, 'auto');
+    if(r.noProduct) throw new Error('未识别到产品讲解，无法自动评分');
+    var mods = {}; r.modules.forEach(function(m){ mods[m.key]=m; });
+    var raw = fullText(segs);
+    var absHits = gptFindHits(segs, raw, GPT_ABS_WORDS);
+    var pos = gptAbilityFromModule(mods.c1, 20, absHits, 5);
+    var flu = gptAbilityFromModule(mods.c2, 15, [], 0);
+    var ext = gptAbilityOverride(segs, raw, 'c3', 15);
+    var dis = gptAbilityOverride(segs, raw, 'c4', 15);
+    var emo = gptAbilityOverride(segs, raw, 'c5', 10);
+    var abSum = pos.score + flu.score + ext.score + dis.score + emo.score;
+    var outfitRes = judgeOutfit(combined, host);
+    var total = abSum + outfitRes.total;
+    var grade = total >= 85 ? 'A' : (total >= 70 ? 'B' : (total >= 60 ? 'C' : 'D'));
+    // 4) 综合判断 + 次日必做
+    var bestA = [pos,flu,ext,dis,emo].slice().sort(function(a,b){return (b.score/b.max)-(a.score/a.max)})[0];
+    var worstA = [pos,flu,ext,dis,emo].slice().sort(function(a,b){return (a.score/a.max)-(b.score/b.max)})[0];
+    var judgment = total >= 85 ? '讲解结构、展示同步与功能覆盖完整，达满分级水平；主要提升点在表达流畅度（' + flu.score + '/' + flu.max + '）。' : (absHits.length ? '讲解结构完整，但存在 ' + absHits.length + ' 处绝对化承诺（' + absHits.slice(0,2).map(function(a){return a.kw;}).join('、') + '），为主要扣分点。' : '功能主线清晰，但核心卖点覆盖有提升空间。');
+    var nextDo = [];
+    if(absHits.length) nextDo.push('当天复盘并替换「' + absHits.slice(0,2).map(function(a){return a.kw;}).join('、') + '」等绝对化话术。');
+    if(dis.score <= 9) nextDo.push('录制并背熟 40 秒标准讲解版本（含展示动作）。');
+    if(flu.score <= 10) nextDo.push('每个卖点限制为结论1句+证据1句+展示1次，减少冗余语气词。');
+    if(nextDo.length < 3) nextDo.push('保持低饱和通勤造型，妆发维持利落方向。');
+    // 5) 代表画面（选道具帧，用视觉接口回传的 base64）
+    var repFrame = descs[4] || descs[0];
+    var repB64 = (repFrame && repFrame.b64) ? 'data:image/jpeg;base64,' + repFrame.b64 : '';
+    // 6) 渲染
+    renderGptDaily({host:host, studio:r.meta && r.meta.studio || '', video:f.name, total:total, grade:grade, judgment:judgment,
+      outfit:outfitRes, abilities:{pos:pos,flu:flu,ext:ext,dis:dis,emo:emo}, repB64:repB64, repTs:repFrame?repFrame.ts:'',
+      nextDo:nextDo, product:r.sellpoints?r.sellpoints.product:'', cover:r.sellpoints?(r.sellpoints.covered+'/'+r.sellpoints.total):'', baselineErr:r.baseline?r.baseline.errors:0});
+    toastErr('完整日报完成：' + total + '分 ' + grade + '级（能力' + abSum + ' + 服化道' + outfitRes.total + '）');
+  }catch(e){
+    toastErr('完整日报失败：' + e.message);
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+// ================= 6. 视频转写入口（本地 SenseVoice / 云端可插拔） =================
+var ASR_URL = localStorage.getItem('asr_url') || 'http://127.0.0.1:3712';
+async function transcribeVideo(){
+  var f = $('videoInput').files[0];
+  if(!f){ toastErr('请先选择视频文件（MKV/MP4/AVI 等）'); return; }
+  var btn = $('transBtn'), st = $('transStatus');
+  btn.disabled = true;
+  st.style.display = 'inline';
+  st.textContent = '上传 + 转写中…（10 分钟切片约 1-3 分钟；长场本地较慢）';
+  try{
+    var resp = await fetch(ASR_URL + '/api/transcribe', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/octet-stream', 'X-File-Name': encodeURIComponent(f.name)},
+      body: f
+    });
+    var d = await resp.json();
+    if(!d.ok) throw new Error(d.error || '转写失败');
+    st.textContent = '转写完成，自动评分中…';
+    var segs = parseTranscript(d.srt || '');
+    if(segs.length === 0) throw new Error('转写结果为空（视频可能无有效语音）');
+    // 自动填充元数据（文件名解析）
+    var meta = autoDetectMeta(f.name);
+    if(meta.studio) $('studioSelect').value = meta.studio;
+    if(meta.host) $('hostInput').value = meta.host;
+    if(meta.date) $('dateInput').value = meta.date;
+    // 自动评分（auto 时文件名含产品名 → 优先文件名识别）
+    var productKey = $('productSelect').value;
+    if(productKey === 'auto'){
+      var fk0 = detectProductFromName(f.name, d.srt || '');
+      if(fk0 && GRADING_STANDARD.sellpoints[fk0]) productKey = fk0;
+    }
+    var r = runGrading(segs, productKey);
+    if(r.noProduct){
+      // 回退：视频文件名含产品名 → 自动选该品
+      var fk = detectProductFromName(f.name, d.srt || '');
+      if(fk && GRADING_STANDARD.sellpoints[fk]){
+        productKey = fk;
+        r = runGrading(segs, productKey);
+      } else {
+        st.textContent = '⚠ ' + (r.pkgHint || '未识别到产品讲解') + '——请手动选择考核标准后重新评分';
+        st.style.color = 'var(--danger)';
+        return;
+      }
+    }
+    r.host = $('hostInput').value.trim() || '未填';
+    r.studio = $('studioSelect').value;
+    r.date = $('dateInput').value.trim() || '未填';
+    r.product = (r.autoMatch && r.autoMatch.auto) ? (GRADING_STANDARD.sellpoints[r.autoMatch.fromKey].name + '（自动匹配：讲品特征/识别' + r.autoMatch.detected + '品）') : GRADING_STANDARD.sellpoints[productKey].name;
+    r.segCount = segs.length;
+    LAST_RESULT = r;
+    renderResult(r);
+    try{ addGoldenToLib(r.host, r.studio, r.date, r.product, r.golden); renderGoldenLib(); }catch(e){}
+    try{ var np = collectProblems(r); renderProblemLib(); renderProblemDetail(); if(np>0) toastErr('问题库 +' + np + ' 条'); }catch(e){}
+    localStorage.setItem('last_srt', d.srt || '');
+    st.textContent = '✅ 转写 + 评分完成（' + segs.length + ' 段）';
+    // 滚动到结果
+    $('result').scrollIntoView({behavior:'smooth'});
+  }catch(e){
+    st.textContent = '❌ ' + e.message;
+    var msg = e.message || '';
+    if(msg.indexOf('Failed to fetch') >= 0 || msg.indexOf('load failed') >= 0 || msg.indexOf('NetworkError') >= 0){
+      toastErr('无法连接转写服务——请在 grading-v2/asr 目录启动：node server-asr.js（首次需等模型加载）');
+    } else {
+      toastErr(e.message);
+    }
+    console.error(e);
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+// ================= 6.5 多主播批量评分 + 每日 TOP1 评选（TOP1 评选机制 V2） =================
+function batchRun(){
+  var files = $('batchInput').files;
+  if(!files || files.length < 2){ toastErr('请至少选择 2 个主播的逐字稿文件（Ctrl/Shift 多选）'); return; }
+  var productKey = $('productSelect').value;
+  $('loading').style.display = 'inline';
+  $('batchStatus').style.display = 'inline';
+  $('batchStatus').textContent = '批量评分中：' + files.length + ' 个文件…';
+  var results = [], done = 0;
+  for(var i=0;i<files.length;i++){
+    (function(file){
+      var reader = new FileReader();
+      reader.onload = function(e){
+        try{
+          var text = e.target.result;
+          var segs = parseTranscript(text);
+          if(!segs.length) throw new Error('未提取到有效话术段');
+          var meta = autoDetectMeta(file.name);
+          var useKey = productKey;
+          if(useKey === 'auto'){
+            // auto 时文件名含产品名 → 优先文件名识别（避免双肩包系列误判）
+            var fk0 = detectProductFromName(file.name, text);
+            if(fk0 && GRADING_STANDARD.sellpoints[fk0]) useKey = fk0;
+          }
+          var r = runGrading(segs, useKey);
+          if(r.noProduct){
+            // 回退：文件名含产品名 → 自动选该品
+            var fk = detectProductFromName(file.name, text);
+            if(fk && GRADING_STANDARD.sellpoints[fk]){
+              useKey = fk;
+              r = runGrading(segs, useKey);
+            } else {
+              results.push({error: (r.pkgHint || '未识别到产品讲解') + '——请手动选考核标准', fileName: file.name, host: '未识别产品'});
+              finishOne();
+              return;
+            }
+          }
+          r.host = meta.host || fallbackHostFromFile(file.name) || $('hostInput').value.trim() || '未识别';
+          r.studio = meta.studio || $('studioSelect').value;
+          r.date = meta.date || $('dateInput').value.trim() || '未填';
+          r.product = (r.autoMatch && r.autoMatch.auto) ? (GRADING_STANDARD.sellpoints[r.autoMatch.fromKey].name + '（自动匹配：讲品特征/识别' + r.autoMatch.detected + '品）') : (GRADING_STANDARD.sellpoints[useKey] ? GRADING_STANDARD.sellpoints[useKey].name + '（按文件名识别）' : '未知');
+          r.segCount = segs.length;
+          r.fileName = file.name;
+          results.push(r);
+          try{ addGoldenToLib(r.host, r.studio, r.date, r.product, r.golden); renderGoldenLib(); }catch(e2){ console.error(e2); }
+        }catch(err){
+          results.push({error: err.message, fileName: file.name, host: '解析失败'});
+          console.error('批量评分异常:', file.name, err);
+        }
+        finishOne();
+      };
+      reader.onerror = function(){
+        results.push({error: '文件读取失败', fileName: file.name, host: '读取失败'});
+        console.error('FileReader 失败:', file.name);
+        finishOne();
+      };
+      reader.readAsText(file, 'utf-8');
+      function finishOne(){
+        done++;
+        if(done === files.length){
+          $('loading').style.display = 'none';
+          $('batchStatus').style.display = 'none';
+          var okN = results.filter(function(r){ return typeof r.total === 'number'; }).length;
+          var failN = results.length - okN;
+          // V3：批量结果全部写入历史库（供"历史进步"标准对比）
+          for(var hi=0; hi<results.length; hi++){
+            if(typeof results[hi].total === 'number') addHistoryRecord(results[hi]);
+          }
+          try{ renderHistoryLib(); }catch(e){}
+          var t1 = pickTop1(results);
+          var msg = '批量评分完成：' + okN + '/' + results.length + ' 个有效';
+          if(t1) msg += '｜TOP1 = ' + t1.host + '（' + t1.total + ' 分）';
+          if(failN > 0) msg += '｜' + failN + ' 个失败';
+          msg += '（结果已展开在下方"TOP1 卡"区域）';
+          toastErr(msg);
+          renderBatchCompare(results);
+          // V3.4：批量完成后同步 TOP1 评选结果到飞书 TOP1 表
+          try{ syncTop1ToFeishu(results, t1); }catch(e){ console.error(e); }
+          // 批量问题沉淀：每份有效结果自动入库
+          try{
+            var lib = getProblemLib();
+            var before = lib.length;
+            for(var pi=0; pi<results.length; pi++){
+              if(typeof results[pi].total === 'number') collectProblems(results[pi]);
+            }
+            renderProblemLib();
+            renderProblemDetail();
+            var np = getProblemLib().length - before;
+            if(np > 0) toastErr('讲品问题库 +' + np + ' 条（含共性/1对1清单，见下方问题库面板）');
+          }catch(e){ console.error(e); }
+        }
+      }
+    })(files[i]);
+  }
+}
+
+// 批量模式：生成单个主播的完整细节报告 HTML（供折叠块逐条核对；与 renderResult 同源逻辑，注意两处需同步维护）
+function buildReportHTML(r){
+  var out = '';
+  // 概览卡
+  out += '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px">';
+  out += '<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px 16px;text-align:center"><div style="font-size:26px;font-weight:800;color:var(--gold)">' + r.total + '</div><div style="font-size:10px;color:var(--text3)">综合得分 / 100</div><div class="grade g' + r.grade + '" style="font-size:11px;margin-top:2px">' + r.grade + ' 级</div></div>';
+  out += '<div style="flex:1;min-width:220px;font-size:12px;line-height:1.7">';
+  out += '<div><b>核心优势：</b>' + esc(r.overview.strength) + '</div>';
+  out += '<div><b>核心问题：</b>' + esc(r.overview.problem) + '</div>';
+  out += '<div><b>最优能力：</b>' + esc(r.overview.best) + '</div>';
+  out += '<div><b>最弱能力：</b>' + esc(r.overview.worst) + '</div>';
+  out += '<div><b>一句话总评：</b>' + esc(r.overview.tagline) + '</div>';
+  out += '</div></div>';
+  // 能力矩阵汇总
+  out += '<div class="summary-grid">';
+  for(var i=0;i<r.modules.length;i++){
+    var m = r.modules[i];
+    var wLabel = m.weight > 0 ? m.weight + '%' : '分析';
+    out += '<div class="s-cell"><div class="n">' + m.name + ' · ' + wLabel + '</div><div class="v ' + (m.weight>0 ? (m.score>=75?'hi':(m.score<45?'lo':'')) : '') + '">' + m.score + '</div><div class="w">' + (m.weight>0 ? '加权 ' + m.weighted : '不计入总分') + '</div></div>';
+  }
+  out += '</div>';
+  // 能力明细（每个子标准：评判标准+完成度×质量+证据+未命中词）
+  for(var i=0;i<r.modules.length;i++){
+    var m = r.modules[i];
+    var wLabel = m.weight > 0 ? '权重 ' + m.weight + '% · 能力分 ' + m.score + ' · 加权 ' + m.weighted : '权重 0% · 只分析不计分（同分仲裁用）';
+    out += '<div class="mod">' + m.name + ' <span class="w">' + wLabel + '</span></div>';
+    for(var j=0;j<m.standards.length;j++){
+      var s = m.standards[j];
+      var cl = s.complete.level === 1 ? 'c-1' : (s.complete.level === 0.5 ? 'c-05' : 'c-0');
+      var scCl = s.score >= 80 ? 'hi' : (s.score >= 45 ? 'mid' : 'lo');
+      var evHtml = '';
+      for(var k=0;k<s.complete.hits.length && k<3;k++){
+        var ev = s.complete.hits[k];
+        evHtml += '<div style="margin-top:4px"><span class="ev">' + esc(ev.kw) + '</span>' + (ev.ts?'<span class="evt">'+esc(ev.ts)+'</span>':'') + '<span class="evctx">' + esc(ev.ctx) + '</span></div>';
+      }
+      if(evHtml === '' && s.quality.score >= 4 && s.complete.hits.length===0){
+        evHtml = '<div class="evctx" style="margin-top:4px;color:var(--warn)">完成度不足但质量因子有贡献（' + s.quality.applied.join('、') + '）</div>';
+      }
+      var missHtml = '';
+      if(s.complete.misses.length){
+        missHtml = '<div class="missed-words">未命中：<b>' + esc(s.complete.misses.slice(0,5).join(' / ')) + '</b>' + (s.complete.misses.length>5?' 等':'' ) + '</div>';
+      }
+      out += '<div class="std"><div class="std-hd"><span class="std-id">' + s.id + '</span><span class="std-nm">' + s.name + '</span><span class="chip ' + cl + '">完成度 ' + s.complete.level + '</span><span class="q">质量 ' + s.quality.score + '/5</span><span class="sc ' + scCl + '">' + s.score + '</span></div>' +
+        '<div class="std-bd"><div class="std-desc">评判标准：' + esc(s.desc) + '（' + esc(s.complete.detail) + '）</div>' + evHtml + missHtml + '</div></div>';
+    }
+  }
+  // 7 大核心卖点
+  out += '<div style="font-weight:700;font-size:12.5px;margin:10px 0 6px">7 大核心卖点覆盖</div>';
+  var sp = r.sellpoints;
+  out += '<table><tr><th style="width:28%">核心卖点</th><th>覆盖</th><th style="width:8%">质量</th><th style="width:9%">命中</th><th>证据</th></tr>';
+  for(var i=0;i<sp.items.length;i++){
+    var it = sp.items[i];
+    var evTxt = it.ev.map(function(e){return (e.ts?e.ts+' ':'')+e.ctx}).join('；');
+    var qCl = it.quality >= 4 ? 'color:var(--ok);font-weight:700' : (it.quality === 3 ? 'color:var(--warn);font-weight:700' : 'color:var(--text3)');
+    out += '<tr><td>' + it.name + '</td><td>' + (it.covered?'<span class="sp-y">✅ 覆盖</span>':'<span class="sp-n">❌ 缺失</span>') + '</td><td style="' + qCl + '">' + it.quality + '/5</td><td>' + it.kwHits + '/' + it.keywords.length + '</td><td>' + esc(evTxt) + '</td></tr>';
+  }
+  out += '<tr style="background:#faf8f3"><td><b>覆盖合计</b></td><td><b>' + sp.covered + '/' + sp.total + '</b></td><td colspan="3">' + (sp.covered===sp.total?'全部覆盖':'存在漏讲卖点，需补讲') + '</td></tr></table>';
+  // 基准库
+  out += '<div style="font-weight:700;font-size:12.5px;margin:10px 0 6px">信息准确性 · 基准库对照</div>';
+  out += '<table><tr><th>基准项</th><th>标准口径</th><th style="width:20%">判定</th><th>主播表述证据</th></tr>';
+  for(var i=0;i<r.baseline.items.length;i++){
+    var b = r.baseline.items[i];
+    out += '<tr><td>' + esc(b.field) + '</td><td>' + esc(b.standard) + '</td><td>' + (b.error?'<span class="b-bad">❌ 错误</span>':'<span class="b-ok">✅ 无误</span>') + '</td><td>' + (b.ev?esc(b.ev.ctx):'<span style="color:var(--text3)">未出现错误表述</span>') + '</td></tr>';
+  }
+  out += '</table>';
+  // 案例
+  out += '<div style="font-weight:700;font-size:12.5px;margin:10px 0 6px">优秀 / 不足案例</div>';
+  out += '<div class="case"><div class="ct">优秀案例 TOP' + r.cases.good.length + '</div>';
+  if(r.cases.good.length===0) out += '<p>未发现 ≥90 分证据段落</p>';
+  for(var i=0;i<r.cases.good.length;i++){
+    var g = r.cases.good[i];
+    out += '<p>【' + g.mod + ' · ' + g.std + '】' + (g.ts?'<span class="evt">'+esc(g.ts)+'</span>':'') + esc(g.ev) + '</p>';
+  }
+  out += '</div><div class="case"><div class="ct">不足案例 TOP' + r.cases.bad.length + '</div>';
+  if(r.cases.bad.length===0) out += '<p>未发现 ≤20 分明显不足</p>';
+  for(var i=0;i<r.cases.bad.length;i++){
+    var b2 = r.cases.bad[i];
+    out += '<p>【' + b2.mod + ' · ' + b2.std + '】' + (b2.ts?'<span class="evt">'+esc(b2.ts)+'</span>':'') + esc(b2.ev || ('缺失：' + b2.miss)) + '</p>';
+  }
+  out += '</div>';
+  // 改善闭环
+  out += '<div style="font-weight:700;font-size:12.5px;margin:10px 0 6px">改善闭环（能力缺口→训练动作→下周验证）</div>';
+  if(r.training && r.training.length){
+    out += '<table><tr><th style="width:14%">低分能力</th><th style="width:8%">能力分</th><th style="width:32%">能力缺口</th><th>训练动作</th><th style="width:13%">下周验证</th></tr>';
+    for(var i=0;i<r.training.length;i++){
+      var t = r.training[i];
+      out += '<tr><td>' + t.mod + '</td><td><b class="' + (t.score<45?'lo':'mid') + '">' + t.score + '</b></td><td style="font-size:12px;color:var(--warn)">' + esc(t.gap) + '</td><td style="font-size:12px">' + esc(t.action) + '</td><td style="font-size:12px;color:var(--ok)">' + esc(t.verify) + '</td></tr>';
+    }
+    out += '</table>';
+  } else {
+    out += '<div style="font-size:12px;color:var(--text3)">各能力均 ≥80 分，无需专项训练</div>';
+  }
+  // 产品识别
+  if(r.products && r.products.products && r.products.products.length){
+    out += '<div style="font-weight:700;font-size:12.5px;margin:10px 0 6px">产品识别与讲品分析（10 分钟窗口卖点覆盖）</div>';
+    for(var i=0;i<r.products.products.length;i++){
+      var p = r.products.products[i];
+      var hasMiss = p.unionMissed.length > 0;
+      out += '<div style="border:1px solid ' + (hasMiss ? '#f5c6bd' : 'var(--border)') + ';border-radius:8px;padding:8px 10px;margin-bottom:8px">';
+      out += '<div style="font-size:12px;font-weight:700">' + p.name + ' · 正式讲品 ' + p.totalRounds + ' 次（顺带提及 ' + (p.touchCount||0) + '）· 整体覆盖 ' + p.unionPct + '%</div>';
+      if(p.unionMissed.length) out += '<div style="font-size:11.5px;color:var(--danger)">10 分钟未讲完：' + esc(p.unionMissed.join('、')) + '</div>';
+      out += '</div>';
+    }
+  }
+  // 金句
+  out += '<div style="font-weight:700;font-size:12.5px;margin:10px 0 6px">今日金句（3 星以上）</div>';
+  if(r.golden && r.golden.items && r.golden.items.length){
+    out += '<table><tr><th style="width:14%">分类</th><th style="width:8%">评分</th><th>金句（时间戳）</th></tr>';
+    for(var i=0;i<r.golden.items.length;i++){
+      var g2 = r.golden.items[i];
+      var starCl = g2.star >= 5 ? 'style="color:var(--danger);font-weight:700"' : 'style="color:var(--gold);font-weight:700"';
+      out += '<tr><td>' + g2.type + '</td><td><span ' + starCl + '>' + '★'.repeat(g2.star) + '</span></td><td>' + (g2.ts?'<span class="evt">'+esc(g2.ts)+'</span>':'') + esc(g2.text) + '</td></tr>';
+    }
+    out += '</table>';
+  } else {
+    out += '<div style="font-size:12px;color:var(--text3)">本场未发现 3 星以上金句</div>';
+  }
+  return out;
+}
+
+// 0% 分析能力仲裁分（需求识别 c6 / 临场反应 c7 / 转化引导 c8）
+function analyzeSum(r){
+  var s = 0;
+  for(var i=0;i<r.modules.length;i++){
+    var m = r.modules[i];
+    if(m.key === 'c6' || m.key === 'c7' || m.key === 'c8') s += m.score;
+  }
+  return s;
+}
+
+// TOP1 评选：总分降序；同分时用 3 项 0% 分析能力仲裁（V2 同分仲裁规则）
+function pickTop1(results){
+  var valid = results.filter(function(r){ return typeof r.total === 'number'; });
+  if(!valid.length) return null;
+  // V3：c1 产品理解硬淘汰——任一子标准 0 分 → 不参与 TOP1（但仍显示排名，标注原因）
+  var pool = valid.filter(function(r){ return !c1HasZero(r); });
+  var sortedPool = pool.slice().sort(function(a,b){
+    if(b.total !== a.total) return b.total - a.total;
+    return analyzeSum(b) - analyzeSum(a);
+  });
+  var winner = sortedPool[0] || null;
+  return winner;
+}
+
+// V3：c1 产品理解是否任一子标准 0 分（B 方案硬淘汰线）
+function c1HasZero(r){
+  if(!r || !r.modules) return false;
+  for(var i=0;i<r.modules.length;i++){
+    var m = r.modules[i];
+    if(m.key === 'c1' && m.standards){
+      for(var j=0;j<m.standards.length;j++){
+        if(m.standards[j].score === 0) return true;  // 任一子标准 0 分 → 淘汰
+      }
+    }
+  }
+  return false;
+}
+
+// V3：c1 未通过的子标准清单（供展示）
+function c1ZeroReasons(r){
+  var out = [];
+  if(!r || !r.modules) return out;
+  for(var i=0;i<r.modules.length;i++){
+    var m = r.modules[i];
+    if(m.key === 'c1' && m.standards){
+      for(var j=0;j<m.standards.length;j++){
+        var s = m.standards[j];
+        if(s.score === 0) out.push(s.id + ' ' + s.name);
+      }
+    }
+  }
+  return out;
+}
+
+// V3：历史评分库（localStorage grading_history_v1：{host, date, total, c1Score, product, ts}）
+function getHistoryLib(){
+  try{ return JSON.parse(localStorage.getItem('grading_history_v1') || '[]'); }catch(e){ return []; }
+}
+function saveHistoryLib(lib){
+  try{ localStorage.setItem('grading_history_v1', JSON.stringify(lib)); }catch(e){}
+}
+function addHistoryRecord(r){
+  if(typeof r.total !== 'number' || !r.host || r.host === '未识别') return;
+  var lib = getHistoryLib();
+  var c1s = null;
+  for(var i=0;i<(r.modules||[]).length;i++){ if(r.modules[i].key === 'c1') c1s = r.modules[i].score; }
+  lib.push({host: r.host, date: r.date || '未填', total: r.total, c1Score: c1s, product: r.product || '', ts: Date.now()});
+  // 上限 5000 条防膨胀
+  if(lib.length > 5000) lib = lib.slice(lib.length - 5000);
+  saveHistoryLib(lib);
+}
+
+// V3：该主播历史平均分（同品优先，无则全量）
+function hostHistoryAvg(host, product){
+  var lib = getHistoryLib();
+  var mine = lib.filter(function(x){ return x.host === host && typeof x.total === 'number'; });
+  if(!mine.length) return null;
+  var sameProd = product ? mine.filter(function(x){ return x.product === product; }) : [];
+  var pool = sameProd.length ? sameProd : mine;
+  var sum = 0;
+  for(var i=0;i<pool.length;i++) sum += pool[i].total;
+  return {avg: Math.round(sum / pool.length * 10) / 10, count: pool.length, isSameProd: sameProd.length > 0};
+}
+
+// V3：历史评分库面板渲染（按主播分组统计 + 明细）
+function renderHistoryLib(){
+  var box = $('historyLibBlock');
+  if(!box) return;
+  var lib = getHistoryLib();
+  if(!lib.length){
+    box.innerHTML = '<div style="font-size:12px;color:var(--text3)">暂无历史评分记录——完成一次单主播/批量评分后自动入库。历史数据用于 TOP1 评选"历史进步"标准（总分 ≥ 历史平均 + 5 分）</div>';
+    return;
+  }
+  // 按主播分组统计
+  var byHost = {};
+  for(var i=0;i<lib.length;i++){
+    var x = lib[i];
+    if(!byHost[x.host]) byHost[x.host] = {count:0, sum:0, last:null, c1Sum:0, c1Count:0};
+    var g = byHost[x.host];
+    g.count++; g.sum += x.total;
+    if(x.c1Score !== null && x.c1Score !== undefined){ g.c1Sum += x.c1Score; g.c1Count++; }
+    if(!g.last || (x.ts||0) > (g.last.ts||0)) g.last = x;
+  }
+  var h = '<div style="font-size:12px;color:var(--text2);margin-bottom:6px">共 <b>' + lib.length + '</b> 条记录 ｜ <button class="btn btn-ghost" style="font-size:11px;padding:1px 10px" onclick="clearHistoryLib()">清空历史库</button></div>';
+  // 主播汇总表
+  h += '<table><tr><th style="width:14%">主播</th><th style="width:10%">次数</th><th style="width:12%">历史平均分</th><th style="width:12%">平均 c1 产品理解</th><th style="width:52%">最近一次</th></tr>';
+  for(var host in byHost){
+    var g = byHost[host];
+    var avg = Math.round(g.sum / g.count * 10) / 10;
+    var c1avg = g.c1Count ? Math.round(g.c1Sum / g.c1Count * 10) / 10 : '—';
+    var lastTxt = g.last ? (g.last.date + ' ｜ ' + g.last.total + ' 分' + (g.last.product ? ' ｜ ' + g.last.product.slice(0, 30) : '')) : '—';
+    h += '<tr><td><b>' + esc(host) + '</b></td><td>' + g.count + '</td><td><b style="color:var(--gold)">' + avg + '</b></td><td>' + c1avg + '</td><td style="font-size:11.5px;color:var(--text2)">' + esc(lastTxt) + '</td></tr>';
+  }
+  h += '</table>';
+  // 明细（最近 20 条）
+  var recent = lib.slice().sort(function(a,b){ return (b.ts||0)-(a.ts||0); }).slice(0, 20);
+  h += '<div style="font-size:12px;font-weight:700;margin:10px 0 4px">最近 20 条明细</div>';
+  h += '<table><tr><th style="width:12%">主播</th><th style="width:10%">日期</th><th style="width:9%">总分</th><th style="width:12%">c1 产品理解</th><th>考核产品</th></tr>';
+  for(var j=0;j<recent.length;j++){
+    var rec = recent[j];
+    h += '<tr><td>' + esc(rec.host) + '</td><td>' + esc(rec.date || '—') + '</td><td><b>' + rec.total + '</b></td><td>' + (rec.c1Score !== null && rec.c1Score !== undefined ? rec.c1Score : '—') + '</td><td style="font-size:11.5px;color:var(--text2)">' + esc((rec.product || '—').slice(0, 40)) + '</td></tr>';
+  }
+  h += '</table>';
+  box.innerHTML = h;
+}
+function clearHistoryLib(){
+  if(!confirm('确定清空全部历史评分记录？TOP1"历史进步"标准将失效，需重新累积。')) return;
+  saveHistoryLib([]);
+  renderHistoryLib();
+  toastErr('历史评分库已清空');
+}
+
+// V3：TOP1 三标准判定（满足至少一个才推荐）
+// ① 横向最优：总分 = 有效参评池最高（排除 c1 淘汰者）
+// ② 历史进步：总分 ≥ 该主播历史平均 + 5 分
+// ③ 特殊之处：金句 5 星 或 卖点覆盖100% 或 任一 0% 分析能力(c6/c7/c8) ≥ 75
+function checkTop1Criteria(r, validPool){
+  var met = [];
+  // ① 横向最优
+  var maxTotal = -1, topHost = null;
+  for(var i=0;i<validPool.length;i++){
+    if(validPool[i].total > maxTotal){ maxTotal = validPool[i].total; topHost = validPool[i].host; }
+  }
+  if(r.total >= maxTotal && validPool.length > 1) met.push({k:'h', label:'横向最优', desc:'全场最高分 ' + r.total + ' 分，优于当日全部参评主播'});
+  // ② 历史进步
+  var hAvg = hostHistoryAvg(r.host, r.product);
+  if(hAvg && r.total >= hAvg.avg + 5) met.push({k:'h2', label:'历史进步', desc:'较历史平均 ' + hAvg.avg + ' 分（' + hAvg.count + ' 次' + (hAvg.isSameProd ? '，同品' : '') + '）提升 ' + Math.round((r.total - hAvg.avg) * 10) / 10 + ' 分'});
+  // ③ 特殊之处
+  var special = [];
+  if(r.golden && r.golden.items){
+    var has5 = r.golden.items.some(function(g){ return g.star >= 5; });
+    if(has5) special.push('金句 5 星');
+  }
+  if(r.sellpoints && r.sellpoints.total && r.sellpoints.covered === r.sellpoints.total) special.push('卖点覆盖 100%');
+  for(var j=0;j<(r.modules||[]).length;j++){
+    var m = r.modules[j];
+    if((m.key === 'c6' || m.key === 'c7' || m.key === 'c8') && m.score >= 75) special.push(m.name.split('（')[0] + ' ' + m.score + ' 分');
+  }
+  if(special.length) met.push({k:'s', label:'特殊之处', desc:'另辟蹊径：' + special.join('、')});
+  return met;
+}
+
+function renderBatchCompare(results){
+  // 批量模式：只显示批量对比区，隐藏单主播报告
+  $('result').style.display = 'block';
+  $('singleReport').style.display = 'none';
+  $('batchCompare').style.display = 'block';
+  var valid = results.filter(function(r){ return typeof r.total === 'number'; });
+  // V3：淘汰池（c1 有 0 分子标准）与候选池（通过 c1 检查）
+  var eliminated = valid.filter(function(r){ return c1HasZero(r); });
+  var candidates = valid.filter(function(r){ return !c1HasZero(r); });
+  var top1 = pickTop1(results);
+  var h = '';
+  h += '<div style="border:1.5px solid var(--gold);border-radius:10px;background:var(--card);padding:14px 16px;margin-bottom:12px">';
+  h += '<div style="font-size:13px;font-weight:700;color:var(--gold);margin-bottom:4px">每日 TOP1 评选（V3 · 产品理解优先 + 三标准推荐）</div>';
+  if(top1){
+    // V3 三标准判定（满足至少一个才推荐）
+    var metCri = checkTop1Criteria(top1, candidates);
+    var criHtml = '';
+    if(metCri.length){
+      criHtml += '<div style="margin-top:6px;font-size:12px">';
+      for(var ci=0; ci<metCri.length; ci++){
+        var cTxt = metCri[ci];
+        criHtml += '<span style="display:inline-block;background:#c9a962;color:#fff;border-radius:4px;padding:1px 8px;margin-right:6px;font-weight:600">' + esc(cTxt.label) + '</span>';
+      }
+      criHtml += '</div>';
+      criHtml += '<div style="font-size:11.5px;color:var(--text2);margin-top:4px">推荐依据：' + esc(metCri.map(function(c){return c.desc;}).join('；')) + '</div>';
+    } else {
+      criHtml = '<div style="font-size:11.5px;color:var(--warn);margin-top:4px">⚠ 最高分主播（' + esc(top1.host) + ' ' + top1.total + ' 分）未满足任一 TOP1 推荐标准（横向最优/历史进步/特殊之处）——按规则不予推荐，仅作排名展示</div>';
+    }
+    // 最强能力
+    var bestM = top1.modules.slice().sort(function(a,b){return b.score-a.score})[0];
+    // 代表金句（最高星第一条）
+    var repJ = null;
+    if(top1.golden && top1.golden.items){
+      for(var i=0;i<top1.golden.items.length;i++){ if(top1.golden.items[i].star >= 4){ repJ = top1.golden.items[i]; break; } }
+    }
+    // 与第二名分差（候选池内）
+    var second = null;
+    for(var i=0;i<candidates.length;i++){ if(candidates[i] !== top1 && (!second || candidates[i].total > second.total)) second = candidates[i]; }
+    var diffTxt = second ? (top1.total - second.total > 0 ? '领先第二名 ' + second.host + ' ' + (top1.total - second.total) + ' 分' : '与 ' + second.host + ' 同分，经 3 项分析能力（需求识别/临场反应/转化引导）仲裁胜出') : '当日唯一通过产品理解的参评主播';
+    h += '<div style="display:flex;align-items:center;gap:14px;margin-top:8px">';
+    h += '<div style="background:linear-gradient(135deg,#c9a962,#b08d3f);color:#fff;width:52px;height:52px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:800;flex:none">1</div>';
+    h += '<div style="flex:1">';
+    h += '<div style="font-size:16px;font-weight:800">' + esc(top1.host) + ' <span style="font-size:12px;color:var(--text2)">' + esc(top1.studio || '') + ' · ' + esc(top1.date || '') + '</span></div>';
+    h += '<div style="font-size:12px;margin-top:2px">总分 <b style="font-size:15px">' + top1.total + '</b>（' + top1.grade + '级）｜最强能力：' + esc(bestM.name.split('（')[0]) + ' ' + bestM.score + ' 分' + (repJ ? '｜代表金句：' + (repJ.ts?'['+esc(repJ.ts)+'] ':'') + esc(repJ.text.slice(0, 40)) + '…' : '') + '</div>';
+    h += '<div style="font-size:12px;color:var(--ok);margin-top:2px">' + diffTxt + (top1.baseline && top1.baseline.errors ? '；信息准确性错误 ' + top1.baseline.errors + ' 处' : '；信息准确性零错误') + '</div>';
+    h += criHtml;
+    h += '</div></div>';
+  } else {
+    if(candidates.length){
+      h += '<div style="font-size:12px;color:var(--warn)">参评主播均未通过产品理解检查（c1 存在 0 分子标准）——按规则今日无 TOP1，先补产品理解再评选</div>';
+    } else {
+      h += '<div style="font-size:12px;color:var(--text3)">无有效评分结果</div>';
+    }
+  }
+  h += '</div>';
+
+  // 排名表
+  h += '<table><tr><th style="width:10%">排名</th><th style="width:12%">主播</th><th style="width:9%">总分</th><th style="width:7%">等级</th><th style="width:16%">产品理解检查</th>';
+  var modKeys = ['c1','c2','c3','c4','c5','c6','c7','c8'];
+  var modNames = {c1:'产品理解', c2:'逻辑组织', c3:'场景化', c4:'道具运用', c5:'情绪感染', c6:'需求识别', c7:'临场反应', c8:'转化引导'};
+  for(var i=0;i<modKeys.length;i++) h += '<th>' + modNames[modKeys[i]] + (i>=5?'*':'') + '</th>';
+  h += '</tr>';
+  var rank = 1;
+  var ordered = valid.slice().sort(function(a,b){
+    if(b.total !== a.total) return b.total - a.total;
+    return analyzeSum(b) - analyzeSum(a);
+  });
+  for(var i=0;i<ordered.length;i++){
+    var r = ordered[i];
+    var isTop = (top1 && r === top1);
+    var isElim = c1HasZero(r);
+    h += '<tr' + (isTop ? ' style="background:#fdf8ec;border-left:3px solid var(--gold)"' : '') + '>';
+    h += '<td>' + (isTop ? 'TOP1' : rank) + '</td>';
+    var hostDisplay = esc(r.host || '未识别');
+    if(!r.host && r.fileName) hostDisplay += '<div style="font-size:10px;color:var(--text3);margin-top:2px">' + esc(r.fileName.replace(/\.[^.]*$/, '').slice(0, 30)) + '</div>';
+    h += '<td><b>' + hostDisplay + '</b>' + (isTop ? '<div style="font-size:10px;color:var(--gold)">TOP1</div>' : '') + '</td>';
+    h += '<td><b style="font-size:13px">' + r.total + '</b></td><td>' + r.grade + '</td>';
+    if(isElim){
+      h += '<td style="font-size:11px;color:var(--danger)"><b>✗ 不参与评选</b><div>' + esc(c1ZeroReasons(r).join('；')) + '</div></td>';
+    } else {
+      h += '<td style="font-size:11px;color:var(--ok)"><b>✓ 通过</b></td>';
+    }
+    for(var j=0;j<modKeys.length;j++){
+      var mk = modKeys[j];
+      var mm = null;
+      for(var k=0;k<r.modules.length;k++){ if(r.modules[k].key === mk){ mm = r.modules[k]; break; } }
+      if(mm){
+        var mc = mm.weight > 0 ? (mm.score >= 75 ? 'var(--ok)' : (mm.score < 45 ? 'var(--danger)' : 'var(--warn)')) : 'var(--text3)';
+        h += '<td style="color:' + mc + ';font-weight:' + (mm.weight>0?'600':'400') + '">' + mm.score + '</td>';
+      } else h += '<td>—</td>';
+    }
+    h += '</tr>';
+    rank++;
+  }
+  h += '</table>';
+  h += '<div style="font-size:11px;color:var(--text3);margin-top:4px">* = V2 权重 0% 分析能力（不计入总分，同分仲裁用）</div>';
+
+  // 每人改善闭环（按低分能力 3 条）
+  h += '<div style="margin-top:12px;font-size:13px;font-weight:700">各主播改善闭环（能力缺口 → 训练动作 → 下周验证）</div>';
+  for(var i=0;i<ordered.length;i++){
+    var r2 = ordered[i];
+    h += '<div style="margin-top:8px;border:1px solid var(--border);border-radius:8px;overflow:hidden">';
+    h += '<div style="padding:7px 12px;background:#faf8f3;font-weight:700;font-size:12.5px;border-bottom:1px solid var(--border)">' + esc(r2.host) + ' <span style="color:var(--text3);font-weight:400">总分 ' + r2.total + '（' + r2.grade + '）</span></div>';
+    h += '<div style="padding:6px 12px">';
+    if(r2.training && r2.training.length){
+      h += '<table><tr><th style="width:16%">低分能力</th><th style="width:8%">能力分</th><th style="width:34%">能力缺口（问题证据）</th><th>训练动作</th><th style="width:13%">下周验证</th></tr>';
+      for(var j=0;j<r2.training.length;j++){
+        var t = r2.training[j];
+        h += '<tr><td>' + t.mod + '</td><td><b class="' + (t.score<45?'lo':'mid') + '">' + t.score + '</b></td><td style="font-size:12px;color:var(--warn)">' + esc(t.gap) + '</td><td style="font-size:12px">' + esc(t.action) + '</td><td style="font-size:12px;color:var(--ok)">' + esc(t.verify) + '</td></tr>';
+      }
+      h += '</table>';
+    } else {
+      h += '<div style="font-size:12px;color:var(--text3)">各能力均 ≥80 分，无需专项训练</div>';
+    }
+    h += '</div></div>';
+  }
+
+  // 各主播完整评分细节（按主播折叠展示，可逐条核对评分是否正确）
+  h += '<div style="margin-top:14px;font-size:13px;font-weight:700">各主播完整评分细节（点击展开 · 逐条核对每个子标准的判定标准/证据/得分）</div>';
+  for(var i=0;i<ordered.length;i++){
+    var r3 = ordered[i];
+    h += '<details style="margin-top:8px;border:1px solid ' + (r3 === top1 ? 'var(--gold)' : 'var(--border)') + ';border-radius:8px;background:var(--card);padding:10px 12px">';
+    h += '<summary style="cursor:pointer;font-weight:700;font-size:13px">' + esc(r3.host) + ' · <b>' + r3.total + '</b> 分（' + r3.grade + '级）' + (r3 === top1 ? ' · TOP1' : '') + ' · 点击展开完整细节</summary>';
+    h += '<div style="margin-top:10px">' + buildReportHTML(r3) + '</div>';
+    h += '</details>';
+  }
+
+  // 失败文件提示
+  var fails = results.filter(function(r){ return r.error; });
+  if(fails.length){
+    h += '<div style="margin-top:8px;font-size:12px;color:var(--danger)">⚠ ' + fails.length + ' 个文件评分失败：' + fails.map(function(f){ return f.fileName + '（' + f.error + '）'; }).join('；') + '</div>';
+  }
+
+  $('batchCompare').innerHTML = h;
+  $('result').style.display = 'block';
+  $('batchCompare').style.display = 'block';
+  $('batchCompare').scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+// 文件选择后自动填充元数据
+function autoFillMeta(input){
+  if(!input || !input.files || !input.files[0]) return;
+  var meta = autoDetectMeta(input.files[0].name);
+  if(meta.studio){ $('studioSelect').value = meta.studio; }
+  if(meta.host){ $('hostInput').value = meta.host; }
+  if(meta.date){ $('dateInput').value = meta.date; }
+  if(meta.host || meta.date || meta.studio){
+    toastErr('已从文件名自动识别：' + [meta.studio, meta.host, meta.date].filter(Boolean).join(' / ') + '（可手动修改）');
+  }
+}
+
+// 批量文件选择提示
+function batchHint(input){
+  var n = input.files.length;
+  if(n === 0){ $('batchHint').textContent = '未选择文件'; $('batchHint').style.color = 'var(--text3)'; return; }
+  $('batchHint').textContent = '已选 ' + n + ' 个文件，点【批量评分 · TOP1 评选】开始';
+  $('batchHint').style.color = 'var(--gold)';
+  if(n < 2) toastErr('至少选 2 个主播文件才能做 TOP1 评选（已选 ' + n + ' 个）');
+}
+
+function run(){
+  var file = $('fileInput').files[0];
+  if(!file){ toastErr('请先选择逐字稿文件（.srt / .txt）'); return; }
+  var reader = new FileReader();
+  reader.onload = function(e){
+    var text = e.target.result;
+    var segs = parseTranscript(text);
+    if(segs.length === 0){ toastErr('解析失败：未提取到有效话术段，请检查文件格式'); return; }
+    var productKey = $('productSelect').value;
+    if(productKey === 'auto'){
+      // auto 时文件名含产品名 → 优先文件名识别（避免双肩包系列误判）
+      var fk0 = detectProductFromName(file.name, text);
+      if(fk0 && GRADING_STANDARD.sellpoints[fk0]) productKey = fk0;
+    }
+    // V3.1：单主播 run 也用文件名解析主播/直播间/日期（与 batchRun 一致，避免依赖手填）
+    var meta2 = autoDetectMeta(file.name);
+    $('loading').style.display = 'inline';
+    setTimeout(function(){
+      try{
+        var r = runGrading(segs, productKey);
+        if(r.noProduct){
+          // 回退：文件名含产品名 → 按文件名识别并自动选标准（如"Truffle Pro_原文.srt"）
+          var fk = detectProductFromName(file.name, text);
+          if(fk && GRADING_STANDARD.sellpoints[fk]){
+            productKey = fk;
+            r = runGrading(segs, productKey);
+          } else {
+            $('loading').style.display = 'none';
+            toastErr((r.pkgHint || '未识别到产品讲解（逐字稿需含产品名/别名）') + '——请手动选择考核标准后重新评分');
+            return;
+          }
+        }
+        r.host = meta2.host || fallbackHostFromFile(file.name) || $('hostInput').value.trim() || '未识别';
+        r.studio = meta2.studio || $('studioSelect').value;
+        r.date = $('dateInput').value.trim() || '未填';
+        r.product = (r.autoMatch && r.autoMatch.auto) ? (GRADING_STANDARD.sellpoints[r.autoMatch.fromKey].name + '（自动匹配：讲品特征/识别' + r.autoMatch.detected + '品）') : (GRADING_STANDARD.sellpoints[productKey] ? GRADING_STANDARD.sellpoints[productKey].name + '（按文件名识别）' : '未知');
+        r.segCount = segs.length;
+        LAST_RESULT = r;
+        renderResult(r);
+        // V3：单主播评分也写入历史库（供"历史进步"标准对比）
+        try{ addHistoryRecord(r); renderHistoryLib(); }catch(e){}
+        // 金句自动入库（3 星及以上，V2：日报完成后自动提取）
+        try{ addGoldenToLib(r.host, r.studio, r.date, r.product, r.golden); renderGoldenLib(); }catch(e){}
+        // 讲品问题自动入库
+        try{ var np2 = collectProblems(r); renderProblemLib(); renderProblemDetail(); if(np2>0) toastErr('讲品问题库 +' + np2 + ' 条'); }catch(e){}
+      }catch(err){
+        toastErr('评分出错：' + err.message);
+        console.error(err);
+      }
+      $('loading').style.display = 'none';
+    }, 50);
+  };
+  reader.readAsText(file, 'utf-8');
+}
+
+function loadSample(){
+  var sample = [
+    '00:00:00 开场：很多明星博主达人都在用，非常好看，也非常好用能装。',
+    '00:00:12 经常出差，要快速拿取电脑，这个箱子非常适合你。',
+    '00:00:21 不需要把整个箱子都打开，站立状态之下直接快速拿取。',
+    '00:01:04 不需要回到酒店，也不需要把它摊倒在地。',
+    '00:02:00 二号链接这一个袁泉老师的同款。',
+    '00:02:03 爱马仕旗下的刘知礼老师主笔设计的。',
+    '00:02:20 四层全新的一个PC材质，抗压性抗冲击性都要更好。',
+    '00:02:47 德国进口科思创PC，坚韧耐用。',
+    '00:03:34 360度静音的万向轮，越负重越好推，赶高铁的时候不会拖后腿。',
+    '00:04:50 7A级抗菌和防渗水，99%的抗菌率。',
+    '00:05:43 你看这个就弹出来了，给大家看一下前开盖。',
+    '00:06:00 快速取物，同时也是能够保护隐私。',
+    '00:06:49 三个隔层收纳起来之后像一个大通仓。',
+    '00:08:24 四层PC、7A级抗菌、静音万向轮、快速取物保护隐私、360天换新五年维修。',
+    '00:08:41 售后360天无忧，五年免费质保，所以您放心用。',
+    '00:09:02 你一年两年才用一次的，我都不建议你买它。',
+    '00:09:11 高频差旅看20寸，家庭出行直接看29寸，确认好尺寸直接拍二号链接。',
+    '00:09:28 20寸适合3到5天的短途出行。',
+    '00:09:40 25寸适合7到14天，29寸适合半个月以上的家庭出行。',
+    '00:09:58 如果大家对尺寸容量不清楚，可以把出行计划打在公屏上。',
+    '00:10:17 有大买大，大家扣1我来帮你们选。'
+  ].join('\n');
+  var blob = new Blob([sample], {type:'text/plain;charset=utf-8'});
+  var f = new File([blob], '样例_陈思颖_8.18.txt', {type:'text/plain'});
+  $('fileInput').files = (function(){ var dt=new DataTransfer(); dt.items.add(f); return dt.files })();
+  $('hostInput').value = '陈思颖'; $('dateInput').value = '2026-08-18'; $('studioSelect').value = '云端商务家';
+  toastErr('样例已载入（模拟陈思颖 8.18 云端商务家片段），点击「开始评分」');
+}
+
+function exportReport(fmt){
+  if(!LAST_RESULT){ toastErr('请先完成一次评分'); return; }
+  var r = LAST_RESULT;
+  var lines = [];
+  lines.push('主播讲解评分报告 v2.1（V2 能力矩阵）');
+  lines.push('主播：' + r.host + ' ｜ 直播间：' + r.studio + ' ｜ 日期：' + r.date + ' ｜ 标准：' + r.product);
+  lines.push('综合得分：' + r.total + ' ｜ 等级：' + r.grade + ' ｜ 分析段落：' + r.segCount + ' 段');
+  lines.push('核心优势：' + r.overview.strength);
+  lines.push('核心问题：' + r.overview.problem);
+  lines.push('一句话总评：' + r.overview.tagline);
+  lines.push('');
+  lines.push('【能力矩阵】');
+  for(var i=0;i<r.modules.length;i++){
+    var m = r.modules[i];
+    var wLabel = m.weight > 0 ? '权重 ' + m.weight + '% → 加权 ' + m.weighted : '权重 0%（只分析不计分）';
+    lines.push(m.name + '：' + m.score + ' 分（' + wLabel + '）');
+    lines.push('  建议：' + (GRADING_STANDARD.training[m.key] || '—'));
+    for(var j=0;j<m.standards.length;j++){
+      var s = m.standards[j];
+      var evTxt = (s.complete.hits[0]||{}).ctx || '';
+      lines.push('  ' + s.id + ' ' + s.name + '：完成度' + s.complete.level + ' × 质量' + s.quality.score + ' = ' + s.score + ' 分' + (evTxt?' ｜ 证据：'+evTxt:''));
+    }
+  }
+  lines.push('');
+  lines.push('【信息准确性】错误 ' + r.baseline.errors + ' 处');
+  for(var i=0;i<r.baseline.items.length;i++){
+    var b = r.baseline.items[i];
+    if(b.error) lines.push('  ❌ ' + b.field + '（标准：' + b.standard + '，出现错误表述）');
+  }
+  lines.push('');
+  lines.push('【改进建议（改善闭环）】');
+  for(var i=0;i<r.training.length;i++){
+    var t2 = r.training[i];
+    lines.push('  ' + t2.mod + '(' + t2.score + '分)');
+    lines.push('    能力缺口：' + t2.gap);
+    lines.push('    训练动作：' + t2.action);
+    lines.push('    下周验证：' + t2.verify);
+  }
+  var content = lines.join('\n');
+  var blob = new Blob([content], {type:'text/plain;charset=utf-8'});
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = '评分报告_' + (r.host||'主播') + '_' + (r.date||'').replace(/-/g,'') + '.' + (fmt==='json'?'json':'txt');
+  a.click();
+}
+
+// ============ 页面初始化 ============
+(function(){
+  try{ renderProblemLib(); }catch(e){}
+  try{ renderGoldenLib(); }catch(e){}
+  try{ renderHistoryLib(); }catch(e){}
+})();
+</script>
+</body>
+</html>
