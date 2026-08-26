@@ -99,7 +99,7 @@
   <div class="top">
     <div class="logo"></div>
     <span class="brand">ITO · 主播讲解评分</span>
-    <span class="badge">v3.0 · 飞书 TOP1 同步</span>
+    <span class="badge">v3.1 · 自动建记录回填</span>
   </div>
   <h1>主播讲解评分系统 v2</h1>
   <div class="sub">V2 日报标准：主播能力矩阵 8 项（5 计分 + 3 分析）｜ 每个评分点 = 可执行评判标准 + 原文证据（时间戳）</div>
@@ -303,7 +303,7 @@ function autoFillFeishu(r){
       body: JSON.stringify({ host: r.host, date: r.date, studio: r.studio, result: r })
     }).then(function(rs){ return rs.json(); }).then(function(j){
       if(j.ok){
-        toastErr('✓ 已回填飞书：' + r.host + ' ' + r.date + '（' + r.total + ' 分 / ' + j.fieldsWritten + ' 字段）');
+        toastErr('✓ 已回填飞书' + (j.created ? '（新建记录）' : '') + '：' + r.host + ' ' + r.date + '（' + r.total + ' 分 / ' + j.fieldsWritten + ' 字段）');
       } else if(j.skipped){
         // 跳过不报错，仅短提示
         toastErr('ⓘ 飞书回填跳过：' + j.reason);

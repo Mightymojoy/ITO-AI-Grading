@@ -71,6 +71,16 @@ async function updateRecord(token, recordId, fields){
   }, body);
 }
 
+async function createRecord(token, fields){
+  const body = JSON.stringify({fields});
+  return httpsJson({
+    hostname:'open.feishu.cn',
+    path:'/open-apis/bitable/v1/apps/'+BASE_TOKEN+'/tables/'+TABLE_ID+'/records',
+    method:'POST',
+    headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json; charset=utf-8','Content-Length':Buffer.byteLength(body)}
+  }, body);
+}
+
 module.exports = async function handler(req, res){
   // CORS（GitHub Pages 跨域调用）
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -95,15 +105,6 @@ module.exports = async function handler(req, res){
     const token = await getToken();
     const records = await listRecords(token);
     const rec = matchRecord(records, host, date);
-    if(!rec){
-      return res.status(200).json({ok:false, skipped:true, reason:'飞书未匹配到记录（主播='+host+' 日期='+date+'）', recordsTotal: records.length});
-    }
-
-    // 安全保护：无附件记录不写入（防污染）
-    const hasAttach = (rec.fields[ATTACH_FIELD] || []).length > 0;
-    if(!hasAttach){
-      return res.status(200).json({ok:false, skipped:true, reason:'匹配记录无视频附件，跳过写入', recordId: rec.record_id});
-    }
 
     // 提取 c1-c5
     const c = {};
@@ -120,7 +121,7 @@ module.exports = async function handler(req, res){
       bad = r.baseline.errorsList.map(e => '['+(e.field||'')+'] '+(e.wrong||[]).join('/')).slice(0,3).join('; ');
     }
 
-    const fields = {
+    const baseFields = {
       '综合评分': String(r.total != null ? r.total : ''),
       '产品知识能力': String(c.c1 != null ? c.c1 : ''),
       '逻辑组织能力(流畅度)': String(c.c2 != null ? c.c2 : ''),
@@ -128,9 +129,26 @@ module.exports = async function handler(req, res){
       '可视化道具运用': String(c.c4 != null ? c.c4 : ''),
       '情绪感染能力': String(c.c5 != null ? c.c5 : '')
     };
+    if(golden) baseFields['黄金话术'] = golden;
+    if(bad) baseFields['违规话术'] = bad;
+
+    // 匹配不到 → 自动创建记录（评分结果自动写入飞书的完整闭环）
+    if(!rec){
+      const createFields = Object.assign({}, baseFields, {
+        '主播': host,
+        '日期': String(date).slice(0,10)
+      });
+      if(data.studio) createFields['直播间'] = data.studio;
+      const cr = await createRecord(token, createFields);
+      if(cr.code !== 0){
+        return res.status(200).json({ok:false, reason:'飞书自动建记录失败: '+(cr.msg||'')+' code='+cr.code});
+      }
+      const newRec = cr.data && cr.data.record;
+      return res.status(200).json({ok:true, created:true, recordId: newRec ? newRec.record_id : '', host, date, total: r.total, fieldsWritten: Object.keys(createFields).length});
+    }
+
+    const fields = Object.assign({}, baseFields);
     if(data.studio && !rec.fields['直播间']) fields['直播间'] = data.studio;
-    if(golden) fields['黄金话术'] = golden;
-    if(bad) fields['违规话术'] = bad;
 
     const up = await updateRecord(token, rec.record_id, fields);
     if(up.code !== 0){
