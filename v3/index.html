@@ -284,11 +284,14 @@ function toastErr(m){var e=$('errbar');e.style.display='block';e.textContent=m;s
 // 云端/本地飞书写回端点（部署版 = Vercel Serverless；本地 = asr 服务 3712）
 // 可通过 localStorage('feishu_fill_url') 覆盖
 var FEISHU_FILL_URL = 'http://127.0.0.1:3712/api/feishu-fill';
+var FEISHU_SYNC_URL = 'http://127.0.0.1:3712/api/feishu-sync';
 try{
   // 云端部署版：显式指向 Vercel 函数（GitHub Pages 无 /api）
   FEISHU_FILL_URL = localStorage.getItem('feishu_fill_url') || 'https://cloud-five-pi.vercel.app/api/feishu-fill';
+  FEISHU_SYNC_URL = localStorage.getItem('feishu_sync_url') || 'https://cloud-five-pi.vercel.app/api/feishu-sync';
   if(typeof location !== 'undefined' && (location.protocol === 'file:' || location.hostname === '127.0.0.1' || location.hostname === 'localhost')){
     FEISHU_FILL_URL = localStorage.getItem('feishu_fill_url') || 'http://127.0.0.1:3712/api/feishu-fill';
+    FEISHU_SYNC_URL = localStorage.getItem('feishu_sync_url') || 'http://127.0.0.1:3712/api/feishu-sync';
   }
 }catch(e){}
 
@@ -344,18 +347,16 @@ function syncFeishuLibs(r){
     if(r.modules) for(var k=0;k<r.modules.length;k++){ if(r.modules[k].key==='c1') c1s = r.modules[k].score; }
     payload.history.push({host:r.host, date:r.date, studio:r.studio, product:r.product||'', total:r.total, grade:r.grade, c1:c1s});
     if(!payload.golden.length && !payload.problems.length && !payload.history.length) return;
-    // 云端部署版暂不支持 sync（需单独端点），仅本地 3712 时同步
-    var isLocal = true;
-    try{ isLocal = (typeof location === 'undefined' || location.protocol === 'file:' || location.hostname === '127.0.0.1' || location.hostname === 'localhost'); }catch(e){}
-    if(isLocal){
-      fetch('http://127.0.0.1:3712/api/feishu-sync', {
-        method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)
-      }).then(function(rs){ return rs.json(); }).then(function(j){
-        if(j.ok && j.total > 0){
-          toastErr('✓ 飞书同步：写入 ' + j.written + ' / 去重 ' + j.skipped + (j.failed ? ' / 失败 ' + j.failed : ''));
-        }
-      }).catch(function(e){ console.log('飞书同步异常:', e.message); });
-    }
+    // 云端 + 本地都同步（FEISHU_SYNC_URL 自动判断环境）
+    fetch(FEISHU_SYNC_URL, {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)
+    }).then(function(rs){ return rs.json(); }).then(function(j){
+      if(j.ok && j.total > 0){
+        toastErr('✓ 飞书同步：写入 ' + j.written + ' / 去重 ' + j.skipped + (j.failed ? ' / 失败 ' + j.failed : ''));
+      } else if(j.skipped){
+        toastErr('ⓘ 飞书同步跳过：' + j.reason);
+      }
+    }).catch(function(e){ console.log('飞书同步异常:', e.message); });
   }catch(e){ console.log('syncFeishuLibs 异常:', e.message); }
 }
 
@@ -391,7 +392,7 @@ function syncTop1ToFeishu(results, top1){
       second: second ? second.host : '', diff: second ? Math.round((top1.total - second.total)*10)/10 : '',
       c1Check: c1Chk
     }]};
-    fetch('http://127.0.0.1:3712/api/feishu-sync', {
+    fetch(FEISHU_SYNC_URL, {
       method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)
     }).then(function(rs){ return rs.json(); }).then(function(j){
       if(j.ok && j.total > 0){
