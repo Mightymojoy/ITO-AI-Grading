@@ -99,7 +99,7 @@
   <div class="top">
     <div class="logo"></div>
     <span class="brand">ITO · 主播讲解评分</span>
-    <span class="badge">v3.6 · 周月自动总结</span>
+    <span class="badge">v3.8 · 明星评分自动写入</span>
   </div>
   <h1>主播讲解评分系统 v2</h1>
   <div class="sub">V2 日报标准：主播能力矩阵 8 项（5 计分 + 3 分析）｜ 每个评分点 = 可执行评判标准 + 原文证据（时间戳）</div>
@@ -376,7 +376,7 @@ function syncWeekMonth(){
 // V3.3：把本场金句/问题/历史评分同步到飞书对应表（黄金话术库/问题话术库/历史评分）
 function syncFeishuLibs(r){
   try{
-    var payload = {golden: [], problems: [], history: [], cases: []};
+    var payload = {golden: [], problems: [], history: [], cases: [], stars: []};
     // 金句（4星+）
     if(r.golden && r.golden.items){
       for(var i=0;i<r.golden.items.length;i++){
@@ -397,6 +397,10 @@ function syncFeishuLibs(r){
     var c1s = null;
     if(r.modules) for(var k=0;k<r.modules.length;k++){ if(r.modules[k].key==='c1') c1s = r.modules[k].score; }
     payload.history.push({host:r.host, date:r.date, studio:effectiveStudio(r), product:r.product||'', total:r.total, grade:r.grade, c1:c1s});
+    // V3.9 明星主播：评分结果额外写入问题整改表（6 位明星：宿浩淇/苏蓬/曲姝锜/甘晋铭/全程/王菲）
+    if(['宿浩淇','苏蓬','曲姝锜','甘晋铭','全程','王菲'].indexOf(r.host) >= 0){
+      payload.stars.push({host:r.host, studio:effectiveStudio(r), total:r.total, modules:r.modules||[], training:r.training||[]});
+    }
     // 优秀案例（V3.7：完整话术 + 三要素判定后的优秀案例才同步）
     if(r.cases && r.cases.good && r.cases.good.length){
       for(var ci=0; ci<r.cases.good.length; ci++){

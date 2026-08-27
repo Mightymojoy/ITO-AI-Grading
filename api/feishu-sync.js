@@ -29,8 +29,33 @@ const TBL = {
   problem: process.env.FEISHU_TBL_PROBLEM || '',
   case:    process.env.FEISHU_TBL_CASE    || '',
   history: process.env.FEISHU_TBL_HISTORY || '',
-  top1:    process.env.FEISHU_TBL_TOP1    || ''
+  top1:    process.env.FEISHU_TBL_TOP1    || '',
+  detail:  process.env.FEISHU_TBL_DETAIL  || 'tblW366zZNF9QF06'
 };
+
+// V3.9 6 名明细（明星）主播——评分结果额外写入"问题整改"表
+const STARS = ['宿浩淇','苏蓬','曲姝锜','甘晋铭','全程','王菲'];
+const STAR_STUDIO = {
+  '宿浩淇':'云端商务家','苏蓬':'云端商务家',
+  '曲姝锜':'轻熟质享客','甘晋铭':'轻熟质享客',
+  '全程':'摩登新贵女','王菲':'摩登新贵女'
+};
+
+// 当前 ISO 周（YYYY-Www）+ 周起始/周结束（周一起）
+function currentWeekInfo(){
+  const now = new Date();
+  const pad2 = n => String(n).padStart(2,'0');
+  const fmt = d => d.getFullYear() + '-' + pad2(d.getMonth()+1) + '-' + pad2(d.getDate());
+  const day = (now.getDay() + 6) % 7;
+  const monday = new Date(now); monday.setDate(now.getDate() - day);
+  const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+  const utc = new Date(Date.UTC(monday.getFullYear(), monday.getMonth(), monday.getDate()));
+  const dayNum = utc.getUTCDay() || 7;
+  utc.setUTCDate(utc.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
+  const weekNum = Math.ceil((utc - yearStart) / 86400000 / 7 + 1);
+  return {label: utc.getUTCFullYear() + '-W' + pad2(weekNum), start: fmt(monday), end: fmt(sunday)};
+}
 
 let tokenCache = null, tokenExpires = 0;
 
@@ -173,6 +198,51 @@ module.exports = async function handler(req, res){
         r = await syncRecord(token, TBL.top1, '日期', t1.date, fields);
       }
       results.push({type:'top1', r: r});
+    }
+
+    // V3.9 明星主播评分结果额外写入"问题整改"表（每次评分实时，按 周起始+主播 去重更新）
+    // 表结构（老大 8.27 重设计）：周起始/周结束/主播/直播间 + 8能力 + 能力欠缺总结/整改计划
+    for(const st of (data.stars || [])){
+      if(!st.host || STARS.indexOf(st.host) < 0) continue;
+      const wk = currentWeekInfo();
+      // 8 能力分映射（评分系统 c1-c8 → 飞书字段）
+      const C_FIELDS = {
+        c1:'产品知识能力', c2:'逻辑组织能力(流畅度)', c3:'场景化表达能力(延展性)',
+        c4:'可视化道具运用', c5:'情绪感染能力', c6:'需求识别能力',
+        c7:'临场反应能力', c8:'转化引导能力'
+      };
+      const cMap = {};
+      (st.modules || []).forEach(m => {
+        if(C_FIELDS[m.key] && m.score != null) cMap[C_FIELDS[m.key]] = String(m.score);
+      });
+      // 能力欠缺总结 + 整改计划（来自 training）
+      const lacks = (st.training || []).map(t => {
+        const m = String(t.gap||'').match(/^(.+?)（未命中/);
+        return (m ? m[1] : t.gap||'');
+      }).filter(Boolean).slice(0,5).join('；');
+      const plan = (st.training || []).map(t => (t.action||'')).filter(Boolean).slice(0,2).join('；');
+      const dFields = Object.assign({}, cMap, {
+        '周起始': wk.start, '周结束': wk.end,
+        '主播': st.host, '直播间': STAR_STUDIO[st.host] || st.studio || '',
+        '能力欠缺总结': lacks || (st.total != null && st.total < 60 ? '综合评分低于60分，需重点辅导' : '—'),
+        '整改计划': plan || (st.total != null && st.total < 60 ? '按评分报告改进建议逐项训练' : '保持现有水平')
+      });
+      // 去重：周起始 + 主播
+      const existRecs = await listRecords(token, TBL.detail);
+      let found = null;
+      for(const er of existRecs){
+        const f = er.fields || {};
+        if(f['周起始'] === wk.start && f['主播'] === st.host){ found = er; break; }
+      }
+      let r;
+      if(found){
+        const up = await updateRecord(token, TBL.detail, found.record_id, dFields);
+        r = up.code === 0 ? {ok:true, recordId: found.record_id, updated:true} : {ok:false, reason:'更新失败: '+(up.msg||'')};
+      } else {
+        const cr = await createRecord(token, TBL.detail, dFields);
+        r = cr.code === 0 ? {ok:true, recordId: cr.data && cr.data.record ? cr.data.record.record_id : '', created:true} : {ok:false, reason:'写入失败: '+(cr.msg||'')};
+      }
+      results.push({type:'star', r: r});
     }
 
     // 统计
