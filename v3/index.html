@@ -99,7 +99,7 @@
   <div class="top">
     <div class="logo"></div>
     <span class="brand">ITO · 主播讲解评分</span>
-    <span class="badge">v3.3 · 批量同步4表</span>
+    <span class="badge">v3.4 · 产品反推直播间</span>
   </div>
   <h1>主播讲解评分系统 v2</h1>
   <div class="sub">V2 日报标准：主播能力矩阵 8 项（5 计分 + 3 分析）｜ 每个评分点 = 可执行评判标准 + 原文证据（时间戳）</div>
@@ -295,6 +295,27 @@ try{
   }
 }catch(e){}
 
+// V3.6：从自动匹配的产品反推直播间（文件名无直播间标识时兜底——如任佳瑛讲 truffle_2 → 轻熟质享客）
+function inferStudioFromProduct(productKey){
+  try{
+    if(!productKey) return '';
+    var prod = GRADING_STANDARD.products[productKey];
+    if(!prod) return '';
+    var names = [prod.name].concat(prod.aliases || []);
+    for(var i=0;i<names.length;i++){
+      var n = names[i];
+      if(n.indexOf('轻熟') >= 0) return '轻熟质享客';
+      if(n.indexOf('摩登') >= 0) return '摩登新贵女';
+      if(n.indexOf('云端') >= 0) return '云端商务家';
+    }
+  }catch(e){}
+  return '';
+}
+// 评分结果直播间：文件名识别 → 产品反推 → 下拉框
+function effectiveStudio(r){
+  return r.studio || inferStudioFromProduct(r.autoMatch && r.autoMatch.fromKey) || '';
+}
+
 // V3.2：评分完成后自动调 /api/feishu-fill 回填（失败/未配置仅 toast，不阻塞评分）
 function autoFillFeishu(r){
   try{
@@ -303,7 +324,7 @@ function autoFillFeishu(r){
     if(!r.date || r.date === '未填') return;
     fetch(FEISHU_FILL_URL, {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ host: r.host, date: r.date, studio: r.studio, result: r })
+      body: JSON.stringify({ host: r.host, date: r.date, studio: effectiveStudio(r), result: r })
     }).then(function(rs){ return rs.json(); }).then(function(j){
       if(j.ok){
         toastErr('✓ 已回填飞书' + (j.created ? '（新建记录）' : '') + '：' + r.host + ' ' + r.date + '（' + r.total + ' 分 / ' + j.fieldsWritten + ' 字段）');
@@ -331,7 +352,7 @@ function syncFeishuLibs(r){
       for(var i=0;i<r.golden.items.length;i++){
         var g = r.golden.items[i];
         if(g.star >= 4){
-          payload.golden.push({host:r.host, date:r.date, studio:r.studio, tags:g.tags||[], star:g.star, text:g.text});
+          payload.golden.push({host:r.host, date:r.date, studio:effectiveStudio(r), tags:g.tags||[], star:g.star, text:g.text});
         }
       }
     }
@@ -339,13 +360,13 @@ function syncFeishuLibs(r){
     if(r.training && r.training.length){
       for(var j=0;j<r.training.length;j++){
         var t = r.training[j];
-        payload.problems.push({host:r.host, date:r.date, studio:r.studio, type:t.mod||'能力缺口', desc:t.gap||'', prio:''});
+        payload.problems.push({host:r.host, date:r.date, studio:effectiveStudio(r), type:t.mod||'能力缺口', desc:t.gap||'', prio:''});
       }
     }
     // 历史评分
     var c1s = null;
     if(r.modules) for(var k=0;k<r.modules.length;k++){ if(r.modules[k].key==='c1') c1s = r.modules[k].score; }
-    payload.history.push({host:r.host, date:r.date, studio:r.studio, product:r.product||'', total:r.total, grade:r.grade, c1:c1s});
+    payload.history.push({host:r.host, date:r.date, studio:effectiveStudio(r), product:r.product||'', total:r.total, grade:r.grade, c1:c1s});
     if(!payload.golden.length && !payload.problems.length && !payload.history.length) return;
     // 云端 + 本地都同步（FEISHU_SYNC_URL 自动判断环境）
     fetch(FEISHU_SYNC_URL, {
