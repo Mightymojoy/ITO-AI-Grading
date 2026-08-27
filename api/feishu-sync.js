@@ -133,14 +133,16 @@ module.exports = async function handler(req, res){
       })});
     }
 
-    // 历史评分（每次评分）
+    // 历史评分（每次评分直接追加，保留全部轨迹——不去重，避免同主播新评分被旧记录拦截）
     for(const h of (data.history || [])){
       if(!h.host || !h.date) continue;
-      results.push({type:'history', r: await syncRecord(token, TBL.history, '主播', h.host, {
+      const hFields = {
         '主播': h.host||'', '日期': h.date||'', '直播间': h.studio||'',
         '产品': h.product||'', '总分': h.total!=null?String(h.total):'', '等级': h.grade||'',
         'c1产品理解': h.c1!=null?String(h.c1):''
-      })});
+      };
+      const hr = await createRecord(token, TBL.history, hFields);
+      results.push({type:'history', r: hr.code !== 0 ? {ok:false, reason:'写入失败: '+(hr.msg||'')+' code='+hr.code} : {ok:true, recordId: hr.data && hr.data.record ? hr.data.record.record_id : ''}});
     }
 
     // 优秀案例
