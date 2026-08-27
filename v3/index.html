@@ -99,7 +99,7 @@
   <div class="top">
     <div class="logo"></div>
     <span class="brand">ITO · 主播讲解评分</span>
-    <span class="badge">v3.5 · 优秀案例质量判定</span>
+    <span class="badge">v3.6 · 周月自动总结</span>
   </div>
   <h1>主播讲解评分系统 v2</h1>
   <div class="sub">V2 日报标准：主播能力矩阵 8 项（5 计分 + 3 分析）｜ 每个评分点 = 可执行评判标准 + 原文证据（时间戳）</div>
@@ -340,7 +340,37 @@ function autoFillFeishu(r){
     });
     // V3.3：同步折叠块数据（金句/问题/历史评分）到飞书同步表
     syncFeishuLibs(r);
+    // V3.8：评分后实时更新当前周/月总结
+    try{ syncWeekMonth(); }catch(e3){ console.log('syncWeekMonth 异常:', e3.message); }
   }catch(e){ console.log('autoFillFeishu 包装异常:', e.message); }
+}
+
+// V3.8：评分后实时聚合更新当前周/月总结（周起始~周结束 / 当月）
+function syncWeekMonth(){
+  try{
+    var now = new Date();
+    var pad2 = function(n){ return String(n).padStart(2,'0'); };
+    var fmt = function(d){ return d.getFullYear() + '-' + pad2(d.getMonth()+1) + '-' + pad2(d.getDate()); };
+    // 当前自然周（周一起）
+    var day = (now.getDay() + 6) % 7;
+    var monday = new Date(now); monday.setDate(now.getDate() - day);
+    var sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+    var wkStart = fmt(monday), wkEnd = fmt(sunday);
+    // 当月
+    var y = now.getFullYear(), m = now.getMonth()+1;
+    var monthStart = y + '-' + pad2(m) + '-01';
+    var monthEnd = y + '-' + pad2(m) + '-31';
+    var WM_URL = FEISHU_FILL_URL.replace('feishu-fill', 'feishu-week-month');
+    if(!WM_URL || WM_URL === FEISHU_FILL_URL) return;
+    fetch(WM_URL, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({range:'week', start:wkStart, end:wkEnd})})
+      .then(function(rs){ return rs.json(); }).then(function(j){
+        if(j.ok && !j.empty) console.log('周总结已更新:', j.hosts, '主播');
+      }).catch(function(e){ console.log('周总结更新异常:', e.message); });
+    fetch(WM_URL, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({range:'month', start:monthStart, end:monthEnd})})
+      .then(function(rs){ return rs.json(); }).then(function(j){
+        if(j.ok && !j.empty) console.log('月总结已更新:', j.hosts, '主播');
+      }).catch(function(e){ console.log('月总结更新异常:', e.message); });
+  }catch(e){ console.log('syncWeekMonth 异常:', e.message); }
 }
 
 // V3.3：把本场金句/问题/历史评分同步到飞书对应表（黄金话术库/问题话术库/历史评分）
