@@ -156,7 +156,7 @@ module.exports = async function handler(req, res){
     for(const t1 of (data.top1 || [])){
       if(!t1.date || !t1.host) continue;
       const fields = {
-        '日期': t1.date||'', '直播间': t1.studio||'', 'TOP1主播': t1.host||'',
+        '日期': t1.date||'', '直播间': t1.studio||'', '主播': t1.host||'',
         '总分': t1.total!=null?String(t1.total):'', '等级': t1.grade||'',
         '推荐标准': (t1.criteria||[]).join('、'), '推荐依据': t1.reason||'',
         '第二名': t1.second||'', '与第二名分差': t1.diff!=null?String(t1.diff):'',
