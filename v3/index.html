@@ -99,7 +99,7 @@
   <div class="top">
     <div class="logo"></div>
     <span class="brand">ITO · 主播讲解评分</span>
-    <span class="badge">v3.1 · 自动建记录回填</span>
+    <span class="badge">v3.3 · 批量同步4表</span>
   </div>
   <h1>主播讲解评分系统 v2</h1>
   <div class="sub">V2 日报标准：主播能力矩阵 8 项（5 计分 + 3 分析）｜ 每个评分点 = 可执行评判标准 + 原文证据（时间戳）</div>
@@ -2176,6 +2176,12 @@ function batchRun(){
             if(typeof results[hi].total === 'number') addHistoryRecord(results[hi]);
           }
           try{ renderHistoryLib(); }catch(e){}
+          // V3.5 修复：批量评分也要同步每份结果到飞书4张表（主播日报/黄金话术库/问题话术库/历史评分）
+          for(var hi=0; hi<results.length; hi++){
+            if(typeof results[hi].total === 'number'){
+              try{ autoFillFeishu(results[hi]); }catch(e2){ console.error('autoFillFeishu 异常:', e2); }
+            }
+          }
           var t1 = pickTop1(results);
           var msg = '批量评分完成：' + okN + '/' + results.length + ' 个有效';
           if(t1) msg += '｜TOP1 = ' + t1.host + '（' + t1.total + ' 分）';
