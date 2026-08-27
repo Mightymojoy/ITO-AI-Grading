@@ -99,7 +99,7 @@
   <div class="top">
     <div class="logo"></div>
     <span class="brand">ITO · 主播讲解评分</span>
-    <span class="badge">v3.4 · 产品反推直播间</span>
+    <span class="badge">v3.5 · 优秀案例质量判定</span>
   </div>
   <h1>主播讲解评分系统 v2</h1>
   <div class="sub">V2 日报标准：主播能力矩阵 8 项（5 计分 + 3 分析）｜ 每个评分点 = 可执行评判标准 + 原文证据（时间戳）</div>
@@ -367,6 +367,15 @@ function syncFeishuLibs(r){
     var c1s = null;
     if(r.modules) for(var k=0;k<r.modules.length;k++){ if(r.modules[k].key==='c1') c1s = r.modules[k].score; }
     payload.history.push({host:r.host, date:r.date, studio:effectiveStudio(r), product:r.product||'', total:r.total, grade:r.grade, c1:c1s});
+    // 优秀案例（V3.7：完整话术 + 三要素判定后的优秀案例才同步）
+    if(r.cases && r.cases.good && r.cases.good.length){
+      for(var ci=0; ci<r.cases.good.length; ci++){
+        var g = r.cases.good[ci];
+        if(g.full && g.ev){
+          payload.cases.push({host:r.host, date:r.date, studio:effectiveStudio(r), type:'优秀', text:g.ev, analysis:'[' + g.std + '] ' + g.mod});
+        }
+      }
+    }
     if(!payload.golden.length && !payload.problems.length && !payload.history.length) return;
     // 云端 + 本地都同步（FEISHU_SYNC_URL 自动判断环境）
     fetch(FEISHU_SYNC_URL, {
@@ -650,6 +659,52 @@ function cnToAr(s){
   return String(n);
 }
 
+// V3.7 优秀案例：完整话术提取（命中段 + 前后各 1 段，形成有参考性的完整讲品话术）
+function extractFullQuote(segs, ts, ctx){
+  if(!ts) return ctx || '';
+  try{
+    for(var i=0;i<segs.length;i++){
+      if(segs[i].ts === ts){
+        var parts = [];
+        for(var j=Math.max(0,i-1); j<=Math.min(segs.length-1,i+1); j++){
+          var t = (segs[j].text||'').trim();
+          if(t) parts.push(t);
+        }
+        var full = parts.join('。');
+        return full.length > 20 ? full : (ctx || full);
+      }
+    }
+  }catch(e){}
+  return ctx || '';
+}
+
+// V3.7 优秀案例：三要素结构完整度判定（产品结论 + 证据/理由 + 使用场景/利益，全命中才算"有参考性"）
+function caseQuality(text, productKey){
+  if(!text || text.length < 25) return false;  // 过短无参考性
+  var t = text.toLowerCase();
+  // ① 产品结论：命中该品任一卖点关键词或专属词
+  var concl = false;
+  try{
+    var sp = GRADING_STANDARD.sellpoints[productKey];
+    if(sp && sp.list) for(var a=0;a<sp.list.length && !concl;a++) for(var b=0;b<(sp.list[a].keywords||[]).length;b++){
+      if(t.indexOf((sp.list[a].keywords[b]||'').toLowerCase()) >= 0){ concl = true; break; }
+    }
+    if(!concl && GRADING_STANDARD.productExclusive && GRADING_STANDARD.productExclusive[productKey]){
+      for(var c=0;c<GRADING_STANDARD.productExclusive[productKey].length;c++){
+        if(t.indexOf(GRADING_STANDARD.productExclusive[productKey][c].toLowerCase()) >= 0){ concl = true; break; }
+      }
+    }
+  }catch(e){}
+  // ② 证据/理由词
+  var EVID = ['因为','采用','材质','重量','容量','尺寸','只有','能够','可以','方便','省','轻','承重','抗压','耐用','防刮','抗菌','防水','散热','储物','空间','设计','内置','拉开','打开','收纳','分区','保护','安全','放心','干净','实用','好用','力','支撑','稳'];
+  // ③ 使用场景/利益词
+  var SCENE = ['出差','通勤','旅行','旅游','上学','办公','商务','家庭','出游','登机','机场','短途','长途','周末','度假','探亲','返乡','回老家','春运','搬家','露营','健身','游泳','数码','电脑','日常','生活','工作','客户','见面','开会','见客户','假期','高铁','飞机','地铁'];
+  var ev = false, sc = false;
+  for(var i=0;i<EVID.length;i++){ if(t.indexOf(EVID[i]) >= 0){ ev = true; break; } }
+  for(var j=0;j<SCENE.length;j++){ if(t.indexOf(SCENE[j]) >= 0){ sc = true; break; } }
+  return concl && ev && sc;
+}
+
 function runGrading(segs, productKey){
   var STD = GRADING_STANDARD;
   segs = applyAsrFix(segs);
@@ -818,7 +873,13 @@ function runGrading(segs, productKey){
     var s4 = moduleResults[i].standards[j];
     var evTxt = (s4.complete.hits[0]||{}).ctx || (s4.complete.hits[0]||{}).kw || '';
     var ts = (s4.complete.hits[0]||{}).ts || '';
-    if(s4.score >= 90 && evTxt) goodCases.push({std:s4.id+' '+s4.name, ev:evTxt, ts:ts, mod:moduleResults[i].name});
+    if(s4.score >= 90 && evTxt){
+      // V3.7：提取完整话术（命中段 ±1 段），三要素结构完整才作为优秀案例
+      var fullQuote = extractFullQuote(segs, ts, evTxt);
+      if(caseQuality(fullQuote, (autoMatch && autoMatch.fromKey) || productKey)){
+        goodCases.push({std:s4.id+' '+s4.name, ev:fullQuote, ts:ts, mod:moduleResults[i].name, full:true});
+      }
+    }
     if(s4.score <= 20) badCases.push({std:s4.id+' '+s4.name, miss:(s4.complete.misses||[]).slice(0,2).join('、'), ev:evTxt, mod:moduleResults[i].name});
   }
   // baseline 错误也进不足案例
