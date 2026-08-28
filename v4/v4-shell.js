@@ -168,7 +168,31 @@ document.addEventListener('DOMContentLoaded', function(){
   };
 });
 
-// ---------- 5. 启动 ----------
+// ---------- 5. 导航点击绑定（双保险：href 默认导航 + 点击兜底） ----------
+// v4.1 修复：v4.0 导航 <a> 无 href 且只靠 hashchange，点击无反应。
+// 现规则：a 带 href 走浏览器默认 hash 导航；此处再兜底——同 hash 重复点击强制刷新视图，异常时直接切页。
+(function(){
+  var nav = document.getElementById('v4nav');
+  if(!nav) return;
+  nav.addEventListener('click', function(ev){
+    var t = ev.target;
+    while(t && t !== nav && !(t.tagName === 'A' && t.getAttribute('data-page'))) t = t.parentNode;
+    if(!t || t === nav) return;
+    var key = t.getAttribute('data-page');
+    var target = '#/' + key;
+    if(location.hash === target){
+      ev.preventDefault();
+      v4Navigate();
+    } else {
+      // 不同 hash：交给默认导航；若 200ms 后 hash 未变（环境异常），强制切页兜底
+      setTimeout(function(){
+        if(location.hash !== target) v4Navigate();
+      }, 200);
+    }
+  });
+})();
+
+// ---------- 6. 启动 ----------
 (function(){
   var t = document.getElementById('tbToday');
   if(t) t.textContent = v4TodayStr() + ' · 工作台模式';
