@@ -192,9 +192,151 @@ document.addEventListener('DOMContentLoaded', function(){
   });
 })();
 
-// ---------- 6. 启动 ----------
+// ---------- 6. 话术库入库规则包装（v4.2：只记录 4 星 / 5 星） ----------
+// 实现：包装全局 addGoldenToLib，入库前过滤 star<4 的条目；app-core.js 文件零改动。
+// 说明：只影响 v4 的入库行为；v3 不受影响；历史已入库的 3 星条目保留，可用下方"清理 3 星存档"按钮一次性移除。
+(function(){
+  if(typeof addGoldenToLib !== 'function') return;
+  var origAdd = addGoldenToLib;
+  window.addGoldenToLib = function(host, studio, date, product, golden){
+    try{
+      if(golden && golden.items && golden.items.length){
+        var kept = [], drop = 0;
+        for(var i=0;i<golden.items.length;i++){
+          if(golden.items[i].star >= 4) kept.push(golden.items[i]); else drop++;
+        }
+        if(drop > 0) console.log('[v4.2] 话术库新规则：过滤 ' + drop + ' 条 <4 星，仅入库 ' + kept.length + ' 条 4/5 星');
+        var g2 = {}; for(var k in golden) g2[k] = golden[k];
+        g2.items = kept;
+        golden = g2;
+      }
+    }catch(e){ console.error('[v4.2] 入库过滤异常，回退原始行为:', e); }
+    return origAdd(host, studio, date, product, golden);
+  };
+})();
+
+// ---------- 7. 归档索引查看器（v4.2：话术库 / 历史评分 统一 月→日→明细 三级查看） ----------
+var V4ARCH = {};  // 每个查看器的选择状态 {golden:{month,day}, history:{month,day}}
+
+function v4ArchData(type){
+  if(type === 'golden'){
+    var lib = v4ReadLS('grading_v2_golden_lib', '{"items":[]}');
+    return (lib.items || []).slice();
+  }
+  return v4ReadLS('grading_history_v1', '[]');
+}
+function v4ArchRender(type){
+  var box = document.getElementById('v4arch-' + type);
+  if(!box) return;
+  var items = v4ArchData(type);
+  // 分组：月 → 日（date 形如 2026-08-28；异常归入"未填"）
+  var byMonth = {}, order = [];
+  for(var i=0;i<items.length;i++){
+    var d = String(items[i].date || '');
+    var m = /^\d{4}-\d{2}/.test(d) ? d.slice(0,7) : '未填';
+    var day = /^\d{4}-\d{2}-\d{2}/.test(d) ? d.slice(0,10) : '';
+    if(!byMonth[m]){ byMonth[m] = {count:0, days:{}}; order.push(m); }
+    byMonth[m].count++;
+    if(day) byMonth[m].days[day] = (byMonth[m].days[day] || 0) + 1;
+  }
+  order.sort().reverse();
+  if(!order.length){
+    box.innerHTML = '<div style="font-size:12px;color:var(--text3)">暂无存档记录——完成一次评分后自动归档</div>';
+    return;
+  }
+  var st = V4ARCH[type] = V4ARCH[type] || {};
+  if(!st.month || byMonth[st.month] === undefined) st.month = order[0];
+  var days = Object.keys(byMonth[st.month].days).sort().reverse();
+  if(st.day && days.indexOf(st.day) < 0 && st.day !== 'all') st.day = days[0] || 'all';
+  if(!st.day) st.day = days[0] || 'all';
+  // 月份索引条
+  var h = '<div class="arch-bar"><span class="arch-lb">月份</span>';
+  for(var a=0;a<order.length;a++){
+    var mo = order[a];
+    h += '<button class="arch-chip' + (mo === st.month ? ' on' : '') + '" data-type="' + type + '" data-act="month" data-v="' + mo + '">' + mo + '（' + byMonth[mo].count + '）</button>';
+  }
+  h += '</div>';
+  // 日期索引条
+  h += '<div class="arch-bar"><span class="arch-lb">日期</span>';
+  h += '<button class="arch-chip' + (st.day === 'all' ? ' on' : '') + '" data-type="' + type + '" data-act="day" data-v="all">全月（' + byMonth[st.month].count + '）</button>';
+  for(var b=0;b<days.length;b++){
+    var dy = days[b];
+    h += '<button class="arch-chip' + (dy === st.day ? ' on' : '') + '" data-type="' + type + '" data-act="day" data-v="' + dy + '">' + dy.slice(5) + '（' + byMonth[st.month].days[dy] + '）</button>';
+  }
+  h += '</div>';
+  // 明细表
+  var rows = items.filter(function(x){
+    var d = String(x.date || '');
+    var m = /^\d{4}-\d{2}/.test(d) ? d.slice(0,7) : '未填';
+    if(m !== st.month) return false;
+    if(st.day === 'all') return true;
+    return d === st.day;
+  });
+  if(type === 'golden'){
+    rows.sort(function(a,b){ return (b.star||0)-(a.star||0); });
+    h += '<table><tr><th style="width:10%">日期</th><th style="width:9%">主播</th><th style="width:12%">分类</th><th style="width:7%">星级</th><th>金句</th><th style="width:13%">标签</th></tr>';
+    for(var c=0;c<rows.length;c++){
+      var g = rows[c];
+      var stc = g.star >= 5 ? 'style="color:var(--danger);font-weight:700"' : 'style="color:var(--gold);font-weight:700"';
+      h += '<tr><td>' + esc(String(g.date || '—').slice(5)) + '</td><td><b>' + esc(g.host || '—') + '</b></td><td>' + esc(g.type || '—') + '</td><td><span ' + stc + '>' + '★'.repeat(g.star || 0) + '</span></td><td style="font-size:11.5px">' + (g.ts ? '<span class="evt">' + esc(g.ts) + '</span>' : '') + esc(g.text || '') + '</td><td style="font-size:11px;color:var(--text2)">' + esc((g.tags || []).join('·')) + '</td></tr>';
+    }
+    h += '</table>';
+    // 存档清理（含 <4 星的旧数据时提示）
+    var lowN = 0;
+    for(var d2=0;d2<items.length;d2++){ if((items[d2].star || 0) < 4) lowN++; }
+    h += '<div style="margin-top:6px;font-size:11.5px;color:var(--text3)">入库规则（v4.2 起）：仅记录 4 星 / 5 星' +
+      (lowN > 0 ? ' ｜ 存档中有 <b>' + lowN + '</b> 条旧规则（3 星）数据 <button class="btn btn-ghost" style="font-size:11px;padding:1px 10px" data-type="golden" data-act="clean3">清理 3 星存档</button>' : ' ｜ 存档无 <4 星数据') + '</div>';
+  } else {
+    rows.sort(function(a,b){ return (b.ts||0)-(a.ts||0); });
+    h += '<table><tr><th style="width:11%">日期</th><th style="width:12%">主播</th><th style="width:8%">总分</th><th style="width:12%">c1 产品理解</th><th>考核产品</th></tr>';
+    for(var e2=0;e2<rows.length;e2++){
+      var r = rows[e2];
+      h += '<tr><td>' + esc(r.date || '—') + '</td><td><b>' + esc(r.host || '—') + '</b></td><td><b style="color:var(--gold)">' + r.total + '</b></td><td>' + (r.c1Score !== null && r.c1Score !== undefined ? r.c1Score : '—') + '</td><td style="font-size:11.5px;color:var(--text2)">' + esc((r.product || '—').slice(0, 44)) + '</td></tr>';
+    }
+    h += '</table>';
+  }
+  box.innerHTML = h;
+}
+// 查看器事件（索引切换 / 3星清理）——事件委托，动态渲染也能点
+document.addEventListener('click', function(ev){
+  var t = ev.target;
+  while(t && t !== document.body && !(t.getAttribute && t.getAttribute('data-act'))) t = t.parentNode;
+  if(!t || t === document.body) return;
+  var type = t.getAttribute('data-type'), act = t.getAttribute('data-act'), v = t.getAttribute('data-v');
+  if(act === 'month'){ V4ARCH[type] = {month: v, day: null}; v4ArchRender(type); }
+  else if(act === 'day'){ V4ARCH[type].day = v; v4ArchRender(type); }
+  else if(act === 'clean3' && type === 'golden'){
+    var lib = v4ReadLS('grading_v2_golden_lib', '{"items":[]}');
+    var kept = [], removed = 0;
+    for(var i=0;i<(lib.items || []).length;i++){
+      if((lib.items[i].star || 0) >= 4) kept.push(lib.items[i]); else removed++;
+    }
+    if(!removed) return;
+    if(!confirm('确定清理存档中 ' + removed + ' 条 3 星话术？此操作不可恢复（4/5 星保留 ' + kept.length + ' 条）。')) return;
+    localStorage.setItem('grading_v2_golden_lib', JSON.stringify({items: kept}));
+    try{ renderGoldenLib(); }catch(e){}
+    v4ArchRender('golden');
+    toastErr('已清理 ' + removed + ' 条 3 星存档，保留 4/5 星 ' + kept.length + ' 条');
+  }
+});
+
+// 核心渲染后联动刷新归档查看器（不改核心函数文件，包装调用）
+(function(){
+  if(typeof renderGoldenLib === 'function'){
+    var a = renderGoldenLib;
+    window.renderGoldenLib = function(){ a(); try{ v4ArchRender('golden'); }catch(e){} };
+  }
+  if(typeof renderHistoryLib === 'function'){
+    var b = renderHistoryLib;
+    window.renderHistoryLib = function(){ b(); try{ v4ArchRender('history'); }catch(e){} };
+  }
+})();
+
+// ---------- 8. 启动 ----------
 (function(){
   var t = document.getElementById('tbToday');
   if(t) t.textContent = v4TodayStr() + ' · 工作台模式';
   v4Navigate();
+  try{ v4ArchRender('golden'); }catch(e){}
+  try{ v4ArchRender('history'); }catch(e){}
 })();

@@ -124,6 +124,12 @@
   .svc{display:flex;align-items:center;gap:8px;font-size:12.5px;padding:6px 0}
   .svc .light{width:9px;height:9px;border-radius:50%;background:#c9c7bd;flex:none}
   .svc .light.on{background:var(--ok)} .svc .light.off{background:var(--danger)}
+  /* 归档索引查看器（v4.2） */
+  .arch-bar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+  .arch-lb{font-size:11.5px;color:var(--text3);min-width:32px}
+  .arch-chip{padding:3px 12px;border:1px solid var(--border);border-radius:12px;background:var(--card);font-size:11.5px;color:var(--text2);cursor:pointer;font-family:inherit}
+  .arch-chip:hover{border-color:var(--gold);color:var(--text)}
+  .arch-chip.on{background:var(--gold-dim);border-color:var(--gold);color:#8a6d24;font-weight:600}
   /* 设置页 */
   .set-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
   @media (max-width:1200px){.dash-grid,.dash-quick{grid-template-columns:repeat(2,1fr)}.set-grid{grid-template-columns:1fr}}
@@ -140,7 +146,7 @@
   <div class="v4-brand">
     <div class="t"><div class="logo"></div><span class="brand">ITO · 主播讲解评分</span></div>
     <h1>评分工作台</h1>
-    <div class="sub">v4.1 · 工作台模式 ｜ 引擎 v3.9 零改动</div>
+    <div class="sub">v4.2 · 工作台模式 ｜ 引擎 v3.9 零改动</div>
   </div>
   <nav class="v4-nav" id="v4nav">
     <div class="grp">日常</div>
@@ -162,7 +168,7 @@
 <main class="v4-main">
   <div class="v4-topbar">
     <h2 id="pageTitle">工作台首页</h2>
-    <span class="badge" id="pageBadge">v4.1</span>
+    <span class="badge" id="pageBadge">v4.2</span>
     <div class="tb-right"><span id="tbToday"></span></div>
   </div>
 
@@ -171,7 +177,7 @@
     <div class="dash-grid">
       <div class="dash-cell"><div class="n">今日已评</div><div class="v" id="dash-stat-today">—</div><div class="w">历史评分库中当日记录</div></div>
       <div class="dash-cell"><div class="n">历史评分累计</div><div class="v" id="dash-stat-history">—</div><div class="w">条 · TOP1「历史进步」数据源</div></div>
-      <div class="dash-cell"><div class="n">话术库累计</div><div class="v" id="dash-stat-golden">—</div><div class="w">条 · 3 星以上金句</div></div>
+      <div class="dash-cell"><div class="n">话术库累计</div><div class="v" id="dash-stat-golden">—</div><div class="w">条 · 4/5 星金句（v4.2 规则）</div></div>
       <div class="dash-cell"><div class="n">问题库累计</div><div class="v" id="dash-stat-problem">—</div><div class="w">条 · 培训清单数据源</div></div>
     </div>
     <div class="dash-quick">
@@ -348,9 +354,15 @@
   <!-- ========== 5 话术库 ========== -->
   <section class="page" id="page-golden">
     <div class="panel">
-      <h3>话术库累计（按能力标签沉淀，每日自动入库）</h3>
-      <div id="goldenLibBlock" style="font-size:12px;color:var(--text3)">加载中…</div>
+      <h3>话术库 · 归档索引（按 月 → 日 查看 ｜ v4.2 起仅入库 4 星 / 5 星）</h3>
+      <div id="v4arch-golden" style="font-size:12px;color:var(--text3)">加载中…</div>
     </div>
+    <details>
+      <summary>原始全量视图（含清空按钮 · 核心渲染）</summary>
+      <div class="fold-bd">
+        <div id="goldenLibBlock" style="font-size:12px;color:var(--text3)">加载中…</div>
+      </div>
+    </details>
   </section>
 
   <!-- ========== 6 问题库 ========== -->
@@ -365,9 +377,15 @@
   <!-- ========== 7 历史分析 ========== -->
   <section class="page" id="page-history">
     <div class="panel">
-      <h3>历史评分库（TOP1 评选「历史进步」标准数据源 · 每次评分自动累积）</h3>
-      <div id="historyLibBlock" style="font-size:12px;color:var(--text3)">加载中…</div>
+      <h3>历史评分 · 归档索引（按 月 → 日 查看 ｜ TOP1「历史进步」标准数据源）</h3>
+      <div id="v4arch-history" style="font-size:12px;color:var(--text3)">加载中…</div>
     </div>
+    <details>
+      <summary>原始全量视图（含主播汇总 / 清空按钮 · 核心渲染）</summary>
+      <div class="fold-bd">
+        <div id="historyLibBlock" style="font-size:12px;color:var(--text3)">加载中…</div>
+      </div>
+    </details>
   </section>
 
   <!-- ========== 8 设置 ========== -->
@@ -398,7 +416,7 @@
     </div>
   </section>
 
-  <div class="ft">ITO · 主播讲解评分工作台 v4.1 ｜ 评分引擎 = v3.9（07a97a7）字符级零改动 ｜ 原系统 v0.10 / v3 均不受影响</div>
+  <div class="ft">ITO · 主播讲解评分工作台 v4.2 ｜ 评分引擎 = v3.9（07a97a7）字符级零改动 ｜ 原系统 v0.10 / v3 均不受影响</div>
 </main>
 
 <script src="../v3/standard.js"></script>
