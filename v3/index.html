@@ -99,7 +99,7 @@
   <div class="top">
     <div class="logo"></div>
     <span class="brand">ITO · 主播讲解评分</span>
-    <span class="badge">v3.8 · 明星评分自动写入</span>
+    <span class="badge">v3.9 · 全表联动修复</span>
   </div>
   <h1>主播讲解评分系统 v2</h1>
   <div class="sub">V2 日报标准：主播能力矩阵 8 项（5 计分 + 3 分析）｜ 每个评分点 = 可执行评判标准 + 原文证据（时间戳）</div>
@@ -2144,6 +2144,16 @@ async function autoFullReport(){
     renderGptDaily({host:host, studio:r.meta && r.meta.studio || '', video:f.name, total:total, grade:grade, judgment:judgment,
       outfit:outfitRes, abilities:{pos:pos,flu:flu,ext:ext,dis:dis,emo:emo}, repB64:repB64, repTs:repFrame?repFrame.ts:'',
       nextDo:nextDo, product:r.sellpoints?r.sellpoints.product:'', cover:r.sellpoints?(r.sellpoints.covered+'/'+r.sellpoints.total):'', baselineErr:r.baseline?r.baseline.errors:0});
+    // V3.10 全联动修复：一键完整日报也要触发全部飞书写回（主播日报/金句/问题/历史/周月/明星）
+    try{
+      r.host = host;
+      r.date = $('dateInput').value.trim() || new Date().toISOString().slice(0,10);
+      r.studio = $('studioSelect').value || (r.meta && r.meta.studio) || '';
+      r.product = r.sellpoints ? r.sellpoints.product : '';
+      r.golden = r.golden || {items:[]};
+      autoFillFeishu(r);   // 内部含 syncFeishuLibs（金句/问题/历史/明星）
+      try{ syncWeekMonth(); }catch(e3){ console.log('周月更新异常:', e3.message); }
+    }catch(e2){ console.log('完整日报飞书写回异常:', e2.message); }
     toastErr('完整日报完成：' + total + '分 ' + grade + '级（能力' + abSum + ' + 服化道' + outfitRes.total + '）');
   }catch(e){
     toastErr('完整日报失败：' + e.message);
