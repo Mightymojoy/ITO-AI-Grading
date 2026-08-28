@@ -405,6 +405,36 @@ function v4FeishuUrl(fkey){
   window.addHistoryRecord = function(r){
     var out = orig.apply(this, arguments);
     try{
+      // ---- v4.5 新增：评分结果同时写入飞书日报本地缓存（点「主播日报」tab 立即可见，无需同步脚本）----
+      if(r && typeof r.total === 'number' && r.host && r.host !== '未识别'){
+        var mods = r.modules || [];
+        var ms = {};
+        for(var i=0;i<mods.length;i++) ms[mods[i].key] = mods[i].score;
+        // 列名与飞书多维表格「主播日报」完全对齐
+        var row = {
+          '日期':     r.date || '未填',
+          '主播':     r.host,
+          '直播间':   r.studio || '',
+          '综合评分': r.total,
+          '产品知识能力':           (typeof ms.c1 === 'number') ? ms.c1 : '',
+          '逻辑组织能力(流畅度)':     (typeof ms.c2 === 'number') ? ms.c2 : '',
+          '场景化表达能力(策展性)':   (typeof ms.c3 === 'number') ? ms.c3 : '',
+          '可操作化运用':             (typeof ms.c4 === 'number') ? ms.c4 : '',
+          '情绪感染能力':             (typeof ms.c5 === 'number') ? ms.c5 : ''
+        };
+        var cache = v4ReadLS('v4_fs_daily_cache', '[]');
+        // 去重：(主播+日期) 相同则覆盖（重新评分同一人同一天）
+        var dupIdx = -1;
+        for(var d=0;d<cache.length;d++){
+          if(cache[d]['主播'] === r.host && cache[d]['日期'] === (r.date||'未填')){ dupIdx=d; break; }
+        }
+        if(dupIdx >= 0) cache[dupIdx] = row; else cache.push(row);
+        // 上限防膨胀
+        if(cache.length > 3000) cache = cache.slice(cache.length - 3000);
+        localStorage.setItem('v4_fs_daily_cache', JSON.stringify(cache));
+        console.log('[v4.5] 日报缓存已更新：' + r.host + ' ' + (r.date||'未填') + ' → 共 ' + cache.length + ' 条');
+      }
+      // ---- 优秀案例 TOP3（原有逻辑不变）----
       if(r && r.cases && r.cases.good && r.cases.good.length && r.host && r.host !== '未识别'){
         var lib = v4ReadLS('grading_cases_lib_v1', '[]');
         var added = 0;
@@ -464,9 +494,11 @@ function v4FsNoData(key){
   var st = document.getElementById('fsStatus');
   if(st) st.textContent = '暂无数据';
   if(!box) return;
-  box.innerHTML = '<div class="fs-tip">「' + esc(V4_FS_NAMES[key] || key) + '」还没有同步过数据。<br>' +
-    '生成方法：在本机项目根目录双击运行 <b>同步飞书数据.bat</b>（首次运行会提示你填 <code>.env</code> 里的飞书 App ID / App Secret）。<br>' +
-    '同步完成后回到本页点「重新载入」即可看到表格。</div>';
+  box.innerHTML = '<div class="fs-tip">' +
+    (key === 'daily'
+      ? '「主播日报」还没有评分数据。<br>操作方法：在左侧「<b>每日评分</b>」页上传视频 / 粘贴转写文本 → 填主播名 → 点「开始评分」。<br>评分完成后结果会<b>自动写入</b>本页（同时回写飞书多维表格），切回这里即可看到表格，无需任何额外操作。'
+      : '「' + esc(V4_FS_NAMES[key] || key) + '」还没有数据。<br>生成方法：在本机项目根目录双击运行 <b>同步飞书数据.bat</b>（首次运行会提示你填 <code>.env</code> 里的飞书 App ID / App Secret）。<br>同步完成后回到本页点「重新载入」即可看到表格。') +
+    '</div>';
 }
 function v4FsShowSync(){
   var el = document.getElementById('fsSyncAt');
@@ -480,6 +512,35 @@ function v4FeishuLoad(key){
   if(ttl) ttl.textContent = '飞书数据表 · ' + (V4_FS_NAMES[key] || key);
   if(box) box.innerHTML = '<div class="fs-meta">正在载入「' + (V4_FS_NAMES[key] || key) + '」…</div>';
   if(st) st.textContent = '载入中…';
+
+  // ---- daily 特殊路径：优先本地评分缓存（评完即见，零延迟）----
+  if(key === 'daily'){
+    var localCache = v4ReadLS('v4_fs_daily_cache', '[]');
+    if(localCache && localCache.length > 0){
+      // 本地缓存有数据 → 先渲染（即时响应），后台异步加载同步产物做 merge
+      V4_FS_STATE.columns = dailyCols();
+      V4_FS_STATE.rows = localCache.slice().sort(dateDesc);
+      V4_FS_STATE.syncedAt = '本地实时（最近一次评分自动写入）';
+      if(st) st.textContent = '共 ' + localCache.length + ' 条（本地评分结果）';
+      v4FsShowSync();
+      v4FeishuRender();
+      v4FsFillSel(key);
+      // 后台加载 data/daily.js 做合并（去重：以同步产物为准覆盖同 主播+日期）
+      v4FsEnsure('daily').then(function(synced){
+        if(!synced || !synced.rows || !synced.rows.length) return;
+        var merged = mergeDaily(localCache, synced.rows);
+        V4_FS_STATE.columns = dailyCols(merged);
+        V4_FS_STATE.rows = merged;
+        V4_FS_STATE.syncedAt = synced.syncedAt || '';
+        if(st) st.textContent = '共 ' + merged.length + ' 条（本地+飞书已合并）';
+        v4FsShowSync();
+        v4FeishuRender();
+      });
+      return;
+    }
+    // 无本地缓存 → 走通用路径
+  }
+
   return v4FsEnsure(key).then(function(d){
     if(!d || !d.ok){ v4FsNoData(key); return; }
     V4_FS_STATE.table = d.table || null;
@@ -615,6 +676,29 @@ function v4FsReload(){
   V4_FS_PENDING = {};
   V4_FS_BUST = Date.now();
   v4FeishuLoad(k);
+}
+
+// ---- 日报专用工具 ----
+// 飞书「主播日报」标准列序（与截图/多维表格完全对齐）
+function dailyCols(rows){
+  var fixed = ['日期','主播','直播间','综合评分','产品知识能力','逻辑组织能力(流畅度)','场景化表达能力(策展性)','可操作化运用','情绪感染能力'];
+  if(!rows || !rows.length) return fixed;
+  var extra = {};
+  rows.forEach(function(r){ Object.keys(r).forEach(function(k){ if(fixed.indexOf(k)<0) extra[k]=1; }); });
+  return fixed.concat(Object.keys(extra));
+}
+function dateDesc(a,b){ var da=String(a['日期']||''), db=String(b['日期']||''); return da>db?-1:da<db?1:0; }
+// 合并：本地缓存（评分实时产生）+ 同步产物（飞书历史），以同步产物为准覆盖同(主播+日期)
+function mergeDaily(local, synced){
+  var map = {};
+  synced.forEach(function(r){ var k = (r['主机']||r['主播']||'') + '|' + (r['日期']||''); map[k] = r; });
+  local.forEach(function(r){
+    var k = (r['主播']||'') + '|' + (r['日期']||'');
+    if(!map[k]) map[k] = r; // 本地有、飞书没有 → 保留（可能是还没回写成功的新评分）
+  });
+  var out = [];
+  for(var k in map) out.push(map[k]);
+  return out.sort(dateDesc);
 }
 document.addEventListener('DOMContentLoaded', function(){
   var rb = document.getElementById('fsReloadBtn');
