@@ -130,6 +130,7 @@
   .arch-chip{padding:3px 12px;border:1px solid var(--border);border-radius:12px;background:var(--card);font-size:11.5px;color:var(--text2);cursor:pointer;font-family:inherit}
   .arch-chip:hover{border-color:var(--gold);color:var(--text)}
   .arch-chip.on{background:var(--gold-dim);border-color:var(--gold);color:#8a6d24;font-weight:600}
+  .v4-nav a .ext{margin-left:auto;font-size:10px;color:var(--text3);font-weight:400}
   /* 设置页 */
   .set-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
   @media (max-width:1200px){.dash-grid,.dash-quick{grid-template-columns:repeat(2,1fr)}.set-grid{grid-template-columns:1fr}}
@@ -146,7 +147,7 @@
   <div class="v4-brand">
     <div class="t"><div class="logo"></div><span class="brand">ITO · 主播讲解评分</span></div>
     <h1>评分工作台</h1>
-    <div class="sub">v4.2 · 工作台模式 ｜ 引擎 v3.9 零改动</div>
+    <div class="sub">v4.3 · 工作台模式 ｜ 引擎 v3.9 零改动</div>
   </div>
   <nav class="v4-nav" id="v4nav">
     <div class="grp">日常</div>
@@ -154,10 +155,19 @@
     <a data-page="daily" href="#/daily"><span class="ico"><svg viewBox="0 0 24 24"><path d="M9 11l3 3 8-8"/><path d="M21 12v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h11"/></svg></span>每日评分</a>
     <a data-page="vision" href="#/vision"><span class="ico"><svg viewBox="0 0 24 24"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg></span>一键完整日报</a>
     <a data-page="batch" href="#/batch"><span class="ico"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>批量 TOP1</a>
-    <div class="grp">积累库</div>
-    <a data-page="golden" href="#/golden"><span class="ico"><svg viewBox="0 0 24 24"><path d="M12 2l2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.5-4.8 2.5.9-5.4L4.2 7.7l5.4-.8z"/></svg></span>话术库</a>
-    <a data-page="problem" href="#/problem"><span class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg></span>问题库</a>
-    <a data-page="history" href="#/history"><span class="ico"><svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M18 9l-5 5-3-3-4 4"/></svg></span>历史分析</a>
+    <div class="grp">飞书工作台（云端）</div>
+    <a data-fkey="daily"><span class="ico"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>主播日报<span class="ext">↗</span></a>
+    <a data-fkey="top1"><span class="ico"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>多主播TOP1评分<span class="ext">↗</span></a>
+    <a data-fkey="week"><span class="ico"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>周总结<span class="ext">↗</span></a>
+    <a data-fkey="weekstar"><span class="ico"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>周总结-明星主播<span class="ext">↗</span></a>
+    <a data-fkey="month"><span class="ico"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>月总结<span class="ext">↗</span></a>
+    <a data-fkey="reward"><span class="ico"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>激励记录<span class="ext">↗</span></a>
+    <a data-fkey="punish"><span class="ico"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>惩罚记录<span class="ext">↗</span></a>
+    <div class="grp">积累库（本地）</div>
+    <a data-page="golden" href="#/golden"><span class="ico"><svg viewBox="0 0 24 24"><path d="M12 2l2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.5-4.8 2.5.9-5.4L4.2 7.7l5.4-.8z"/></svg></span>黄金话术库</a>
+    <a data-page="problem" href="#/problem"><span class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg></span>问题话术库</a>
+    <a data-page="cases" href="#/cases"><span class="ico"><svg viewBox="0 0 24 24"><path d="M12 2l2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.5-4.8 2.5.9-5.4L4.2 7.7l5.4-.8z"/></svg></span>优秀案例TOP3</a>
+    <a data-page="history" href="#/history"><span class="ico"><svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M18 9l-5 5-3-3-4 4"/></svg></span>历史评分</a>
     <div class="grp">系统</div>
     <a data-page="settings" href="#/settings"><span class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>设置</a>
   </nav>
@@ -168,7 +178,7 @@
 <main class="v4-main">
   <div class="v4-topbar">
     <h2 id="pageTitle">工作台首页</h2>
-    <span class="badge" id="pageBadge">v4.2</span>
+    <span class="badge" id="pageBadge">v4.3</span>
     <div class="tb-right"><span id="tbToday"></span></div>
   </div>
 
@@ -388,6 +398,14 @@
     </details>
   </section>
 
+  <!-- ========== 7b 优秀案例TOP3 ========== -->
+  <section class="page" id="page-cases">
+    <div class="panel">
+      <h3>优秀案例TOP3 · 归档索引（按 月 → 日 查看 ｜ 每次评分自动沉淀当日前 3 优秀案例）</h3>
+      <div id="v4arch-cases" style="font-size:12px;color:var(--text3)">加载中…</div>
+    </div>
+  </section>
+
   <!-- ========== 8 设置 ========== -->
   <section class="page" id="page-settings">
     <div class="set-grid">
@@ -410,13 +428,35 @@
       </div>
     </div>
     <div class="panel">
+      <h3>飞书工作台直达链接（侧边栏「飞书工作台」各项的跳转地址，可选）</h3>
+      <div class="file-hint" style="margin-bottom:8px">在飞书多维表格中打开对应数据表视图 → 复制浏览器地址栏链接 → 粘贴到下面对应项。未配置的项点击时打开工作台总链接。</div>
+      <div class="row"><label>工作台总链接</label><input type="text" id="fl-base" style="flex:1" placeholder="https://my.feishu.cn/wiki/…"></div>
+      <div class="set-grid">
+        <div>
+          <div class="row"><label>主播日报</label><input type="text" id="fl-daily" style="flex:1" placeholder="…table=tbl…&view=vew…"></div>
+          <div class="row"><label>多主播TOP1</label><input type="text" id="fl-top1" style="flex:1"></div>
+          <div class="row"><label>周总结</label><input type="text" id="fl-week" style="flex:1"></div>
+          <div class="row"><label>明星周总结</label><input type="text" id="fl-weekstar" style="flex:1"></div>
+        </div>
+        <div>
+          <div class="row"><label>月总结</label><input type="text" id="fl-month" style="flex:1"></div>
+          <div class="row"><label>激励记录</label><input type="text" id="fl-reward" style="flex:1"></div>
+          <div class="row"><label>惩罚记录</label><input type="text" id="fl-punish" style="flex:1"></div>
+        </div>
+      </div>
+      <div class="row">
+        <button class="btn" id="flSaveBtn">保存飞书链接</button>
+        <span style="font-size:11px;color:var(--text3)">保存后立即生效（localStorage，仅本机）</span>
+      </div>
+    </div>
+    <div class="panel">
       <h3>主播着装标准 V4（《三大直播间主播夏季着装V4》· 服化道判断基准）</h3>
       <div class="file-hint" style="margin-bottom:8px">服化道评分结构：服装10 / 妆发5 / 鞋履配饰3 / 道具场景4 / 整体3 = 25 分；低于 18 分综合等级最高 B 级</div>
       <div id="set-outfit"></div>
     </div>
   </section>
 
-  <div class="ft">ITO · 主播讲解评分工作台 v4.2 ｜ 评分引擎 = v3.9（07a97a7）字符级零改动 ｜ 原系统 v0.10 / v3 均不受影响</div>
+  <div class="ft">ITO · 主播讲解评分工作台 v4.3 ｜ 评分引擎 = v3.9（07a97a7）字符级零改动 ｜ 原系统 v0.10 / v3 均不受影响</div>
 </main>
 
 <script src="../v3/standard.js"></script>

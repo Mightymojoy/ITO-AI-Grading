@@ -25,9 +25,10 @@ var V4_PAGES = {
   daily:     '每日评分',
   vision:    '一键完整日报',
   batch:     '批量 TOP1',
-  golden:    '话术库',
-  problem:   '问题库',
-  history:   '历史分析',
+  golden:    '黄金话术库',
+  problem:   '问题话术库',
+  cases:     '优秀案例TOP3',
+  history:   '历史评分',
   settings:  '设置'
 };
 function v4Navigate(){
@@ -119,7 +120,7 @@ function v4RenderSettings(){
   document.getElementById('set-sync').value   = localStorage.getItem('feishu_sync_url') || '';
   // 版本口径
   document.getElementById('set-versions').innerHTML =
-    '工作台版本：<b>v4.0</b>（壳层）<br>' +
+    '工作台版本：<b>v4.3</b>（壳层）<br>' +
     '评分引擎：<b>v3.9</b>（app-core.js · 07a97a7 字符级零改动）<br>' +
     '评分标准：<b>' + esc(GRADING_STANDARD.version) + '</b> · ' + esc(GRADING_STANDARD.meta.name) + '<br>' +
     '评分口径：' + esc(GRADING_STANDARD.meta.scoring) + '<br>' +
@@ -166,6 +167,28 @@ document.addEventListener('DOMContentLoaded', function(){
     toastErr('已恢复默认地址，即将刷新…');
     setTimeout(function(){ location.reload(); }, 800);
   };
+  // 飞书直达链接（v4.3）
+  var flSave = document.getElementById('flSaveBtn');
+  if(flSave) flSave.onclick = function(){
+    var base = document.getElementById('fl-base').value.trim();
+    if(base) localStorage.setItem('feishu_wiki_url', base); else localStorage.removeItem('feishu_wiki_url');
+    var fkMap = { 'fl-daily':'daily','fl-top1':'top1','fl-week':'week','fl-weekstar':'weekstar','fl-month':'month','fl-reward':'reward','fl-punish':'punish' };
+    var n = 0;
+    for(var id in fkMap){
+      var v2 = document.getElementById(id).value.trim();
+      var key = 'feishu_tbl_' + fkMap[id];
+      if(v2){ localStorage.setItem(key, v2); n++; } else localStorage.removeItem(key);
+    }
+    toastErr('飞书链接已保存（' + n + ' 项直达），立即生效');
+    v4RenderSettings();
+  };
+  // 回填已存链接
+  var baseEl = document.getElementById('fl-base');
+  if(baseEl){
+    baseEl.value = localStorage.getItem('feishu_wiki_url') || '';
+    var fkMap2 = { 'fl-daily':'daily','fl-top1':'top1','fl-week':'week','fl-weekstar':'weekstar','fl-month':'month','fl-reward':'reward','fl-punish':'punish' };
+    for(var id2 in fkMap2){ document.getElementById(id2).value = localStorage.getItem('feishu_tbl_' + fkMap2[id2]) || ''; }
+  }
 });
 
 // ---------- 5. 导航点击绑定（双保险：href 默认导航 + 点击兜底） ----------
@@ -192,8 +215,7 @@ document.addEventListener('DOMContentLoaded', function(){
   });
 })();
 
-// ---------- 6. 话术库入库规则包装（v4.2：只记录 4 星 / 5 星） ----------
-// 实现：包装全局 addGoldenToLib，入库前过滤 star<4 的条目；app-core.js 文件零改动。
+// ---------- 6. 话术库入库规则包装（v4.2：只记录 4 星 / 5 星） ----------// 实现：包装全局 addGoldenToLib，入库前过滤 star<4 的条目；app-core.js 文件零改动。
 // 说明：只影响 v4 的入库行为；v3 不受影响；历史已入库的 3 星条目保留，可用下方"清理 3 星存档"按钮一次性移除。
 (function(){
   if(typeof addGoldenToLib !== 'function') return;
@@ -223,6 +245,7 @@ function v4ArchData(type){
     var lib = v4ReadLS('grading_v2_golden_lib', '{"items":[]}');
     return (lib.items || []).slice();
   }
+  if(type === 'cases') return v4ReadLS('grading_cases_lib_v1', '[]');
   return v4ReadLS('grading_history_v1', '[]');
 }
 function v4ArchRender(type){
@@ -286,6 +309,14 @@ function v4ArchRender(type){
     for(var d2=0;d2<items.length;d2++){ if((items[d2].star || 0) < 4) lowN++; }
     h += '<div style="margin-top:6px;font-size:11.5px;color:var(--text3)">入库规则（v4.2 起）：仅记录 4 星 / 5 星' +
       (lowN > 0 ? ' ｜ 存档中有 <b>' + lowN + '</b> 条旧规则（3 星）数据 <button class="btn btn-ghost" style="font-size:11px;padding:1px 10px" data-type="golden" data-act="clean3">清理 3 星存档</button>' : ' ｜ 存档无 <4 星数据') + '</div>';
+  } else if(type === 'cases'){
+    rows.sort(function(a,b){ return (b.t||0)-(a.t||0); });
+    h += '<table><tr><th style="width:10%">日期</th><th style="width:9%">主播</th><th style="width:14%">能力 · 子标准</th><th>优秀案例（原文证据 + 时间戳）</th></tr>';
+    for(var c2=0;c2<rows.length;c2++){
+      var cs = rows[c2];
+      h += '<tr><td>' + esc(String(cs.date || '—').slice(5)) + '</td><td><b>' + esc(cs.host || '—') + '</b></td><td style="font-size:11.5px;color:var(--gold)">' + esc(cs.mod || '') + (cs.std ? ' · ' + esc(cs.std) : '') + '</td><td style="font-size:11.5px">' + (cs.ts ? '<span class="evt">' + esc(cs.ts) + '</span>' : '') + esc(cs.ev || '') + '</td></tr>';
+    }
+    h += '</table><div style="margin-top:6px;font-size:11.5px;color:var(--text3)">沉淀规则（v4.3 起）：每次单主播/批量评分自动记录当日前 3 条优秀案例（≥90 分高质量证据段落），按 主播+日期+原文 去重</div>';
   } else {
     rows.sort(function(a,b){ return (b.ts||0)-(a.ts||0); });
     h += '<table><tr><th style="width:11%">日期</th><th style="width:12%">主播</th><th style="width:8%">总分</th><th style="width:12%">c1 产品理解</th><th>考核产品</th></tr>';
@@ -332,6 +363,52 @@ document.addEventListener('click', function(ev){
   }
 })();
 
+// ---------- 7.5 飞书工作台直达（v4.3：侧边栏云端 7 项，链接可在设置页配置） ----------
+var V4_FL_KEYS = { daily:'主播日报', top1:'多主播TOP1评分', week:'周总结', weekstar:'周总结-明星主播', month:'月总结', reward:'激励记录', punish:'惩罚记录' };
+var V4_FL_BASE_DEFAULT = 'https://my.feishu.cn/wiki/GQgowqCIcijjENk8Vl8c2OQVnvj';
+function v4FeishuUrl(fkey){
+  return localStorage.getItem('feishu_tbl_' + fkey) || (localStorage.getItem('feishu_wiki_url') || V4_FL_BASE_DEFAULT);
+}
+document.addEventListener('click', function(ev){
+  var t = ev.target;
+  while(t && t !== document.body && !(t.getAttribute && t.getAttribute('data-fkey'))) t = t.parentNode;
+  if(!t || t === document.body) return;
+  var fkey = t.getAttribute('data-fkey');
+  if(!V4_FL_KEYS[fkey]) return;
+  ev.preventDefault();
+  window.open(v4FeishuUrl(fkey), '_blank');
+});
+
+// ---------- 7.6 优秀案例TOP3 本地沉淀（v4.3：包装 addHistoryRecord，评分时顺带存当日前3优秀案例） ----------
+// 新键 grading_cases_lib_v1：{date, host, studio, product, mod, std, ts, ev}
+(function(){
+  if(typeof addHistoryRecord !== 'function') return;
+  var orig = addHistoryRecord;
+  window.addHistoryRecord = function(r){
+    var out = orig.apply(this, arguments);
+    try{
+      if(r && r.cases && r.cases.good && r.cases.good.length && r.host && r.host !== '未识别'){
+        var lib = v4ReadLS('grading_cases_lib_v1', '[]');
+        var added = 0;
+        for(var i=0;i<r.cases.good.length && i<3;i++){
+          var c = r.cases.good[i];
+          var dup = lib.some(function(x){ return x.host === r.host && x.date === r.date && (x.ev || '').slice(0, 40) === String(c.ev || '').slice(0, 40); });
+          if(dup) continue;
+          lib.push({date: r.date || '未填', host: r.host, studio: r.studio || '', product: r.product || '', mod: c.mod || '', std: c.std || '', ts: c.ts || '', ev: c.ev || '', t: Date.now()});
+          added++;
+        }
+        if(lib.length > 2000) lib = lib.slice(lib.length - 2000);
+        if(added > 0){
+          localStorage.setItem('grading_cases_lib_v1', JSON.stringify(lib));
+          console.log('[v4.3] 优秀案例 +' + added + ' 条入库');
+          try{ v4ArchRender('cases'); }catch(e){}
+        }
+      }
+    }catch(e){ console.error('[v4.3] 优秀案例入库异常:', e); }
+    return out;
+  };
+})();
+
 // ---------- 8. 启动 ----------
 (function(){
   var t = document.getElementById('tbToday');
@@ -339,4 +416,5 @@ document.addEventListener('click', function(ev){
   v4Navigate();
   try{ v4ArchRender('golden'); }catch(e){}
   try{ v4ArchRender('history'); }catch(e){}
+  try{ v4ArchRender('cases'); }catch(e){}
 })();
