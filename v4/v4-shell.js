@@ -142,10 +142,10 @@ function v4RenderSettings(){
   document.getElementById('set-vision').value = localStorage.getItem('vision_url') || '';
   document.getElementById('set-fill').value   = localStorage.getItem('feishu_fill_url') || '';
   document.getElementById('set-sync').value   = localStorage.getItem('feishu_sync_url') || '';
-  document.getElementById('set-read').value   = localStorage.getItem('feishu_read_url') || '';
+  document.getElementById('set-read').value   = localStorage.getItem('feishu_data_dir') || 'data';
   // 版本口径
   document.getElementById('set-versions').innerHTML =
-    '工作台版本：<b>v4.4</b>（壳层）<br>' +
+    '工作台版本：<b>v4.5</b>（壳层）<br>' +
     '评分引擎：<b>v3.9</b>（app-core.js · 07a97a7 字符级零改动）<br>' +
     '评分标准：<b>' + esc(GRADING_STANDARD.version) + '</b> · ' + esc(GRADING_STANDARD.meta.name) + '<br>' +
     '评分口径：' + esc(GRADING_STANDARD.meta.scoring) + '<br>' +
@@ -177,7 +177,7 @@ document.addEventListener('DOMContentLoaded', function(){
   var save = document.getElementById('setSaveBtn');
   var reset = document.getElementById('setResetBtn');
   if(save) save.onclick = function(){
-    var map = {'set-asr':'asr_url','set-vision':'vision_url','set-fill':'feishu_fill_url','set-sync':'feishu_sync_url','set-read':'feishu_read_url'};
+    var map = {'set-asr':'asr_url','set-vision':'vision_url','set-fill':'feishu_fill_url','set-sync':'feishu_sync_url','set-read':'feishu_data_dir'};
     for(var id in map){
       var v = document.getElementById(id).value.trim();
       if(v) localStorage.setItem(map[id], v);
@@ -395,15 +395,7 @@ var V4_FL_BASE_DEFAULT = 'https://my.feishu.cn/wiki/GQgowqCIcijjENk8Vl8c2OQVnvj'
 function v4FeishuUrl(fkey){
   return localStorage.getItem('feishu_tbl_' + fkey) || (localStorage.getItem('feishu_wiki_url') || V4_FL_BASE_DEFAULT);
 }
-document.addEventListener('click', function(ev){
-  var t = ev.target;
-  while(t && t !== document.body && !(t.getAttribute && t.getAttribute('data-fkey'))) t = t.parentNode;
-  if(!t || t === document.body) return;
-  var fkey = t.getAttribute('data-fkey');
-  if(!V4_FL_KEYS[fkey]) return;
-  ev.preventDefault();
-  window.open(v4FeishuUrl(fkey), '_blank');
-});
+// v4.5 起：侧边栏 7 项一律在工作台内渲染，不再 window.open 跳飞书（保留 url 仅用于设置页展示）
 
 // ---------- 7.6 优秀案例TOP3 本地沉淀（v4.3：包装 addHistoryRecord，评分时顺带存当日前3优秀案例） ----------
 // 新键 grading_cases_lib_v1：{date, host, studio, product, mod, std, ts, ev}
@@ -435,66 +427,89 @@ document.addEventListener('click', function(ev){
   };
 })();
 
-// ---------- 7.7 飞书云端数据（v4.4：飞书内容全量集合进工作台） ----------
-var V4_FS_READ = localStorage.getItem('feishu_read_url') || 'https://cloud-five-pi.vercel.app/api/feishu-read';
+// ---------- 7.7 飞书数据表内嵌渲染（v4.5：读本地同步产物 data/*.js，全程不跳转飞书） ----------
 var V4_FS_NAMES = {daily:'主播日报', top1:'多主播TOP1评分', week:'周总结', weekstar:'周总结-明星主播', month:'月总结', reward:'激励记录', punish:'惩罚记录'};
-var V4_FS_STATE = {key:'', table:null, columns:[], rows:[]};
+var V4_FS_STATE = {key:'', table:null, columns:[], rows:[], syncedAt:''};
+var V4_FS_PENDING = {};
 
-function v4FeishuApi(body){
-  return fetch(V4_FS_READ, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)})
-    .then(function(r){ return r.json(); })
-    .catch(function(e){ return {ok:false, error:'无法连接读取接口：' + e.message}; });
+// 以 <script src> 注入载入：file:// 双击打开也能用（fetch/XHR 在 file:// 会被 CORS 拦截）
+var V4_FS_BUST = 0; // 重新载入时递增，穿透浏览器缓存
+function v4FsScript(src){
+  return new Promise(function(resolve, reject){
+    var s = document.createElement('script');
+    s.src = src + (V4_FS_BUST ? '?_=' + V4_FS_BUST : '');
+    s.charset = 'utf-8';
+    s.onload = function(){ if(s.parentNode) s.parentNode.removeChild(s); resolve(true); };
+    s.onerror = function(){ if(s.parentNode) s.parentNode.removeChild(s); reject(new Error('load fail')); };
+    document.head.appendChild(s);
+  });
+}
+function v4FsPath(key){
+  var base = localStorage.getItem('feishu_data_dir') || 'data';
+  return String(base).replace(/\/+$/, '') + '/' + key + '.js';
+}
+function v4FsEnsure(key){
+  window.V4FS = window.V4FS || {};
+  if(window.V4FS[key]) return Promise.resolve(window.V4FS[key]);
+  if(V4_FS_PENDING[key]) return V4_FS_PENDING[key];
+  V4_FS_PENDING[key] = v4FsScript(v4FsPath(key)).then(function(){
+    V4_FS_PENDING[key] = null;
+    return window.V4FS[key] || null;
+  })['catch'](function(){ V4_FS_PENDING[key] = null; return null; });
+  return V4_FS_PENDING[key];
+}
+// 未同步时的引导空态（不跳转、不报错）
+function v4FsNoData(key){
+  var box = document.getElementById('v4arch-feishu');
+  var st = document.getElementById('fsStatus');
+  if(st) st.textContent = '暂无数据';
+  if(!box) return;
+  box.innerHTML = '<div class="fs-tip">「' + esc(V4_FS_NAMES[key] || key) + '」还没有同步过数据。<br>' +
+    '生成方法：在本机项目根目录双击运行 <b>同步飞书数据.bat</b>（首次运行会提示你填 <code>.env</code> 里的飞书 App ID / App Secret）。<br>' +
+    '同步完成后回到本页点「重新载入」即可看到表格。</div>';
+}
+function v4FsShowSync(){
+  var el = document.getElementById('fsSyncAt');
+  if(el) el.textContent = V4_FS_STATE.syncedAt ? ('最近同步：' + V4_FS_STATE.syncedAt) : '';
 }
 function v4FeishuLoad(key){
   V4_FS_STATE.key = key;
   var box = document.getElementById('v4arch-feishu');
   var st = document.getElementById('fsStatus');
   var ttl = document.getElementById('fs-title');
-  var apiTxt = document.getElementById('fsApiTxt');
-  if(apiTxt) apiTxt.textContent = V4_FS_READ;
-  if(ttl) ttl.textContent = '飞书云端数据 · ' + (V4_FS_NAMES[key] || key);
-  if(box) box.innerHTML = '<div style="font-size:12px;color:var(--text3)">正在从飞书读取「' + (V4_FS_NAMES[key] || key) + '」…</div>';
-  if(st) st.textContent = '读取中…';
-  return v4FeishuApi({action:'records', key:key, limit:300}).then(function(d){
-    if(!d || !d.ok){
-      var why = (d && (d.reason || d.error)) ? (d.reason || d.error) : '未知错误';
-      if(box) box.innerHTML = '<div style="font-size:12px;color:var(--warn)">⚠ 未能读取飞书数据：' + esc(why) + '<br>可点右上「在飞书打开 ↗」直接查看，或在设置页核对读取接口地址 / 补填 table_id。</div>';
-      if(st) st.textContent = '读取失败';
-      return;
-    }
-    V4_FS_STATE.table = d.table; V4_FS_STATE.columns = d.columns || []; V4_FS_STATE.rows = d.rows || [];
-    if(st) st.textContent = '已读取 ' + (d.total || 0) + ' 条' + (d.limited ? '（已达上限）' : '') + ' ｜ 表：' + (d.table && d.table.name ? d.table.name : '—');
+  if(ttl) ttl.textContent = '飞书数据表 · ' + (V4_FS_NAMES[key] || key);
+  if(box) box.innerHTML = '<div class="fs-meta">正在载入「' + (V4_FS_NAMES[key] || key) + '」…</div>';
+  if(st) st.textContent = '载入中…';
+  return v4FsEnsure(key).then(function(d){
+    if(!d || !d.ok){ v4FsNoData(key); return; }
+    V4_FS_STATE.table = d.table || null;
+    V4_FS_STATE.columns = d.columns || [];
+    V4_FS_STATE.rows = d.rows || [];
+    V4_FS_STATE.syncedAt = d.syncedAt || '';
+    var n = (d.rows || []).length;
+    if(st) st.textContent = '共 ' + n + ' 条' + (d.limited ? '（已达上限）' : '') + ' ｜ ' + (d.table && d.table.name ? d.table.name : '');
+    v4FsShowSync();
     v4FeishuRender();
-    v4FeishuFillSel(key);
+    v4FsFillSel(key);
   });
 }
-// 表选择器：自动发现全部表，切到任意表（含本地库没有的表）
-function v4FeishuFillSel(curKey){
+// 表选择器：读本地同步索引 data/_index.js，切到任一已同步的表
+function v4FsFillSel(curKey){
   var sel = document.getElementById('fsTableSel');
   if(!sel) return;
-  v4FeishuApi({action:'tables'}).then(function(d){
-    if(!d || !d.ok || !d.tables) return;
+  v4FsEnsure('_index').then(function(idx){
+    if(!idx || !idx.tables || !idx.tables.length){ sel.style.display = 'none'; return; }
+    sel.style.display = '';
     var h = '';
-    for(var i=0;i<d.tables.length;i++){
-      var t = d.tables[i];
-      h += '<option value="' + esc(t.table_id) + '"' + (t.table_id === (V4_FS_STATE.table && V4_FS_STATE.table.table_id) ? ' selected' : '') + '>' + esc(t.name) + '</option>';
+    for(var i=0;i<idx.tables.length;i++){
+      var t = idx.tables[i];
+      h += '<option value="' + esc(t.key) + '"' + (t.key === curKey ? ' selected' : '') + '>' + esc(t.name) + '（' + (t.count || 0) + '）</option>';
     }
     sel.innerHTML = h;
     sel.onchange = function(){
-      var box = document.getElementById('v4arch-feishu');
-      box.innerHTML = '<div style="font-size:12px;color:var(--text3)">读取中…</div>';
-      v4FeishuApi({action:'records', table_id: sel.value, limit:300}).then(function(r2){
-        if(!r2 || !r2.ok){
-          box.innerHTML = '<div style="font-size:12px;color:var(--warn)">读取失败：' + esc((r2 && (r2.reason||r2.error)) || '') + '</div>';
-          return;
-        }
-        V4_FS_STATE.table = r2.table; V4_FS_STATE.columns = r2.columns || []; V4_FS_STATE.rows = r2.rows || [];
-        var ttl = document.getElementById('fs-title');
-        if(ttl) ttl.textContent = '飞书云端数据 · ' + (r2.table && r2.table.name ? r2.table.name : '');
-        var st2 = document.getElementById('fsStatus');
-        if(st2) st2.textContent = '已读取 ' + r2.total + ' 条';
-        v4FeishuRender();
-      });
+      var k = sel.value;
+      try{ history.replaceState(null, '', '#/feishu?t=' + k); }catch(e){}
+      v4FeishuLoad(k);
     };
   });
 }
@@ -559,24 +574,29 @@ function v4FeishuRender(){
   }
   box.innerHTML = h;
 }
+// 飞书风格表格：粘性表头 + 首列冻结 + 斑马纹 + 数值右对齐 + 等级徽章
 function v4FeishuTable(rows, cols, dateCol){
-  if(!rows.length) return '<div style="font-size:12px;color:var(--text3)">无记录</div>';
-  var h = '<table><tr>';
-  for(var c=0;c<cols.length;c++){
-    h += '<th' + (cols[c] === dateCol ? ' style="width:10%"' : '') + '>' + esc(cols[c]) + '</th>';
-  }
-  h += '</tr>';
-  for(var i=0;i<rows.length && i<300;i++){
+  if(!rows.length) return '<div class="fs-empty">无记录</div>';
+  var h = '<div class="fs-wrap"><table class="fs-tbl"><thead><tr>';
+  for(var c=0;c<cols.length;c++) h += '<th>' + esc(cols[c]) + '</th>';
+  h += '</tr></thead><tbody>';
+  for(var i=0;i<rows.length && i<500;i++){
     h += '<tr>';
     for(var c2=0;c2<cols.length;c2++){
-      var v = String(rows[i][cols[c2]] === undefined || rows[i][cols[c2]] === null ? '' : rows[i][cols[c2]]);
-      if(cols[c2] === dateCol && v.length > 10) v = v.slice(0,10);
-      if(v.length > 60) v = v.slice(0,60) + '…';
-      h += '<td style="font-size:11.5px">' + esc(v) + '</td>';
+      var raw = rows[i][cols[c2]];
+      var v = (raw === undefined || raw === null) ? '' : String(raw);
+      var isDate = (cols[c2] === dateCol);
+      if(isDate && v.length > 10) v = v.slice(0,10);
+      var cls = (!isDate && /^[+-]?\d+(\.\d+)?$/.test(v)) ? ' class="num"' : '';
+      var gm = v.match(/^\s*([A-E])级?\s*$/);
+      var cell;
+      if(gm) cell = '<span class="fs-g g' + gm[1] + '">' + gm[1] + '</span>';
+      else { var t = v.length > 80 ? v.slice(0,80) + '…' : v; cell = esc(t); }
+      h += '<td' + cls + ' title="' + esc(v).replace(/"/g, '&quot;') + '">' + cell + '</td>';
     }
     h += '</tr>';
   }
-  return h + '</table>';
+  return h + '</tbody></table></div>';
 }
 // 飞书页：索引切换 / 重新拉取 / 在飞书打开
 document.addEventListener('click', function(ev){
@@ -587,14 +607,18 @@ document.addEventListener('click', function(ev){
   if(act === 'month'){ V4ARCH[fk] = {month: v, day: null}; v4FeishuRender(); }
   else if(act === 'day'){ V4ARCH[fk].day = v; v4FeishuRender(); }
 });
+// 重新载入：清内存缓存 + 递增穿透参数，确保读到磁盘上刚同步出来的最新数据
+function v4FsReload(){
+  window.V4FS = window.V4FS || {};
+  var k = V4_FS_STATE.key || (v4HashParts().params.t || 'daily');
+  window.V4FS = {};
+  V4_FS_PENDING = {};
+  V4_FS_BUST = Date.now();
+  v4FeishuLoad(k);
+}
 document.addEventListener('DOMContentLoaded', function(){
   var rb = document.getElementById('fsReloadBtn');
-  if(rb) rb.onclick = function(){ v4FeishuLoad(V4_FS_STATE.key || (v4HashParts().params.t || 'daily')); };
-  var ob = document.getElementById('fsOpenBtn');
-  if(ob) ob.onclick = function(){
-    var k = V4_FS_STATE.key || (v4HashParts().params.t || 'daily');
-    window.open(localStorage.getItem('feishu_tbl_' + k) || (localStorage.getItem('feishu_wiki_url') || V4_FL_BASE_DEFAULT), '_blank');
-  };
+  if(rb) rb.onclick = function(){ v4FsReload(); };
 });
 
 // ---------- 8. 启动 ----------

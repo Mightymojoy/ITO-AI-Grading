@@ -125,5 +125,5 @@ const SAMPLE = [
   }catch(e){ ok(false, '服化道异常: ' + e.message); }
 
   console.log('\n===== v4 离线验证完成 =====');
-  console.log('引擎版本: ' + vm.runInContext('GRADING_STANDARD.version', sandbox) + ' ｜ 工作台: v4.4');
+  console.log('引擎版本: ' + vm.runInContext('GRADING_STANDARD.version', sandbox) + ' ｜ 工作台: v4.5');
 })();

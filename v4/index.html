@@ -135,6 +135,22 @@
   .set-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
   @media (max-width:1200px){.dash-grid,.dash-quick{grid-template-columns:repeat(2,1fr)}.set-grid{grid-template-columns:1fr}}
   @media (max-width:900px){body.v4{flex-direction:column}.v4-sidebar{width:100%;height:auto;position:static}.v4-nav{display:flex;flex-wrap:wrap}#errbar{left:0;top:0}}
+  /* 飞书风格内嵌表格（v4.5：数据直接落在工作台内，全程不跳转飞书） */
+  .fs-wrap{max-height:70vh;overflow:auto;border:1px solid var(--border);border-radius:8px;background:var(--card)}
+  .fs-tbl{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%;margin:0;border:none;border-radius:0;font-size:12px}
+  .fs-tbl th{position:sticky;top:0;z-index:2;background:#f5f6f7;color:var(--text2);font-weight:600;font-size:11.5px;text-align:left;padding:8px 12px;border-bottom:1px solid var(--border);border-right:1px solid #efece3;white-space:nowrap}
+  .fs-tbl th:first-child{position:sticky;left:0;z-index:3;min-width:88px}
+  .fs-tbl td{padding:7px 12px;border-bottom:1px solid #f2efe7;border-right:1px solid #f2efe7;color:var(--text2);white-space:nowrap;max-width:300px;overflow:hidden;text-overflow:ellipsis;background:var(--card)}
+  .fs-tbl td:first-child{position:sticky;left:0;z-index:1;background:var(--card);color:var(--text);font-weight:600;border-right:1px solid var(--border);min-width:88px}
+  .fs-tbl tbody tr:nth-child(even) td{background:#fcfbf7}
+  .fs-tbl tbody tr:hover td{background:var(--gold-dim)}
+  .fs-tbl .num{text-align:right;font-variant-numeric:tabular-nums}
+  .fs-tbl .fs-g{display:inline-block;min-width:22px;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;text-align:center}
+  .fs-empty{padding:28px 16px;text-align:center;font-size:12px;color:var(--text3);line-height:1.9}
+  .fs-meta{font-size:11px;color:var(--text3);margin-bottom:8px}
+  .fs-steps{font-size:11.5px;color:var(--text2);line-height:2}
+  .fs-steps code{background:#f0ede5;padding:1px 6px;border-radius:4px;font-size:11px;color:#8a6d24}
+  .fs-tip{font-size:11.5px;color:var(--warn);background:#fdf8ec;border:1px solid #f0e4c4;border-radius:6px;padding:10px 12px;line-height:1.9}
 </style>
 </head>
 <body class="v4">
@@ -147,7 +163,7 @@
   <div class="v4-brand">
     <div class="t"><div class="logo"></div><span class="brand">ITO · 主播讲解评分</span></div>
     <h1>评分工作台</h1>
-    <div class="sub">v4.4 · 工作台模式 ｜ 引擎 v3.9 零改动</div>
+    <div class="sub">v4.5 · 工作台模式 ｜ 引擎 v3.9 零改动</div>
   </div>
   <nav class="v4-nav" id="v4nav">
     <div class="grp">日常</div>
@@ -178,7 +194,7 @@
 <main class="v4-main">
   <div class="v4-topbar">
     <h2 id="pageTitle">工作台首页</h2>
-    <span class="badge" id="pageBadge">v4.4</span>
+    <span class="badge" id="pageBadge">v4.5</span>
     <div class="tb-right"><span id="tbToday"></span></div>
   </div>
 
@@ -343,24 +359,25 @@
     </div>
   </section>
 
-  <!-- ========== 3b 飞书云端数据（v4.4：飞书内容集合进工作台） ========== -->
+  <!-- ========== 3b 飞书数据表（v4.5：内嵌渲染，全程不跳转飞书） ========== -->
   <section class="page" id="page-feishu">
     <div class="panel">
-      <h3 id="fs-title">飞书云端数据</h3>
+      <h3 id="fs-title">飞书数据表</h3>
       <div class="row" style="margin-bottom:10px">
-        <button class="btn" id="fsReloadBtn">重新拉取</button>
-        <button class="btn btn-ghost" id="fsOpenBtn">在飞书打开 ↗</button>
+        <button class="btn" id="fsReloadBtn">重新载入</button>
         <select id="fsTableSel" style="min-width:220px;font-size:12px"></select>
         <span id="fsStatus" style="font-size:12px;color:var(--text3)"></span>
       </div>
-      <div id="v4arch-feishu" style="font-size:12px;color:var(--text3)">准备拉取飞书数据…</div>
+      <div id="v4arch-feishu" class="fs-meta">载入中…</div>
     </div>
     <div class="panel" style="background:#faf8f3">
       <h3>数据来源说明</h3>
-      <div style="font-size:11.5px;color:var(--text2)">
-        本页数据<b>实时读取自飞书多维表格</b>（经部署在 Vercel 的读取接口 <span id="fsApiTxt"></span> 中转，凭证在服务端，浏览器不接触密钥）。<br>
-        表定位优先用环境变量配置，未配置时按表名关键字自动发现；若某张表提示「未找到」，可在设置页填入该表的 <b>table_id</b>（飞书表链接中 <b>tbl</b> 开头的一串字符）。<br>
-        本地积累库（黄金话术 / 问题话术 / 优秀案例 / 历史评分）与云端数据互不影响，可对照查看。
+      <div class="fs-steps">
+        本页数据<b>直接内嵌在工作台内渲染</b>，点击左侧任意分类即在此展示，<b>不会跳转到飞书</b>。<br>
+        数据源：同步脚本生成的本地静态文件 <code>v4/data/*.json</code>（与页面同源，秒开、无跨域）。<br>
+        刷新数据：双击运行 <code>同步飞书数据.bat</code> → 拉取飞书多维表格 → 覆盖 JSON → 回本页点「重新载入」。<br>
+        凭证只存在本机 <code>.env</code>（已加入 .gitignore，不进仓库），浏览器全程不接触密钥。<br>
+        <span id="fsSyncAt"></span>
       </div>
     </div>
   </section>
@@ -437,7 +454,7 @@
         <div class="row"><label>视觉 3713</label><input type="text" id="set-vision" style="flex:1" placeholder="http://127.0.0.1:3713"></div>
         <div class="row"><label>飞书 fill</label><input type="text" id="set-fill" style="flex:1" placeholder="https://cloud-five-pi.vercel.app/api/feishu-fill"></div>
         <div class="row"><label>飞书 sync</label><input type="text" id="set-sync" style="flex:1" placeholder="https://cloud-five-pi.vercel.app/api/feishu-sync"></div>
-      <div class="row"><label>读取接口</label><input type="text" id="set-read" style="flex:1" placeholder="https://cloud-five-pi.vercel.app/api/feishu-read"></div>
+      <div class="row"><label>数据目录</label><input type="text" id="set-read" style="flex:1" placeholder="data"></div>
       <div class="row">
         <button class="btn" id="setSaveBtn">保存地址</button>
           <button class="btn btn-ghost" id="setResetBtn">恢复默认</button>
@@ -479,7 +496,7 @@
     </div>
   </section>
 
-  <div class="ft">ITO · 主播讲解评分工作台 v4.4 ｜ 评分引擎 = v3.9（07a97a7）字符级零改动 ｜ 原系统 v0.10 / v3 均不受影响</div>
+  <div class="ft">ITO · 主播讲解评分工作台 v4.5 ｜ 评分引擎 = v3.9（07a97a7）字符级零改动 ｜ 原系统 v0.10 / v3 均不受影响</div>
 </main>
 
 <script src="../v3/standard.js"></script>
