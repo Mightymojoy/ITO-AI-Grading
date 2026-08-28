@@ -135,7 +135,7 @@
   .set-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
   @media (max-width:1200px){.dash-grid,.dash-quick{grid-template-columns:repeat(2,1fr)}.set-grid{grid-template-columns:1fr}}
   @media (max-width:900px){body.v4{flex-direction:column}.v4-sidebar{width:100%;height:auto;position:static}.v4-nav{display:flex;flex-wrap:wrap}#errbar{left:0;top:0}}
-  /* 飞书风格内嵌表格（v4.5：数据直接落在工作台内，全程不跳转飞书） */
+  /* 飞书风格内嵌表格（v4.6：数据直接落在工作台内，全程不跳转飞书） */
   .fs-wrap{max-height:70vh;overflow:auto;border:1px solid var(--border);border-radius:8px;background:var(--card)}
   .fs-tbl{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%;margin:0;border:none;border-radius:0;font-size:12px}
   .fs-tbl th{position:sticky;top:0;z-index:2;background:#f5f6f7;color:var(--text2);font-weight:600;font-size:11.5px;text-align:left;padding:8px 12px;border-bottom:1px solid var(--border);border-right:1px solid #efece3;white-space:nowrap}
@@ -163,7 +163,7 @@
   <div class="v4-brand">
     <div class="t"><div class="logo"></div><span class="brand">ITO · 主播讲解评分</span></div>
     <h1>评分工作台</h1>
-    <div class="sub">v4.5 · 工作台模式 ｜ 引擎 v3.9 零改动</div>
+    <div class="sub">v4.6 · 工作台模式 ｜ 引擎 v3.9 零改动</div>
   </div>
   <nav class="v4-nav" id="v4nav">
     <div class="grp">日常</div>
@@ -194,7 +194,7 @@
 <main class="v4-main">
   <div class="v4-topbar">
     <h2 id="pageTitle">工作台首页</h2>
-    <span class="badge" id="pageBadge">v4.5</span>
+    <span class="badge" id="pageBadge">v4.6</span>
     <div class="tb-right"><span id="tbToday"></span></div>
   </div>
 
@@ -359,7 +359,7 @@
     </div>
   </section>
 
-  <!-- ========== 3b 飞书数据表（v4.5：内嵌渲染，全程不跳转飞书） ========== -->
+  <!-- ========== 3b 飞书数据表（v4.6：内嵌渲染，全程不跳转飞书） ========== -->
   <section class="page" id="page-feishu">
     <div class="panel">
       <h3 id="fs-title">飞书数据表</h3>
@@ -374,8 +374,11 @@
       <h3>数据来源说明</h3>
       <div class="fs-steps">
         本页数据<b>直接内嵌在工作台内渲染</b>，点击左侧任意分类即在此展示，<b>不会跳转到飞书</b>。<br>
-        <b>「主播日报」无需任何同步</b>：在「每日评分」页评完一次分，结果<b>立即自动写入本页</b>，点进来就能看到。<br>
-        数据源：同步脚本生成的本地静态文件 <code>v4/data/*.js</code>（与页面同源，秒开；用 .js 而非 .json 是为双击本地打开时不被浏览器跨域拦截）。<br>
+        <b>5 个分类无需任何同步</b>（一次评分自动写入，点进来就能看到）：<br>
+        &nbsp;&nbsp;· <b>主播日报 / 周总结 / 月总结</b>：每次评分（单主播或批量）自动写入，周/月表自动带「周次」「月份」分组列；<br>
+        &nbsp;&nbsp;· <b>周总结-明星主播</b>：仅 <b>宿浩淇、苏蓬、曲姝锜、甘晋铭、全程、王菲</b> 6 位自动单独记录；<br>
+        &nbsp;&nbsp;· <b>多主播TOP1评分</b>：仅批量评分后自动记录当次 <b>TOP1</b> 那一位，其余不主动记录。<br>
+        其余分类数据源：同步脚本生成的本地静态文件 <code>v4/data/*.js</code>（同源秒开；用 .js 而非 .json 是为双击本地打开时不被浏览器跨域拦截）。<br>
         刷新其余表：双击运行 <code>同步飞书数据.bat</code> → 拉取飞书多维表格 → 覆盖数据文件 → 回本页点「重新载入」。<br>
         凭证只存在本机 <code>.env</code>（已加入 .gitignore，不进仓库），浏览器全程不接触密钥。<br>
         <span id="fsSyncAt"></span>
@@ -497,7 +500,7 @@
     </div>
   </section>
 
-  <div class="ft">ITO · 主播讲解评分工作台 v4.5 ｜ 评分引擎 = v3.9（07a97a7）字符级零改动 ｜ 原系统 v0.10 / v3 均不受影响</div>
+  <div class="ft">ITO · 主播讲解评分工作台 v4.6 ｜ 评分引擎 = v3.9（07a97a7）字符级零改动 ｜ 原系统 v0.10 / v3 均不受影响</div>
 </main>
 
 <script src="../v3/standard.js"></script>
