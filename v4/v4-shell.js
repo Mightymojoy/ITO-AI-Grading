@@ -145,7 +145,7 @@ function v4RenderSettings(){
   document.getElementById('set-read').value   = localStorage.getItem('feishu_data_dir') || 'data';
   // 版本口径
   document.getElementById('set-versions').innerHTML =
-    '工作台版本：<b>v4.7.8</b>（壳层）<br>' +
+    '工作台版本：<b>v4.7.9</b>（壳层）<br>' +
     '评分引擎：<b>v3.9</b>（app-core.js · 07a97a7 字符级零改动）<br>' +
     '评分标准：<b>' + esc(GRADING_STANDARD.version) + '</b> · ' + esc(GRADING_STANDARD.meta.name) + '<br>' +
     '评分口径：' + esc(GRADING_STANDARD.meta.scoring) + '<br>' +
@@ -540,6 +540,55 @@ function v4RouteScore(r){
   console.log('[v4.6] 评分已路由写入：' + r.host + ' ' + date +
               ' → 日报 / 周总结 / 月总结' + (star ? ' / 明星主播' : ''));
 }
+
+// ---------- 7.9 修复周/月总结周次算错（v4.7.9）----------
+// 引擎 syncWeekMonth() 用 new Date()（今天）算周次，而不是评分日期。
+// 后果：补录历史评分时，记录会被归到"今天所在的周"，而评分实际属于另一周 → 周总结里查不到。
+// 例：08-31 补录 08-27（周四）的评分，应归 08-24~08-30 周，却被算成 08-31~09-06 周。
+// 修法：包装 autoFillFeishu 记下本次评分日期，再覆盖 syncWeekMonth 用它来算周/月。
+var V4_LAST_SCORE_DATE = '';
+(function(){
+  if(typeof autoFillFeishu !== 'function') return;
+  var orig = autoFillFeishu;
+  window.autoFillFeishu = function(r){
+    if(r && r.date && r.date !== '未填' && r.date !== '未识别') V4_LAST_SCORE_DATE = r.date;
+    return orig.apply(this, arguments);
+  };
+})();
+(function(){
+  // 按本地时区解析 YYYY-M-D，避免 new Date('2026-08-27') 被当成 UTC 导致差一天
+  function v4ParseDate(s){
+    var p = String(s || '').match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    return p ? new Date(+p[1], +p[2] - 1, +p[3]) : null;
+  }
+  window.syncWeekMonth = function(){
+    try{
+      var now = v4ParseDate(V4_LAST_SCORE_DATE) || new Date();
+      var pad2 = function(n){ return String(n).padStart(2,'0'); };
+      var fmt = function(d){ return d.getFullYear() + '-' + pad2(d.getMonth()+1) + '-' + pad2(d.getDate()); };
+      var day = (now.getDay() + 6) % 7;
+      var monday = new Date(now); monday.setDate(now.getDate() - day);
+      var sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+      var wkStart = fmt(monday), wkEnd = fmt(sunday);
+      var y = now.getFullYear(), m = now.getMonth() + 1;
+      var monthStart = y + '-' + pad2(m) + '-01';
+      var monthEnd = y + '-' + pad2(m) + '-31';
+      var WM_URL = (typeof FEISHU_FILL_URL !== 'undefined' ? FEISHU_FILL_URL : '')
+                     .replace('feishu-fill', 'feishu-week-month');
+      if(!WM_URL) return;
+      console.log('[v4.7.9] 周月汇总按评分日期 ' + (V4_LAST_SCORE_DATE || '(今天)') +
+                  ' 计算：周 ' + wkStart + '~' + wkEnd + '，月 ' + monthStart);
+      fetch(WM_URL, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({range:'week', start:wkStart, end:wkEnd})})
+        .then(function(rs){ return rs.json(); }).then(function(j){
+          if(j.ok && !j.empty) console.log('周总结已更新:', j.hosts, '主播');
+        })['catch'](function(e){ console.log('周总结更新异常:', e.message); });
+      fetch(WM_URL, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({range:'month', start:monthStart, end:monthEnd})})
+        .then(function(rs){ return rs.json(); }).then(function(j){
+          if(j.ok && !j.empty) console.log('月总结已更新:', j.hosts, '主播');
+        })['catch'](function(e){ console.log('月总结更新异常:', e.message); });
+    }catch(e){ console.log('syncWeekMonth 异常:', e.message); }
+  };
+})();
 
 // 批量评分后：只把 TOP1 那一位写入「多主播TOP1评分」，其余不主动记录
 (function(){
