@@ -893,9 +893,15 @@ document.addEventListener('click', function(ev){
   var _TN = {sellpoint_miss:'讲品覆盖', baseline_error:'信息准确性', low_ability:'能力短板'};
   function v4EnhanceTrainingTable(){
     var box = $('problemLibBlock'); if(!box) return;
+    // 不能用「th 数量===4」定位：跨主播共性问题表也是 4 列，会抢先命中
+    // 必须按表头文字精确匹配「问题分布」
     var tbls = box.querySelectorAll('table'), trainTbl = null;
     for(var ti=0;ti<tbls.length;ti++){
-      if(tbls[ti].querySelectorAll('th').length === 4){ trainTbl = tbls[ti]; break; }
+      var ths = tbls[ti].querySelectorAll('th'), hit = false;
+      for(var tj=0;tj<ths.length;tj++){
+        if(ths[tj].textContent.replace(/\s/g,'') === '问题分布'){ hit = true; break; }
+      }
+      if(hit){ trainTbl = tbls[ti]; break; }
     }
     if(!trainTbl) return;
     var lib = (typeof getProblemLib === 'function') ? getProblemLib() : [];
