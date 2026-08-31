@@ -108,7 +108,7 @@ function v4RenderDashboard(){
     var h = '<table><tr><th style="width:14%">主播</th><th style="width:12%">日期</th><th style="width:9%">总分</th><th style="width:11%">c1 产品理解</th><th>考核产品</th></tr>';
     for(var j=0;j<recent.length;j++){
       var r = recent[j];
-      h += '<tr><td><b>' + esc(r.host) + '</b></td><td>' + esc(r.date || '—') + '</td><td><b style="color:var(--gold)">' + r.total + '</b></td><td>' + (r.c1Score !== null && r.c1Score !== undefined ? r.c1Score : '—') + '</td><td style="font-size:11.5px;color:var(--text2)">' + esc((r.product || '—').slice(0, 44)) + '</td></tr>';
+      h += '<tr><td><b>' + esc(r.host) + '</b></td><td>' + esc(r.date || '—') + '</td><td><b style="color:var(--gold)">' + r.total + '</b></td><td>' + (r.c1Score !== null && r.c1Score !== undefined ? r.c1Score : '—') + '</td><td style="font-size:11.5px;color:var(--text2)">' + v4ExpandCell(r.product || '—', 44) + '</td></tr>';
     }
     box.innerHTML = h + '</table><div style="margin-top:6px"><a href="#/history" style="font-size:11.5px;color:var(--gold)">查看全部历史 →</a></div>';
   }
@@ -145,7 +145,7 @@ function v4RenderSettings(){
   document.getElementById('set-read').value   = localStorage.getItem('feishu_data_dir') || 'data';
   // 版本口径
   document.getElementById('set-versions').innerHTML =
-    '工作台版本：<b>v4.7.6</b>（壳层）<br>' +
+    '工作台版本：<b>v4.7.7</b>（壳层）<br>' +
     '评分引擎：<b>v3.9</b>（app-core.js · 07a97a7 字符级零改动）<br>' +
     '评分标准：<b>' + esc(GRADING_STANDARD.version) + '</b> · ' + esc(GRADING_STANDARD.meta.name) + '<br>' +
     '评分口径：' + esc(GRADING_STANDARD.meta.scoring) + '<br>' +
@@ -273,6 +273,23 @@ function v4ArchData(type){
   if(type === 'cases') return v4ReadLS('grading_cases_lib_v1', '[]');
   return v4ReadLS('grading_history_v1', '[]');
 }
+// 日期归一化（全局，归档查看器与飞书表共用）：兼容 2026-8-13 / 2026-08-13 混合格式
+// 返回 {m:'YYYY-MM', d:'YYYY-MM-DD'}，解析不出时均为 ''
+function v4NormDate(s){
+  var p = String(s || '').match(/^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?/);
+  if(!p) return {m:'', d:''};
+  var mo = p[2].length === 1 ? '0' + p[2] : p[2];
+  var da = p[3] ? (p[3].length === 1 ? '0' + p[3] : p[3]) : '';
+  return {m: p[1] + '-' + mo, d: da ? p[1] + '-' + mo + '-' + da : ''};
+}
+// 长文本单元格：超 n 字时渲染「截断 + 展开/收起」结构（点击由全局委托处理）
+function v4ExpandCell(v, n){
+  v = (v === undefined || v === null) ? '' : String(v);
+  if(v.length <= n) return esc(v);
+  return '<span class="fs-expand"><span class="fs-short">' + esc(v.slice(0,n)) +
+         '</span><span class="fs-full" style="display:none">' + esc(v) +
+         '</span> <a class="fs-toggle" data-action="toggleExpand">展开</a></span>';
+}
 function v4ArchRender(type){
   var box = document.getElementById('v4arch-' + type);
   if(!box) return;
@@ -281,8 +298,9 @@ function v4ArchRender(type){
   var byMonth = {}, order = [];
   for(var i=0;i<items.length;i++){
     var d = String(items[i].date || '');
-    var m = /^\d{4}-\d{2}/.test(d) ? d.slice(0,7) : '未填';
-    var day = /^\d{4}-\d{2}-\d{2}/.test(d) ? d.slice(0,10) : '';
+    var nd0 = v4NormDate(d);
+    var m = nd0.m || '未填';
+    var day = nd0.d;
     if(!byMonth[m]){ byMonth[m] = {count:0, days:{}}; order.push(m); }
     byMonth[m].count++;
     if(day) byMonth[m].days[day] = (byMonth[m].days[day] || 0) + 1;
@@ -314,11 +332,11 @@ function v4ArchRender(type){
   h += '</div>';
   // 明细表
   var rows = items.filter(function(x){
-    var d = String(x.date || '');
-    var m = /^\d{4}-\d{2}/.test(d) ? d.slice(0,7) : '未填';
+    var ndF = v4NormDate(x.date);
+    var m = ndF.m || '未填';
     if(m !== st.month) return false;
     if(st.day === 'all') return true;
-    return d === st.day;
+    return ndF.d === st.day;
   });
   if(type === 'golden'){
     rows.sort(function(a,b){ return (b.star||0)-(a.star||0); });
@@ -326,7 +344,7 @@ function v4ArchRender(type){
     for(var c=0;c<rows.length;c++){
       var g = rows[c];
       var stc = g.star >= 5 ? 'style="color:var(--danger);font-weight:700"' : 'style="color:var(--gold);font-weight:700"';
-      h += '<tr><td>' + esc(String(g.date || '—').slice(5)) + '</td><td><b>' + esc(g.host || '—') + '</b></td><td>' + esc(g.type || '—') + '</td><td><span ' + stc + '>' + '★'.repeat(g.star || 0) + '</span></td><td style="font-size:11.5px">' + (g.ts ? '<span class="evt">' + esc(g.ts) + '</span>' : '') + esc(g.text || '') + '</td><td style="font-size:11px;color:var(--text2)">' + esc((g.tags || []).join('·')) + '</td></tr>';
+      h += '<tr><td>' + esc(String(g.date || '—').slice(5)) + '</td><td><b>' + esc(g.host || '—') + '</b></td><td>' + esc(g.type || '—') + '</td><td><span ' + stc + '>' + '★'.repeat(g.star || 0) + '</span></td><td style="font-size:11.5px">' + (g.ts ? '<span class="evt">' + esc(g.ts) + '</span>' : '') + v4ExpandCell(g.text || '', 80) + '</td><td style="font-size:11px;color:var(--text2)">' + esc((g.tags || []).join('·')) + '</td></tr>';
     }
     h += '</table>';
     // 存档清理（含 <4 星的旧数据时提示）
@@ -339,7 +357,7 @@ function v4ArchRender(type){
     h += '<table><tr><th style="width:10%">日期</th><th style="width:9%">主播</th><th style="width:14%">能力 · 子标准</th><th>优秀案例（原文证据 + 时间戳）</th></tr>';
     for(var c2=0;c2<rows.length;c2++){
       var cs = rows[c2];
-      h += '<tr><td>' + esc(String(cs.date || '—').slice(5)) + '</td><td><b>' + esc(cs.host || '—') + '</b></td><td style="font-size:11.5px;color:var(--gold)">' + esc(cs.mod || '') + (cs.std ? ' · ' + esc(cs.std) : '') + '</td><td style="font-size:11.5px">' + (cs.ts ? '<span class="evt">' + esc(cs.ts) + '</span>' : '') + esc(cs.ev || '') + '</td></tr>';
+      h += '<tr><td>' + esc(String(cs.date || '—').slice(5)) + '</td><td><b>' + esc(cs.host || '—') + '</b></td><td style="font-size:11.5px;color:var(--gold)">' + esc(cs.mod || '') + (cs.std ? ' · ' + esc(cs.std) : '') + '</td><td style="font-size:11.5px">' + (cs.ts ? '<span class="evt">' + esc(cs.ts) + '</span>' : '') + v4ExpandCell(cs.ev || '', 80) + '</td></tr>';
     }
     h += '</table><div style="margin-top:6px;font-size:11.5px;color:var(--text3)">沉淀规则（v4.3 起）：每次单主播/批量评分自动记录当日前 3 条优秀案例（≥90 分高质量证据段落），按 主播+日期+原文 去重</div>';
   } else {
@@ -347,7 +365,7 @@ function v4ArchRender(type){
     h += '<table><tr><th style="width:11%">日期</th><th style="width:12%">主播</th><th style="width:8%">总分</th><th style="width:12%">c1 产品理解</th><th>考核产品</th></tr>';
     for(var e2=0;e2<rows.length;e2++){
       var r = rows[e2];
-      h += '<tr><td>' + esc(r.date || '—') + '</td><td><b>' + esc(r.host || '—') + '</b></td><td><b style="color:var(--gold)">' + r.total + '</b></td><td>' + (r.c1Score !== null && r.c1Score !== undefined ? r.c1Score : '—') + '</td><td style="font-size:11.5px;color:var(--text2)">' + esc((r.product || '—').slice(0, 44)) + '</td></tr>';
+      h += '<tr><td>' + esc(r.date || '—') + '</td><td><b>' + esc(r.host || '—') + '</b></td><td><b style="color:var(--gold)">' + r.total + '</b></td><td>' + (r.c1Score !== null && r.c1Score !== undefined ? r.c1Score : '—') + '</td><td style="font-size:11.5px;color:var(--text2)">' + v4ExpandCell(r.product || '—', 44) + '</td></tr>';
     }
     h += '</table>';
   }
@@ -466,8 +484,7 @@ function v4WeekKey(dateStr){
   return d.getFullYear() + '-W' + (week < 10 ? '0' + week : week);
 }
 function v4MonthKey(dateStr){
-  var m = /^(\d{4}-\d{2})/.exec(String(dateStr || ''));
-  return m ? m[1] : '';
+  return v4NormDate(dateStr).m;
 }
 // 从评分结果构造标准行（各 tab 共用同一份 scoreEvent，避免列名漂移）
 function v4ScoreRow(r, extra){
@@ -714,14 +731,7 @@ function v4FeishuRender(){
   }
   var h = '';
   if(dateCol){
-    // 月→日 分组（日期归一化：兼容 2026-8-13 / 2026-08-13 两种格式）
-    function v4NormDate(s){
-      var p = String(s || '').match(/^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?/);
-      if(!p) return {m:'', d:''};
-      var mo = p[2].length === 1 ? '0' + p[2] : p[2];
-      var da = p[3] ? (p[3].length === 1 ? '0' + p[3] : p[3]) : '';
-      return {m: p[1] + '-' + mo, d: da ? p[1] + '-' + mo + '-' + da : ''};
-    }
+    // 月→日 分组（v4NormDate 为全局函数，与归档查看器共用）
     var byMonth = {}, order = [];
     for(var i=0;i<rows.length;i++){
       var nd = v4NormDate(rows[i][dateCol]);
@@ -784,13 +794,7 @@ function v4FeishuTable(rows, cols, dateCol){
       var gm = v.match(/^\s*([A-E])级?\s*$/);
       var cell;
       if(gm) cell = '<span class="fs-g g' + gm[1] + '">' + gm[1] + '</span>';
-      else {
-        if(v.length > 80){
-          var short = esc(v.slice(0,80));
-          var full = esc(v);
-          cell = '<span class="fs-expand"><span class="fs-short">' + short + '</span><span class="fs-full" style="display:none">' + full + '</span> <a class="fs-toggle" data-action="toggleExpand">展开</a></span>';
-        } else { cell = esc(v); }
-      }
+      else { cell = v4ExpandCell(v, 80); }
       h += '<td' + cls + ' title="' + esc(v).replace(/"/g, '&quot;') + '">' + cell + '</td>';
     }
     h += '</tr>';
