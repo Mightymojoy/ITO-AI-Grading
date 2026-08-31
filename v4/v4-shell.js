@@ -756,6 +756,11 @@ function v4FeishuRender(){
       if(stt.day === 'all') return true;
       return nd.d === stt.day;
     });
+    // 按日期列降序排列（最新在前）
+    shown.sort(function(a,b){
+      var da = v4NormDate(a[dateCol]).d, db = v4NormDate(b[dateCol]).d;
+      return (da < db ? 1 : (da > db ? -1 : 0));
+    });
     h += v4FeishuTable(shown, cols, dateCol);
   } else {
     h += '<div style="font-size:11.5px;color:var(--text3);margin-bottom:6px">该表无日期列，按原始顺序平铺（共 ' + rows.length + ' 条）</div>';
