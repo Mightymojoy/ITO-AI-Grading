@@ -882,7 +882,7 @@ document.addEventListener('click', function(ev){
     t = t.parentNode;
   }
 });
-// ---- v4.8.4 问题库培训清单：问题分布标签可点击展开 + 飞书数据兜底 ----
+// ---- v4.8.5 问题库培训清单：问题分布标签可点击展开 + 飞书数据兜底 ----
 (function(){
   if(typeof renderProblemLib !== 'function') return;
   var _origPL = renderProblemLib;
@@ -893,34 +893,35 @@ document.addEventListener('click', function(ev){
     '情绪感染能力':'low_ability', '逻辑组织能力（流畅度）':'low_ability',
     '促单话术':'low_ability', '互动节奏':'low_ability'
   };
-  function v4GetMergedLib(){
+  function v4BuildMergedLib(){
     var lib = (typeof getProblemLib === 'function') ? getProblemLib() : [];
     var localKeys = {};
     for(var i=0;i<lib.length;i++) localKeys[lib[i].key] = 1;
-    // 飞书「问题话术库」同步数据作为兜底
     var feishuData = null;
     try { feishuData = (window.V4FS && window.V4FS['tbl_tblORA9bSl8M63EO']) ? window.V4FS['tbl_tblORA9bSl8M63EO'].rows : null; } catch(e) {}
     if(feishuData && feishuData.length){
       for(var j=0;j<feishuData.length;j++){
-        var row = feishuData[j];
-        var fk = 'feishu_'+j;
+        var row = feishuData[j], fk = 'feishu_'+j;
         if(localKeys[fk]) continue;
         var typeStr = String(row['问题类型'] || '');
-        var cat = _TYPE_MAP[typeStr] || 'baseline_error';
-        lib.push({key:fk, host:row['主播']||'', cat:cat, text:row['问题描述']||'', date:row['日期']||'', priority:''});
+        lib.push({key:fk, host:row['主播']||'', cat:_TYPE_MAP[typeStr]||'baseline_error', text:row['问题描述']||'', date:row['日期']||'', priority:''});
       }
     }
     return lib;
   }
+  // 关键：patch getProblemLib 让原版 renderProblemLib 就能读到合并数据
+  if(typeof getProblemLib === 'function'){
+    var _origGL = getProblemLib;
+    window.getProblemLib = function(){ return v4BuildMergedLib(); };
+  }
   window.renderProblemLib = function(){
     _origPL.apply(this, arguments);
-    // 异步等待飞书数据加载完成后，再增强培训清单
+    // 异步增强：等飞书数据加载完成后重新渲染芯片
     var ensure = (typeof v4FsEnsure === 'function') ? v4FsEnsure : null;
     if(ensure){
       ensure('tbl_tblORA9bSl8M63EO').then(function(){ v4EnhanceTrainingTable(); });
     } else {
-      // 兜底：立即尝试（数据可能已通过其他方式加载）
-      setTimeout(v4EnhanceTrainingTable, 200);
+      setTimeout(v4EnhanceTrainingTable, 300);
     }
   };
   function v4EnhanceTrainingTable(){
@@ -934,7 +935,7 @@ document.addEventListener('click', function(ev){
       if(hit){ trainTbl = tbls[ti]; break; }
     }
     if(!trainTbl) return;
-    var lib = v4GetMergedLib();
+    var lib = v4BuildMergedLib();
     var sum = (typeof summarizeProblems === 'function') ? summarizeProblems(lib) : null;
     if(!sum || !sum.byHost) return;
     var rows = trainTbl.querySelectorAll('tr');
