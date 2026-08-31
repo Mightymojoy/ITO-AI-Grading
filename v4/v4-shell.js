@@ -145,7 +145,7 @@ function v4RenderSettings(){
   document.getElementById('set-read').value   = localStorage.getItem('feishu_data_dir') || 'data';
   // 版本口径
   document.getElementById('set-versions').innerHTML =
-    '工作台版本：<b>v4.6</b>（壳层）<br>' +
+    '工作台版本：<b>v4.7</b>（壳层）<br>' +
     '评分引擎：<b>v3.9</b>（app-core.js · 07a97a7 字符级零改动）<br>' +
     '评分标准：<b>' + esc(GRADING_STANDARD.version) + '</b> · ' + esc(GRADING_STANDARD.meta.name) + '<br>' +
     '评分口径：' + esc(GRADING_STANDARD.meta.scoring) + '<br>' +
@@ -710,17 +710,24 @@ function v4FeishuRender(){
   if(!dateCol){
     for(var c2=0;c2<cols.length;c2++){
       var v = String(rows[0][cols[c2]] || '');
-      if(/^\d{4}-\d{2}-\d{2}/.test(v)){ dateCol = cols[c2]; break; }
+      if(/^\d{4}-\d{1,2}-\d{1,2}/.test(v)){ dateCol = cols[c2]; break; }
     }
   }
   var h = '';
   if(dateCol){
-    // 月→日 分组
+    // 月→日 分组（日期归一化：兼容 2026-8-13 / 2026-08-13 两种格式）
+    function v4NormDate(s){
+      var p = String(s || '').match(/^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?/);
+      if(!p) return {m:'', d:''};
+      var mo = p[2].length === 1 ? '0' + p[2] : p[2];
+      var da = p[3] ? (p[3].length === 1 ? '0' + p[3] : p[3]) : '';
+      return {m: p[1] + '-' + mo, d: da ? p[1] + '-' + mo + '-' + da : ''};
+    }
     var byMonth = {}, order = [];
     for(var i=0;i<rows.length;i++){
-      var d = String(rows[i][dateCol] || '');
-      var m = /^\d{4}-\d{2}/.test(d) ? d.slice(0,7) : '未填';
-      var day = /^\d{4}-\d{2}-\d{2}/.test(d) ? d.slice(0,10) : '';
+      var nd = v4NormDate(rows[i][dateCol]);
+      var m = nd.m || '未填';
+      var day = nd.d;
       if(!byMonth[m]){ byMonth[m] = {count:0, days:{}}; order.push(m); }
       byMonth[m].count++;
       if(day) byMonth[m].days[day] = (byMonth[m].days[day] || 0) + 1;
@@ -743,11 +750,11 @@ function v4FeishuRender(){
     }
     h += '</div>';
     var shown = rows.filter(function(x){
-      var d = String(x[dateCol] || '');
-      var m = /^\d{4}-\d{2}/.test(d) ? d.slice(0,7) : '未填';
+      var nd = v4NormDate(x[dateCol]);
+      var m = nd.m || '未填';
       if(m !== stt.month) return false;
       if(stt.day === 'all') return true;
-      return d === stt.day;
+      return nd.d === stt.day;
     });
     h += v4FeishuTable(shown, cols, dateCol);
   } else {
