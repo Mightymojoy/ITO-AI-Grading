@@ -914,14 +914,23 @@ document.addEventListener('click', function(ev){
     var _origGL = getProblemLib;
     window.getProblemLib = function(){ return v4BuildMergedLib(_origGL); };
   }
+  // 多路重试：飞书数据是异步网络加载，单次 .then() 可能被后续渲染覆盖
+  // 用多个时间点各试一次，确保增强最终一定生效
+  var _retryDelays = [0, 120, 400, 900, 1800, 3500];
+  function v4EnhanceWithRetry(){
+    for(var i=0;i<_retryDelays.length;i++){
+      (function(delay){
+        setTimeout(function(){ try{ v4EnhanceTrainingTable(); }catch(e){} }, delay);
+      })(_retryDelays[i]);
+    }
+  }
   window.renderProblemLib = function(){
     _origPL.apply(this, arguments);
-    // 异步增强：等飞书数据加载完成后重新渲染芯片
+    v4EnhanceWithRetry();
+    // 同时监听飞书数据加载完成事件（如果数据尚未加载）
     var ensure = (typeof v4FsEnsure === 'function') ? v4FsEnsure : null;
     if(ensure){
-      ensure('tbl_tblORA9bSl8M63EO').then(function(){ v4EnhanceTrainingTable(); });
-    } else {
-      setTimeout(v4EnhanceTrainingTable, 300);
+      ensure('tbl_tblORA9bSl8M63EO').then(function(){ v4EnhanceWithRetry(); });
     }
   };
   function v4EnhanceTrainingTable(){
