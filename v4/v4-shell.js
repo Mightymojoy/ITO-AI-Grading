@@ -1025,4 +1025,8 @@ document.addEventListener('DOMContentLoaded', function(){
   try{ v4ArchRender('golden'); }catch(e){}
   try{ v4ArchRender('history'); }catch(e){}
   try{ v4ArchRender('cases'); }catch(e){}
+  // v4.8.8 关键：app-core.js 先于 v4-shell.js 执行，页面初始化时调用的是「未打补丁」的
+  // renderProblemLib，培训清单没有芯片。这里补丁生效后必须主动重渲染一次，
+  // 否则「评分时能看到、刷新后消失」。
+  try{ renderProblemLib(); }catch(e){}
 })();
