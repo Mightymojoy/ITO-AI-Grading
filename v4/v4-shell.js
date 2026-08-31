@@ -882,6 +882,54 @@ document.addEventListener('click', function(ev){
     t = t.parentNode;
   }
 });
+// ---- v4.8.0 问题库培训清单：问题分布可点击展开具体问题描述 ----
+(function(){
+  if(typeof renderProblemLib !== 'function') return;
+  var _origPL = renderProblemLib;
+  window.renderProblemLib = function(){
+    _origPL.apply(this, arguments);
+    v4EnhanceTrainingTable();
+  };
+  var _TN = {sellpoint_miss:'讲品覆盖', baseline_error:'信息准确性', low_ability:'能力短板'};
+  function v4EnhanceTrainingTable(){
+    var box = $('problemLibBlock'); if(!box) return;
+    var tbls = box.querySelectorAll('table'), trainTbl = null;
+    for(var ti=0;ti<tbls.length;ti++){
+      if(tbls[ti].querySelectorAll('th').length === 4){ trainTbl = tbls[ti]; break; }
+    }
+    if(!trainTbl) return;
+    var lib = (typeof getProblemLib === 'function') ? getProblemLib() : [];
+    var sum = (typeof summarizeProblems === 'function') ? summarizeProblems(lib) : null;
+    if(!sum || !sum.byHost) return;
+    var rows = trainTbl.querySelectorAll('tr');
+    for(var ri=0;ri<rows.length;ri++){
+      var cells = rows[ri].querySelectorAll('td');
+      if(cells.length < 3) continue;
+      var hn = cells[0].textContent.trim(), hd = sum.byHost[hn];
+      if(!hd) continue;
+      var distCell = cells[2], cats = Object.keys(hd.counts), html = '';
+      for(var ci=0;ci<cats.length;ci++){
+        var cat = cats[ci], cnt = hd.counts[cat], dn = _TN[cat] || cat;
+        var items = hd.items.filter(function(it){ return it.cat === cat; });
+        var detail = items.map(function(it){ return '· ' + (it.text || ''); }).join('\n');
+        html += '<span class="prob-chip" data-action="toggleProbDetail" style="display:inline-block;margin:2px 4px 2px 0;padding:1px 7px;border-radius:10px;font-size:11px;border:1px solid var(--gold);color:var(--gold);cursor:pointer;white-space:nowrap">' + esc(dn + '×' + cnt) + '</span>';
+        html += '<span class="prob-detail" style="display:none;margin:4px 0 8px 0;padding:6px 10px;background:var(--bg2);border-left:3px solid var(--gold);font-size:11.5px;line-height:1.75;color:var(--text1)">' + esc(detail) + '</span>';
+      }
+      distCell.innerHTML = html;
+    }
+  }
+})();
+// 点击分类芯片 → 展开/收起该分类的具体问题描述
+document.addEventListener('click', function(ev){
+  var t = ev.target;
+  if(t.getAttribute && t.getAttribute('data-action') === 'toggleProbDetail'){
+    ev.preventDefault(); ev.stopPropagation();
+    var d = t.nextElementSibling;
+    if(!d || !d.classList.contains('prob-detail')) return;
+    if(d.style.display === 'none'){ d.style.display = 'block'; t.style.background = 'var(--gold)'; t.style.color = '#fff'; }
+    else { d.style.display = 'none'; t.style.background = ''; t.style.color = 'var(--gold)'; }
+  }
+});
 // 重新载入：清内存缓存 + 递增穿透参数，确保读到磁盘上刚同步出来的最新数据
 function v4FsReload(){
   window.V4FS = window.V4FS || {};
