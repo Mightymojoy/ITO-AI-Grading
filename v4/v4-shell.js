@@ -145,7 +145,7 @@ function v4RenderSettings(){
   document.getElementById('set-read').value   = localStorage.getItem('feishu_data_dir') || 'data';
   // 版本口径
   document.getElementById('set-versions').innerHTML =
-    '工作台版本：<b>v4.7.7</b>（壳层）<br>' +
+    '工作台版本：<b>v4.7.8</b>（壳层）<br>' +
     '评分引擎：<b>v3.9</b>（app-core.js · 07a97a7 字符级零改动）<br>' +
     '评分标准：<b>' + esc(GRADING_STANDARD.version) + '</b> · ' + esc(GRADING_STANDARD.meta.name) + '<br>' +
     '评分口径：' + esc(GRADING_STANDARD.meta.scoring) + '<br>' +
@@ -588,7 +588,9 @@ var V4_FS_STATE = {key:'', table:null, columns:[], rows:[], syncedAt:''};
 var V4_FS_PENDING = {};
 
 // 以 <script src> 注入载入：file:// 双击打开也能用（fetch/XHR 在 file:// 会被 CORS 拦截）
-var V4_FS_BUST = 0; // 重新载入时递增，穿透浏览器缓存
+// 默认即带时间戳：否则浏览器会缓存旧的 data/*.js，同步后不点「重新载入」就一直看到旧数据。
+// 只在首次加载各表时各请求一次（v4FsEnsure 有内存缓存，切 tab 不会重复下载）。
+var V4_FS_BUST = Date.now();
 function v4FsScript(src){
   return new Promise(function(resolve, reject){
     var s = document.createElement('script');
