@@ -71,6 +71,14 @@ function v4Navigate(){
   if(key === 'dashboard') try{ v4RenderDashboard(); }catch(e){}
   if(key === 'settings')  try{ v4RenderSettings(); }catch(e){}
   if(key === 'feishu')    try{ v4FeishuLoad(curT || 'daily'); }catch(e){}
+  // v4.8.10 关键：切到「问题库」页时主动重渲染，确保培训清单芯片一定生成
+  // （app-core.js 初始化时用的是未打补丁的 renderProblemLib，不重渲染就没有芯片）
+  if(key === 'problem'){
+    try{ renderProblemLib(); }catch(e){}
+    [300, 1000, 2500].forEach(function(d){
+      setTimeout(function(){ try{ renderProblemLib(); }catch(e){} }, d);
+    });
+  }
 }
 window.addEventListener('hashchange', v4Navigate);
 
@@ -1034,8 +1042,10 @@ document.addEventListener('DOMContentLoaded', function(){
   try{ v4ArchRender('golden'); }catch(e){}
   try{ v4ArchRender('history'); }catch(e){}
   try{ v4ArchRender('cases'); }catch(e){}
-  // v4.8.8 关键：app-core.js 先于 v4-shell.js 执行，页面初始化时调用的是「未打补丁」的
-  // renderProblemLib，培训清单没有芯片。这里补丁生效后必须主动重渲染一次，
-  // 否则「评分时能看到、刷新后消失」。
-  try{ renderProblemLib(); }catch(e){}
+  // v4.8.10 关键：app-core.js 先于 v4-shell.js 执行，页面初始化时调用的是「未打补丁」的
+  // renderProblemLib，培训清单没有芯片。补丁生效后必须主动重渲染，否则
+  // 「评分时能看到、刷新后消失」。延迟多点触发，规避初始化时序竞争。
+  [0, 500, 1500, 3000].forEach(function(d){
+    setTimeout(function(){ try{ renderProblemLib(); }catch(e){} }, d);
+  });
 })();
