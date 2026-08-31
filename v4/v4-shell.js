@@ -883,6 +883,7 @@ document.addEventListener('click', function(ev){
   }
 });
 // ---- v4.8.3 问题库培训清单：问题分布标签可点击展开具体问题描述 ----
+// v4.8.4 增强：同时读取飞书同步数据（localStorage 为空时也能显示培训清单）
 (function(){
   if(typeof renderProblemLib !== 'function') return;
   var _origPL = renderProblemLib;
@@ -890,6 +891,40 @@ document.addEventListener('click', function(ev){
     _origPL.apply(this, arguments);
     v4EnhanceTrainingTable();
   };
+  // 飞书问题类型 → 内部 category 映射
+  var _TYPE_MAP = {
+    '产品理解能力':'sellpoint_miss', '可视化道具运用':'sellpoint_miss',
+    '场景化表达能力（延展性）':'sellpoint_miss', '卖点提炼能力':'sellpoint_miss',
+    '情绪感染能力':'low_ability', '逻辑组织能力（流畅度）':'low_ability',
+    '促单话术':'low_ability', '互动节奏':'low_ability'
+  };
+  function v4GetMergedLib(){
+    // 1. localStorage 数据（评分时自动沉淀，优先）
+    var lib = (typeof getProblemLib === 'function') ? getProblemLib() : [];
+    var localKeys = {};
+    for(var i=0;i<lib.length;i++) localKeys[lib[i].key] = 1;
+    // 2. 飞书「问题话术库」同步数据作为兜底
+    var feishuData = null;
+    try { feishuData = (window.V4FS && window.V4FS['tbl_tblORA9bSl8M63EO']) ? window.V4FS['tbl_tblORA9bSl8M63EO'].rows : null; } catch(e) {}
+    if(feishuData && feishuData.length){
+      for(var j=0;j<feishuData.length;j++){
+        var row = feishuData[j];
+        var fk = 'feishu_'+j;
+        if(localKeys[fk]) continue; // 去重
+        var typeStr = String(row['问题类型'] || '');
+        var cat = _TYPE_MAP[typeStr] || 'baseline_error';
+        lib.push({
+          key: fk,
+          host: row['主播'] || '',
+          cat: cat,
+          text: row['问题描述'] || '',
+          date: row['日期'] || '',
+          priority: ''
+        });
+      }
+    }
+    return lib;
+  }
   function v4EnhanceTrainingTable(){
     var box = $('problemLibBlock'); if(!box) return;
     // 按表头文字「问题分布」精确定位培训清单表（跨主播共性问题表也是4列，不能用th数量）
@@ -902,7 +937,8 @@ document.addEventListener('click', function(ev){
       if(hit){ trainTbl = tbls[ti]; break; }
     }
     if(!trainTbl) return;
-    var lib = (typeof getProblemLib === 'function') ? getProblemLib() : [];
+    // 用合并后的数据源（localStorage + 飞书兜底）
+    var lib = v4GetMergedLib();
     var sum = (typeof summarizeProblems === 'function') ? summarizeProblems(lib) : null;
     if(!sum || !sum.byHost) return;
     // 把「问题分布」列的纯文本替换为可点击芯片+隐藏详情
