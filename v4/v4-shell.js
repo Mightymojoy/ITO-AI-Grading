@@ -882,15 +882,10 @@ document.addEventListener('click', function(ev){
     t = t.parentNode;
   }
 });
-// ---- v4.8.3 问题库培训清单：问题分布标签可点击展开具体问题描述 ----
-// v4.8.4 增强：同时读取飞书同步数据（localStorage 为空时也能显示培训清单）
+// ---- v4.8.4 问题库培训清单：问题分布标签可点击展开 + 飞书数据兜底 ----
 (function(){
   if(typeof renderProblemLib !== 'function') return;
   var _origPL = renderProblemLib;
-  window.renderProblemLib = function(){
-    _origPL.apply(this, arguments);
-    v4EnhanceTrainingTable();
-  };
   // 飞书问题类型 → 内部 category 映射
   var _TYPE_MAP = {
     '产品理解能力':'sellpoint_miss', '可视化道具运用':'sellpoint_miss',
@@ -899,35 +894,37 @@ document.addEventListener('click', function(ev){
     '促单话术':'low_ability', '互动节奏':'low_ability'
   };
   function v4GetMergedLib(){
-    // 1. localStorage 数据（评分时自动沉淀，优先）
     var lib = (typeof getProblemLib === 'function') ? getProblemLib() : [];
     var localKeys = {};
     for(var i=0;i<lib.length;i++) localKeys[lib[i].key] = 1;
-    // 2. 飞书「问题话术库」同步数据作为兜底
+    // 飞书「问题话术库」同步数据作为兜底
     var feishuData = null;
     try { feishuData = (window.V4FS && window.V4FS['tbl_tblORA9bSl8M63EO']) ? window.V4FS['tbl_tblORA9bSl8M63EO'].rows : null; } catch(e) {}
     if(feishuData && feishuData.length){
       for(var j=0;j<feishuData.length;j++){
         var row = feishuData[j];
         var fk = 'feishu_'+j;
-        if(localKeys[fk]) continue; // 去重
+        if(localKeys[fk]) continue;
         var typeStr = String(row['问题类型'] || '');
         var cat = _TYPE_MAP[typeStr] || 'baseline_error';
-        lib.push({
-          key: fk,
-          host: row['主播'] || '',
-          cat: cat,
-          text: row['问题描述'] || '',
-          date: row['日期'] || '',
-          priority: ''
-        });
+        lib.push({key:fk, host:row['主播']||'', cat:cat, text:row['问题描述']||'', date:row['日期']||'', priority:''});
       }
     }
     return lib;
   }
+  window.renderProblemLib = function(){
+    _origPL.apply(this, arguments);
+    // 异步等待飞书数据加载完成后，再增强培训清单
+    var ensure = (typeof v4FsEnsure === 'function') ? v4FsEnsure : null;
+    if(ensure){
+      ensure('tbl_tblORA9bSl8M63EO').then(function(){ v4EnhanceTrainingTable(); });
+    } else {
+      // 兜底：立即尝试（数据可能已通过其他方式加载）
+      setTimeout(v4EnhanceTrainingTable, 200);
+    }
+  };
   function v4EnhanceTrainingTable(){
     var box = $('problemLibBlock'); if(!box) return;
-    // 按表头文字「问题分布」精确定位培训清单表（跨主播共性问题表也是4列，不能用th数量）
     var tbls = box.querySelectorAll('table'), trainTbl = null;
     for(var ti=0;ti<tbls.length;ti++){
       var ths = tbls[ti].querySelectorAll('th'), hit = false;
@@ -937,11 +934,9 @@ document.addEventListener('click', function(ev){
       if(hit){ trainTbl = tbls[ti]; break; }
     }
     if(!trainTbl) return;
-    // 用合并后的数据源（localStorage + 飞书兜底）
     var lib = v4GetMergedLib();
     var sum = (typeof summarizeProblems === 'function') ? summarizeProblems(lib) : null;
     if(!sum || !sum.byHost) return;
-    // 把「问题分布」列的纯文本替换为可点击芯片+隐藏详情
     var rows = trainTbl.querySelectorAll('tr');
     for(var ri=0;ri<rows.length;ri++){
       var cells = rows[ri].querySelectorAll('td');
