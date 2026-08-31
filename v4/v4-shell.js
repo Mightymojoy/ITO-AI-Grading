@@ -882,7 +882,7 @@ document.addEventListener('click', function(ev){
     t = t.parentNode;
   }
 });
-// ---- v4.8.0 问题库培训清单：问题分布可点击展开具体问题描述 ----
+// ---- v4.8.2 问题库培训清单：新增「问题描述」列，直接列出每条具体描述 ----
 (function(){
   if(typeof renderProblemLib !== 'function') return;
   var _origPL = renderProblemLib;
@@ -890,11 +890,9 @@ document.addEventListener('click', function(ev){
     _origPL.apply(this, arguments);
     v4EnhanceTrainingTable();
   };
-  var _TN = {sellpoint_miss:'讲品覆盖', baseline_error:'信息准确性', low_ability:'能力短板'};
   function v4EnhanceTrainingTable(){
     var box = $('problemLibBlock'); if(!box) return;
-    // 不能用「th 数量===4」定位：跨主播共性问题表也是 4 列，会抢先命中
-    // 必须按表头文字精确匹配「问题分布」
+    // 按表头文字「问题分布」精确定位培训清单表（跨主播共性问题表也是4列，不能用th数量）
     var tbls = box.querySelectorAll('table'), trainTbl = null;
     for(var ti=0;ti<tbls.length;ti++){
       var ths = tbls[ti].querySelectorAll('th'), hit = false;
@@ -907,35 +905,42 @@ document.addEventListener('click', function(ev){
     var lib = (typeof getProblemLib === 'function') ? getProblemLib() : [];
     var sum = (typeof summarizeProblems === 'function') ? summarizeProblems(lib) : null;
     if(!sum || !sum.byHost) return;
+    // 表头：在「问题分布」和「P0 重点」之间插入「问题描述」
+    var headerRow = trainTbl.querySelector('tr');
+    if(headerRow){
+      var ths2 = headerRow.querySelectorAll('th');
+      var p0Th = ths2[ths2.length-1]; // 最后一个th是P0重点
+      var newTh = document.createElement('th');
+      newTh.textContent = '问题描述';
+      headerRow.insertBefore(newTh, p0Th);
+    }
+    // 每行数据：在倒数第2个位置插入问题描述td
     var rows = trainTbl.querySelectorAll('tr');
     for(var ri=0;ri<rows.length;ri++){
       var cells = rows[ri].querySelectorAll('td');
       if(cells.length < 3) continue;
       var hn = cells[0].textContent.trim(), hd = sum.byHost[hn];
       if(!hd) continue;
-      var distCell = cells[2], cats = Object.keys(hd.counts), html = '';
-      for(var ci=0;ci<cats.length;ci++){
-        var cat = cats[ci], cnt = hd.counts[cat], dn = _TN[cat] || cat;
-        var items = hd.items.filter(function(it){ return it.cat === cat; });
-        var detail = items.map(function(it){ return '· ' + (it.text || ''); }).join('\n');
-        html += '<span class="prob-chip" data-action="toggleProbDetail" style="display:inline-block;margin:2px 4px 2px 0;padding:1px 7px;border-radius:10px;font-size:11px;border:1px solid var(--gold);color:var(--gold);cursor:pointer;white-space:nowrap">' + esc(dn + '×' + cnt) + '</span>';
-        html += '<span class="prob-detail" style="display:none;margin:4px 0 8px 0;padding:6px 10px;background:var(--bg2);border-left:3px solid var(--gold);font-size:11.5px;line-height:1.75;color:var(--text1)">' + esc(detail) + '</span>';
+      // 按日期倒序排列该主播的所有问题描述
+      var itemsSorted = hd.items.slice().sort(function(a,b){
+        return (b.date||'').localeCompare(a.date||'');
+      });
+      var descHtml = '';
+      for(var ii=0;ii<itemsSorted.length;ii++){
+        var it = itemsSorted[ii];
+        var catTag = it.cat === 'sellpoint_miss' ? '<span style="color:var(--gold);font-size:10px">[讲品]</span>'
+                    : it.cat === 'low_ability' ? '<span style="color:var(--danger);font-size:10px">[能力]</span>'
+                    : '<span style="color:#888;font-size:10px">[' + esc(it.cat) + ']</span>';
+        descHtml += '<div style="margin-bottom:3px;line-height:1.5;font-size:11.5px">' + catTag + ' ' + esc(it.text || '') + '</div>';
       }
-      distCell.innerHTML = html;
+      var p0Cell = cells[cells.length-1]; // P0重点
+      var newTd = document.createElement('td');
+      newTd.style.cssText = 'font-size:11.5px;color:var(--text2);max-width:320px;vertical-align:top';
+      newTd.innerHTML = descHtml;
+      rows[ri].insertBefore(newTd, p0Cell);
     }
   }
 })();
-// 点击分类芯片 → 展开/收起该分类的具体问题描述
-document.addEventListener('click', function(ev){
-  var t = ev.target;
-  if(t.getAttribute && t.getAttribute('data-action') === 'toggleProbDetail'){
-    ev.preventDefault(); ev.stopPropagation();
-    var d = t.nextElementSibling;
-    if(!d || !d.classList.contains('prob-detail')) return;
-    if(d.style.display === 'none'){ d.style.display = 'block'; t.style.background = 'var(--gold)'; t.style.color = '#fff'; }
-    else { d.style.display = 'none'; t.style.background = ''; t.style.color = 'var(--gold)'; }
-  }
-});
 // 重新载入：清内存缓存 + 递增穿透参数，确保读到磁盘上刚同步出来的最新数据
 function v4FsReload(){
   window.V4FS = window.V4FS || {};
