@@ -145,7 +145,7 @@ function v4RenderSettings(){
   document.getElementById('set-read').value   = localStorage.getItem('feishu_data_dir') || 'data';
   // 版本口径
   document.getElementById('set-versions').innerHTML =
-    '工作台版本：<b>v4.7.5</b>（壳层）<br>' +
+    '工作台版本：<b>v4.7.6</b>（壳层）<br>' +
     '评分引擎：<b>v3.9</b>（app-core.js · 07a97a7 字符级零改动）<br>' +
     '评分标准：<b>' + esc(GRADING_STANDARD.version) + '</b> · ' + esc(GRADING_STANDARD.meta.name) + '<br>' +
     '评分口径：' + esc(GRADING_STANDARD.meta.scoring) + '<br>' +
@@ -805,12 +805,26 @@ document.addEventListener('click', function(ev){
   var fk = t.getAttribute('data-fsm'), act = t.getAttribute('data-fsact'), v = t.getAttribute('data-v');
   if(act === 'month'){ V4ARCH[fk] = {month: v, day: null}; v4FeishuRender(); }
   else if(act === 'day'){ V4ARCH[fk].day = v; v4FeishuRender(); }
-  // 展开/收起长文本
-  else if(t.getAttribute('data-action') === 'toggleExpand'){
-    var sp = t.parentNode;
-    var s = sp.querySelector('.fs-short'), f = sp.querySelector('.fs-full');
-    if(s.style.display === 'none'){ s.style.display=''; f.style.display='none'; t.textContent='展开'; }
-    else { s.style.display='none'; f.style.display='inline'; t.textContent='收起'; }
+});
+// 长文本展开/收起：独立监听，不并入上面的 data-fsact 冒泡查找
+// （上面的 handler 会 while 上溯找 data-fsact，找不到就 return，塞进去永远是死代码）
+document.addEventListener('click', function(ev){
+  var t = ev.target;
+  while(t && t !== document.body){
+    if(t.getAttribute && t.getAttribute('data-action') === 'toggleExpand'){
+      ev.preventDefault();
+      ev.stopPropagation();
+      var sp = t.parentNode;
+      var s = sp.querySelector('.fs-short'), f = sp.querySelector('.fs-full');
+      if(!s || !f) return;
+      if(s.style.display === 'none'){
+        s.style.display = ''; f.style.display = 'none'; t.textContent = '展开';
+      } else {
+        s.style.display = 'none'; f.style.display = 'inline'; t.textContent = '收起';
+      }
+      return;
+    }
+    t = t.parentNode;
   }
 });
 // 重新载入：清内存缓存 + 递增穿透参数，确保读到磁盘上刚同步出来的最新数据
