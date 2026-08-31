@@ -893,8 +893,8 @@ document.addEventListener('click', function(ev){
     '情绪感染能力':'low_ability', '逻辑组织能力（流畅度）':'low_ability',
     '促单话术':'low_ability', '互动节奏':'low_ability'
   };
-  function v4BuildMergedLib(){
-    var lib = (typeof getProblemLib === 'function') ? getProblemLib() : [];
+  function v4BuildMergedLib(_origGL){
+    var lib = (typeof _origGL === 'function') ? _origGL() : [];
     var localKeys = {};
     for(var i=0;i<lib.length;i++) localKeys[lib[i].key] = 1;
     var feishuData = null;
@@ -912,7 +912,7 @@ document.addEventListener('click', function(ev){
   // 关键：patch getProblemLib 让原版 renderProblemLib 就能读到合并数据
   if(typeof getProblemLib === 'function'){
     var _origGL = getProblemLib;
-    window.getProblemLib = function(){ return v4BuildMergedLib(); };
+    window.getProblemLib = function(){ return v4BuildMergedLib(_origGL); };
   }
   window.renderProblemLib = function(){
     _origPL.apply(this, arguments);
