@@ -146,6 +146,11 @@
   .fs-tbl tbody tr:hover td{background:var(--gold-dim)}
   .fs-tbl .num{text-align:right;font-variant-numeric:tabular-nums}
   .fs-tbl .fs-g{display:inline-block;min-width:22px;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;text-align:center}
+  /* 展开/收起长文本 */
+  .fs-expand{display:inline;vertical-align:baseline;line-height:1.5}
+  .fs-toggle{color:var(--gold);cursor:pointer;font-size:10.5px;margin-left:4px;text-decoration:none;border-bottom:1px dashed var(--gold);white-space:nowrap}
+  .fs-toggle:hover{color:#b08d3f;border-bottom-style:solid}
+  .fs-tbl td:has(.fs-expand){white-space:normal;max-width:none;overflow:visible;text-overflow:clip}
   .fs-empty{padding:28px 16px;text-align:center;font-size:12px;color:var(--text3);line-height:1.9}
   .fs-meta{font-size:11px;color:var(--text3);margin-bottom:8px}
   .fs-steps{font-size:11.5px;color:var(--text2);line-height:2}
@@ -163,7 +168,7 @@
   <div class="v4-brand">
     <div class="t"><div class="logo"></div><span class="brand">ITO · 主播讲解评分</span></div>
     <h1>评分工作台</h1>
-    <div class="sub">v4.7.4 · 工作台模式 ｜ 引擎 v3.9 零改动</div>
+    <div class="sub">v4.7.5 · 工作台模式 ｜ 引擎 v3.9 零改动</div>
   </div>
   <nav class="v4-nav" id="v4nav">
     <div class="grp">日常</div>
@@ -194,7 +199,7 @@
 <main class="v4-main">
   <div class="v4-topbar">
     <h2 id="pageTitle">工作台首页</h2>
-    <span class="badge" id="pageBadge">v4.7.4</span>
+    <span class="badge" id="pageBadge">v4.7.5</span>
     <div class="tb-right"><span id="tbToday"></span></div>
   </div>
 
@@ -500,7 +505,7 @@
     </div>
   </section>
 
-  <div class="ft">ITO · 主播讲解评分工作台 v4.7.4 ｜ 评分引擎 = v3.9（07a97a7）字符级零改动 ｜ 原系统 v0.10 / v3 均不受影响</div>
+  <div class="ft">ITO · 主播讲解评分工作台 v4.7.5 ｜ 评分引擎 = v3.9（07a97a7）字符级零改动 ｜ 原系统 v0.10 / v3 均不受影响</div>
 </main>
 
 <script src="../v3/standard.js?v=4.7.4"></script>

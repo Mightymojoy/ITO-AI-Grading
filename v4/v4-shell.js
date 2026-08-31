@@ -145,7 +145,7 @@ function v4RenderSettings(){
   document.getElementById('set-read').value   = localStorage.getItem('feishu_data_dir') || 'data';
   // 版本口径
   document.getElementById('set-versions').innerHTML =
-    '工作台版本：<b>v4.7.4</b>（壳层）<br>' +
+    '工作台版本：<b>v4.7.5</b>（壳层）<br>' +
     '评分引擎：<b>v3.9</b>（app-core.js · 07a97a7 字符级零改动）<br>' +
     '评分标准：<b>' + esc(GRADING_STANDARD.version) + '</b> · ' + esc(GRADING_STANDARD.meta.name) + '<br>' +
     '评分口径：' + esc(GRADING_STANDARD.meta.scoring) + '<br>' +
@@ -784,7 +784,13 @@ function v4FeishuTable(rows, cols, dateCol){
       var gm = v.match(/^\s*([A-E])级?\s*$/);
       var cell;
       if(gm) cell = '<span class="fs-g g' + gm[1] + '">' + gm[1] + '</span>';
-      else { var t = v.length > 80 ? v.slice(0,80) + '…' : v; cell = esc(t); }
+      else {
+        if(v.length > 80){
+          var short = esc(v.slice(0,80));
+          var full = esc(v);
+          cell = '<span class="fs-expand"><span class="fs-short">' + short + '</span><span class="fs-full" style="display:none">' + full + '</span> <a class="fs-toggle" data-action="toggleExpand">展开</a></span>';
+        } else { cell = esc(v); }
+      }
       h += '<td' + cls + ' title="' + esc(v).replace(/"/g, '&quot;') + '">' + cell + '</td>';
     }
     h += '</tr>';
@@ -799,6 +805,13 @@ document.addEventListener('click', function(ev){
   var fk = t.getAttribute('data-fsm'), act = t.getAttribute('data-fsact'), v = t.getAttribute('data-v');
   if(act === 'month'){ V4ARCH[fk] = {month: v, day: null}; v4FeishuRender(); }
   else if(act === 'day'){ V4ARCH[fk].day = v; v4FeishuRender(); }
+  // 展开/收起长文本
+  else if(t.getAttribute('data-action') === 'toggleExpand'){
+    var sp = t.parentNode;
+    var s = sp.querySelector('.fs-short'), f = sp.querySelector('.fs-full');
+    if(s.style.display === 'none'){ s.style.display=''; f.style.display='none'; t.textContent='展开'; }
+    else { s.style.display='none'; f.style.display='inline'; t.textContent='收起'; }
+  }
 });
 // 重新载入：清内存缓存 + 递增穿透参数，确保读到磁盘上刚同步出来的最新数据
 function v4FsReload(){
