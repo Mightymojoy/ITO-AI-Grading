@@ -160,14 +160,13 @@ function v4RenderSettings(){
     if(!byStudio[st]) byStudio[st] = [];
     byStudio[st].push({name:name, o:hosts[name]});
   }
-  var h = '<table><tr><th style="width:18%">主播</th><th style="width:22%">直播间</th><th style="width:14%">状态</th></tr>';
+  var h = '<table><tr><th style="width:24%">主播</th><th>直播间</th></tr>';
   var order = ['云端商务家','轻熟质享客','摩登新贵女','天猫直播间'];
   for(var oi=0; oi<order.length; oi++){
     var list = byStudio[order[oi]] || [];
     for(var li=0; li<list.length; li++){
       var it = list[li];
-      var stc = it.o.status === '确认' ? 'var(--ok)' : (it.o.status === '不合适' ? 'var(--danger)' : 'var(--warn)');
-      h += '<tr><td><b>' + esc(it.name) + '</b></td><td>' + esc(it.o.studio) + '</td><td><b style="color:' + stc + '">' + esc(it.o.status) + '</b></td></tr>';
+      h += '<tr><td><b>' + esc(it.name) + '</b></td><td>' + esc(it.o.studio) + '</td></tr>';
     }
   }
   document.getElementById('set-outfit').innerHTML = h + '</table>';
