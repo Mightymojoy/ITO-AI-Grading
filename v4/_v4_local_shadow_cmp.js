@@ -9,16 +9,18 @@ const { chromium } = require('C:/Users/QwQ/.workbuddy/binaries/node/workspace/no
 
 const EXE = 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const URL = 'http://127.0.0.1:8791/v4/index.html';
-const SRT_BASE = 'D:/E盘文件/26年7月14日 更新存储路径/主播AI评分系统_开发/grading-v2/asr/tmp/batch_0820';
-const STUDIO = '轻熟质享客';
-const DATE = '2026-08-20';
+const SRT_BASE_DEFAULT = 'D:/E盘文件/26年7月14日 更新存储路径/主播AI评分系统_开发/grading-v2/asr/tmp/batch_0820';
+const REPORT_PATH = path.join(__dirname, '_shadow_report.md');
 
-const HOSTS = [
-  { name: '任佳瑛', src: path.join(SRT_BASE, '任佳瑛', '任佳瑛.srt') },
-  { name: '曲姝锜', src: path.join(SRT_BASE, '曲姝锜', '曲姝锜.srt') },
-  { name: '毕政扬', src: path.join(SRT_BASE, '毕政扬', '毕政扬.srt') }
-  // 王金鸽 08-20 缺 SRT，跳过
+// 用法：node v4/_v4_local_shadow_cmp.js [hostsJSON] [append|overwrite]
+//   hostsJSON: JSON 数组 [{name, src, date, studio}]，省略则跑默认 08-20 轻熟质享客
+//   append: 'append' 追加到现有 _shadow_report.md；'overwrite' 覆盖（默认）
+const HOSTS = process.argv[2] ? JSON.parse(process.argv[2]) : [
+  { name: '任佳瑛', src: path.join(SRT_BASE_DEFAULT, '任佳瑛', '任佳瑛.srt'), date: '2026-08-20', studio: '轻熟质享客' },
+  { name: '曲姝锜', src: path.join(SRT_BASE_DEFAULT, '曲姝锜', '曲姝锜.srt'), date: '2026-08-20', studio: '轻熟质享客' },
+  { name: '毕政扬', src: path.join(SRT_BASE_DEFAULT, '毕政扬', '毕政扬.srt'), date: '2026-08-20', studio: '轻熟质享客' }
 ];
+const APPEND = process.argv[3] === 'append';
 
 const MODES = [
   { key: 'kw',  label: '关键词版',  enabled: '0' },
@@ -58,7 +60,7 @@ async function waitSemStatus(page, wantDoneOrDegrade, maxMs) {
 
   for (const h of HOSTS) {
     // 复制改名到 v4（autoDetectMeta 期望 主播_日期_直播间_原文.srt）
-    const dst = path.join(__dirname, `_${h.name}_${DATE}_${STUDIO}_原文.srt`);
+    const dst = path.join(__dirname, `_${h.name}_${h.date}_${h.studio}_原文.srt`);
     fs.copyFileSync(h.src, dst);
 
     for (const m of MODES) {
@@ -142,22 +144,29 @@ async function waitSemStatus(page, wantDoneOrDegrade, maxMs) {
     );
   }
 
-  // 落 Markdown 报告
-  let md = '# 08-20 影子回归 双轨对照（语义版 vs 关键词版）\n\n';
-  md += '> 自动生成于 ' + new Date().toISOString() + ' · 本地工作台 v4.9.0\n\n';
-  md += '## 对照表\n\n| 主播 | 关键词版 总分/c1 | 语义版 总分/c1 | 总分差 | c1差 | 自动识别产品 |\n|---|---|---|---|---|---|\n';
+  // 落 Markdown 报告（追加或覆盖）
+  let md = '## 批次：' + HOSTS.map(h => h.name + '@' + h.studio).join(' / ') + '\n\n';
+  md += '> 生成于 ' + new Date().toISOString() + ' · 本地工作台 v4.9.0\n\n';
+  md += '### 对照表\n\n| 主播 | 关键词版 总分/c1 | 语义版 总分/c1 | 总分差 | c1差 | 自动识别产品 |\n|---|---|---|---|---|---|\n';
   for (const name of HOSTS.map(h => h.name)) {
     const k = byHost[name].kw, s = byHost[name].sem;
     const dT = (typeof k.total === 'number' && typeof s.total === 'number') ? (s.total - k.total) : '-';
     const dC = (typeof k.c1 === 'number' && typeof s.c1 === 'number') ? (s.c1 - k.c1) : '-';
     md += '| ' + name + ' | ' + k.total + ' / ' + k.c1 + ' | ' + s.total + ' / ' + s.c1 + ' | ' + dT + ' | ' + dC + ' | ' + (s.product || '-') + ' |\n';
   }
-  md += '\n## 各模式状态条\n\n| 主播 | 模式 | 状态条 |\n|---|---|---|\n';
+  md += '\n### 状态条\n\n| 主播 | 模式 | 状态条 |\n|---|---|---|\n';
   results.forEach(r => { md += '| ' + r.host + ' | ' + r.modeLabel + ' | ' + (r.status || '').slice(0, 100) + ' |\n'; });
-  md += '\n## 耗时\n\n| 主播 | 模式 | 耗时 |\n|---|---|---|\n';
+  md += '\n### 耗时\n\n| 主播 | 模式 | 耗时 |\n|---|---|---|\n';
   results.forEach(r => { md += '| ' + r.host + ' | ' + r.modeLabel + ' | ' + r.ms + 'ms |\n'; });
-  fs.writeFileSync(path.join(__dirname, '_shadow_report.md'), md, 'utf8');
-  console.log('\n报告已落 v4/_shadow_report.md');
+
+  if (APPEND && fs.existsSync(REPORT_PATH)) {
+    fs.appendFileSync(REPORT_PATH, '\n---\n\n' + md, 'utf8');
+    console.log('\n报告已追加到 ' + REPORT_PATH);
+  } else {
+    const head = '# 影子回归报告（语义版 vs 关键词版）\n\n多批次累计快照。\n\n';
+    fs.writeFileSync(REPORT_PATH, head + md, 'utf8');
+    console.log('\n报告已落 ' + REPORT_PATH);
+  }
 
   if (pageErrors.length) {
     console.log('\n页面错误(' + pageErrors.length + '):');
