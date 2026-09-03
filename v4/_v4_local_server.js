@@ -8,9 +8,18 @@
 // 与云端差异：判定接口与页面同源（无 CORS）、Key 读本地文件；其余逻辑与线上 api/semantic-judge.js 完全一致
 // =====================================================
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
+
+// v4.9.1：本地飞书写回端点 → 云端代理（同源接管，杜绝 3712 未启导致的主播日报漏写）
+// 前端 app-core.js 在 host 为 127.0.0.1/localhost 时默认把 FEISHU_FILL_URL/SYNC_URL
+// 指向 127.0.0.1:3712（v3 asr 端口）——本地一体化模式（8791）下 3712 未启则 fetch 静默失败。
+// 本服务新增 /api/feishu-fill、/api/feishu-week-month、/api/feishu-sync 三条 POST 代理，
+// 原样转发到云端 Vercel 函数（飞书凭据所在），页面请求与响应均同源，免跨域。
+const CLOUD_HOST = 'cloud-five-pi.vercel.app';
+const PROXY_PATHS = ['/api/feishu-fill', '/api/feishu-week-month', '/api/feishu-sync'];
 
 const ROOT = path.join(__dirname, '..');
 const PORT = Number(process.argv[2]) || 8791;
@@ -91,11 +100,44 @@ function routeJudge(req, res) {
   });
 }
 
+// ---- 飞书写回云端代理：POST body 原样转发 cloud-five-pi，响应原样回写 ----
+function proxyToCloud(req, res, apiPath) {
+  const chunks = [];
+  req.on('data', c => chunks.push(c));
+  req.on('error', e => sendText(res, 400, JSON.stringify({ ok:false, error:'请求读取失败: ' + e.message }), 'application/json; charset=utf-8'));
+  req.on('end', () => {
+    const body = Buffer.concat(chunks);
+    const opt = {
+      hostname: CLOUD_HOST,
+      port: 443,
+      path: apiPath,
+      method: 'POST',
+      headers: {
+        'Content-Type': req.headers['content-type'] || 'application/json; charset=utf-8',
+        'Content-Length': body.length
+      }
+    };
+    const pReq = https.request(opt, pRes => {
+      const out = [];
+      pRes.on('data', c => out.push(c));
+      pRes.on('end', () => {
+        const buf = Buffer.concat(out);
+        try { res.writeHead(pRes.statusCode || 200, { 'Content-Type': pRes.headers['content-type'] || 'application/json; charset=utf-8' }); } catch (e) {}
+        res.end(buf);
+      });
+    });
+    pReq.on('error', e => sendText(res, 502, JSON.stringify({ ok:false, error:'云端代理不可达: ' + e.message }), 'application/json; charset=utf-8'));
+    pReq.setTimeout(30000, () => { try { pReq.destroy(new Error('云端代理超时(30s)')); } catch (e) {} });
+    pReq.end(body);
+  });
+}
+
 const server = http.createServer((req, res) => {
   let urlPath;
   try { urlPath = decodeURIComponent(String(req.url || '/').split('?')[0]); }
   catch (e) { return sendText(res, 400, 'bad url'); }
   if (urlPath === '/semantic-judge') return routeJudge(req, res);
+  if (req.method === 'POST' && PROXY_PATHS.indexOf(urlPath) !== -1) return proxyToCloud(req, res, urlPath);
   if (req.method === 'POST') return sendText(res, 404, 'not found');
   serveStatic(req, res, urlPath);
 });
@@ -108,6 +150,7 @@ server.listen(PORT, '127.0.0.1', () => {
   lines.push('  ─────────────────────────────────────────────────────');
   lines.push('  工作台地址 : http://127.0.0.1:' + PORT + '/v4/index.html');
   lines.push('  判定接口   : http://127.0.0.1:' + PORT + '/semantic-judge（与页面同源，免跨域）');
+  lines.push('  飞书写回   : /api/feishu-fill｜feishu-week-month｜feishu-sync → 云端代理（同源接管，无需 3712）');
   lines.push('  评分公式   : level × quality × 20（不动）；语义只覆写"判卷依据"');
   lines.push('  DeepSeek   : ' + (hasKey ? 'Key 已注入 ✓ 语义判定可用' : 'Key 未配置 ✗ 自动降级为关键词版'));
   lines.push('');

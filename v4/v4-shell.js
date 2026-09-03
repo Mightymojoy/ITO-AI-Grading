@@ -32,6 +32,30 @@ var V4_PAGES = {
   history:   '历史评分',
   settings:  '设置'
 };
+// ---------- v4.9.1：本地一体化工作台（8791）飞书写回端点接管 ----------
+// app-core.js 在 host 为 127.0.0.1/localhost 时把 FEISHU_FILL_URL / FEISHU_SYNC_URL
+// 默认指向 127.0.0.1:3712（v3 asr 端口）。本地一体化模式（本服务 8791）下 3712 未启
+// → autoFillFeishu / syncFeishuLibs / syncWeekMonth 的 fetch 静默失败 → 主播日报漏写。
+// 本模块纯加法覆盖：本地 http(s) 打开（非 3712 端口）→ 同源 /api/feishu-* →
+// 由一体化服务代理转发云端 Vercel 函数（免跨域、不依赖 3712、双击即用）。
+// localStorage.feishu_fill_url / feishu_sync_url 手动覆盖仍最优先。
+(function(){
+  try{
+    if(typeof location === 'undefined' || typeof window === 'undefined') return;
+    var isLocalHttp = (location.protocol === 'http:' || location.protocol === 'https:') &&
+      (location.hostname === '127.0.0.1' || location.hostname === 'localhost');
+    if(!isLocalHttp) return;               // 线上 GitHub Pages / Vercel：走默认云端端点，不接管
+    if(location.port === '3712') return;   // 直接由 v3 asr 服务托管页面：保持原样
+    var base = location.origin;
+    if(typeof FEISHU_FILL_URL !== 'undefined'){
+      window.FEISHU_FILL_URL = localStorage.getItem('feishu_fill_url') || base + '/api/feishu-fill';
+    }
+    if(typeof FEISHU_SYNC_URL !== 'undefined'){
+      window.FEISHU_SYNC_URL = localStorage.getItem('feishu_sync_url') || base + '/api/feishu-sync';
+    }
+    console.log('[v4.9.1] 本地一体化模式：飞书写回端点已接管 → fill=' + window.FEISHU_FILL_URL + ' sync=' + window.FEISHU_SYNC_URL);
+  }catch(e){ console.log('飞书端点接管跳过:', e.message); }
+})();
 // v4.4：hash 支持参数（#/feishu?t=daily）
 function v4HashParts(){
   var raw = (location.hash || '').replace(/^#\/?/, '');
