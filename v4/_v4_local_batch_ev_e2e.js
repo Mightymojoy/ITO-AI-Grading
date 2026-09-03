@@ -23,7 +23,15 @@ const DST2 = path.join(__dirname, '_赵亚男_2026-08-18_综合_原文.srt');
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const errors = [];
   page.on('pageerror', e => errors.push('PAGEERR: ' + e.message));
-  page.on('console', m => { if (m.type() === 'error') errors.push('CONSOLE: ' + m.text().slice(0, 200)); });
+  page.on('console', m => {
+    if (m.type() === 'error') {
+      const loc = m.location();
+      errors.push('CONSOLE: ' + m.text().slice(0, 150) + (loc && loc.url ? ' @ ' + loc.url : ''));
+    }
+  });
+  page.on('requestfailed', req => {
+    errors.push('REQFAIL: ' + req.url() + ' · ' + (req.failure() ? req.failure().errorText : '?'));
+  });
 
   await page.goto(URL, { waitUntil: 'domcontentloaded' });
   await page.evaluate(() => {
