@@ -11,7 +11,7 @@ const https = require('https');
 const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY || '';
 const MODEL = 'deepseek-chat';
 const MAX_TOKENS = 6000;          // 46 子点证据包 JSON 安全余量
-const TEMPERATURE = 0.2;          // 判定要可复现，低温
+const TEMPERATURE = 0;            // 判定确定性（老大拍板 09-03：0.2→0，消除同 SRT 两次判分抖动）
 
 // ---- 系统指令（= Prompt 稿 §1 铁律 + §3 四态 + §4 特殊规则 + §2 输出契约）----
 const SYSTEM = [
