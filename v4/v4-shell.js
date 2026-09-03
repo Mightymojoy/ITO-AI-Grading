@@ -1060,6 +1060,17 @@ document.addEventListener('DOMContentLoaded', function(){
     try{ return localStorage.getItem('semantic_enabled') !== '0'; }catch(e){ return true; }
   }
   function semApiUrl(){
+    // 本地化工作台自动指向：页面由本地一体化服务打开（127.0.0.1 / localhost）时，
+    // 判定接口与页面同源 → 直接用 location.origin + /semantic-judge，无需手动配（仍允许 localStorage 手动覆盖）
+    var h = '';
+    try{ h = window.location.hostname; }catch(e){}
+    if(h === '127.0.0.1' || h === 'localhost'){
+      try{
+        var ls = localStorage.getItem('semantic_api_url');
+        if(ls) return ls;
+      }catch(e){}
+      return window.location.origin + '/semantic-judge';
+    }
     try{ return localStorage.getItem('semantic_api_url') || V4S.CFG.apiUrl; }catch(e){ return V4S.CFG.apiUrl; }
   }
 
