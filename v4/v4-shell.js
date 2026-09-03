@@ -400,7 +400,7 @@ function v4ArchRender(type){
     h += '<div style="font-size:11px;color:var(--text3);margin-bottom:4px">点击行内「查看完整评分记录」展开该次评分的模块分卡与逐子点判定证据；再点收起</div>';
     for(var e2=0;e2<rows.length;e2++){
       var r = rows[e2];
-      var det = v4DetailByTs(r.ts);
+      var det = v4DetailByTs(r.ts, r.host);   // v4.10.2：双键匹配（ts+host），防批量同 ts 错配
       var uid = 'v4his-' + String(r.ts) + '-' + e2;
       h += '<div class="v4his-row">'
         + '<input type="checkbox" class="v4his-tg" id="' + uid + '">'
@@ -607,11 +607,14 @@ function v4DetailHTML(det){
   if(!any) h += '<div class="v4his-none">该记录无模块明细存档</div>';
   return h;
 }
-// 从 detail 库按 ts 取完整记录（无 → 返回 null）
-function v4DetailByTs(ts){
+// 从 detail 库按 ts + host 双键取完整记录（无 → 返回 null）
+// v4.10.2：仅按 ts 匹配在批量同毫秒场景会错配（两条摘要 ts 相同 → 返回第一条）→ 追加 host 校验
+function v4DetailByTs(ts, host){
   try{
     var ds = v4ReadLS('grading_detail_v1', '[]');
-    for(var i=0;i<ds.length;i++){ if(String(ds[i].ts) === String(ts)) return ds[i]; }
+    for(var i=0;i<ds.length;i++){
+      if(String(ds[i].ts) === String(ts) && (!host || ds[i].host === host)) return ds[i];
+    }
   }catch(e){}
   return null;
 }
