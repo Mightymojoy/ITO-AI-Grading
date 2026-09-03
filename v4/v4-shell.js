@@ -1240,6 +1240,8 @@ document.addEventListener('DOMContentLoaded', function(){
     }catch(e){ console.error('[v4.9] 语义落库异常:', e); }
     // 重渲染（单主播报告 / 批量比较卡 / 各库面板）
     try{ if(typeof renderResult === 'function') renderResult(r); }catch(e){}
+    // v4.9.2：重渲染后为每张语义判定卡注入「判定依据」逐子点证据（有依可寻）
+    try{ attachSemEvidence(r); }catch(e){ console.error('[v4.9.2] attachSemEvidence:', e); }
     try{ renderGoldenLib(); }catch(e){}
     try{ renderHistoryLib(); }catch(e){}
     try{ if(typeof renderProblemLib === 'function') renderProblemLib(); }catch(e){}
@@ -1265,6 +1267,116 @@ document.addEventListener('DOMContentLoaded', function(){
     } else if(sem.degraded){
       semStatusText('⚠ 语义判定暂不可用（' + (sem.reason||'未知') + '）——本次已降级为关键词规则，请检查云端 /api/semantic-judge', '#f6e3dd', '#b3452e');
     }
+  }
+
+  // ---- 判定依据明细 v4.9.2：每张语义判定卡可展开查看逐子点证据（有依可寻） ----
+  // 证据源：V4S.apply 覆写后 s.complete.sem = {mode,passed,total,full,half,states,evs}
+  // evs 元素：{subId,state,confidence,quoteTs,quote,reason}（模型真实返回，逐条展示）
+  var _semEvStyleInjected = false;
+  function semEvEnsureStyle(){
+    if(_semEvStyleInjected) return;
+    _semEvStyleInjected = true;
+    try{
+      var st = document.createElement('style');
+      st.textContent = '#modules .semEvTg{display:none}'
+        + '#modules .semEvLb{display:block;cursor:pointer;font-size:11px;color:#9a7b2d;margin-top:6px;user-select:none;-webkit-user-select:none}'
+        + '#modules .semEvLb:hover{color:#c9a962}'
+        + '#modules .semEvLb:before{content:"\\25B8  "}'
+        + '#modules .semEvTg:checked + .semEvLb:before{content:"\\25BE  "}'
+        + '#modules .semEvBd{display:none;margin-top:6px;border:1px solid #efe6d2;background:#fdfbf4;border-radius:6px;padding:6px 10px}'
+        + '#modules .semEvTg:checked + .semEvLb + .semEvBd{display:block}'
+        + '.semEvRow{font-size:11.5px;line-height:1.6;padding:4px 0;border-bottom:1px dashed #efe6d2;word-break:break-all}'
+        + '.semEvRow:last-child{border-bottom:none}'
+        + '.semEvTag{display:inline-block;padding:0 6px;border-radius:4px;font-size:10.5px;margin-right:6px;vertical-align:1px}'
+        + '.semEvPt{font-weight:600;color:#5a4632;margin-right:8px}'
+        + '.semEvTs{color:#b0a48e;font-size:10.5px;margin-left:4px}'
+        + '.semEvQ{color:#6b5b45;display:block;margin-top:2px}'
+        + '.semEvRs{color:#9a927f;font-size:10.5px;margin-top:1px}';
+      document.head.appendChild(st);
+    }catch(e){}
+  }
+  function semEvMeta(state){
+    switch(state){
+      case 'HIT':     return {t:'达标', c:'#3d6b35', b:'#e8ece4'};
+      case 'EQUIV':   return {t:'换说法达标', c:'#2f5f8f', b:'#e3edf7'};
+      case 'NEGATE':  return {t:'讲错', c:'#b3452e', b:'#f6e3dd'};
+      case 'UNCLEAR': return {t:'存疑待人工', c:'#9a7b2d', b:'#f6f0d8'};
+      case 'MISS':    return {t:'未讲到', c:'#7d828b', b:'#eef0f3'};
+      default:        return {t:String(state||'?'), c:'#7d828b', b:'#eef0f3'};
+    }
+  }
+  function semPointNameOf(stdId, pId){
+    try{
+      var def = V4S.POINTS[stdId] || V4S.POINTS_22;
+      if(def && def.points){ for(var i=0;i<def.points.length;i++){ if(def.points[i].id === pId) return def.points[i].name; } }
+    }catch(e){}
+    return pId;
+  }
+  function semEvidenceHTML(s, sem){
+    var stdId = String(s.id);
+    var def = null;
+    try{ def = V4S.POINTS[stdId] || (stdId === '2.2' ? V4S.POINTS_22 : null); }catch(e){}
+    var order = [], seen = {};
+    if(def && def.points){ for(var i=0;i<def.points.length;i++) order.push(def.points[i].id); }
+    for(var e=0;e<(sem.evs||[]).length;e++){            // 兜底：def 未覆盖但模型判到的子点也列出
+      var pid = String((sem.evs[e].subId || '').split('-')[1] || '');
+      if(pid && order.indexOf(pid) < 0) order.push(pid);
+    }
+    var rows = '';
+    for(var o=0;o<order.length;o++){
+      var pId = order[o];
+      if(seen[pId]) continue; seen[pId] = 1;
+      var ev = null;
+      for(var x=0;x<(sem.evs||[]).length;x++){ if(String(sem.evs[x].subId) === stdId + '-' + pId){ ev = sem.evs[x]; break; } }
+      var st = ev ? ev.state : (sem.states ? (sem.states[pId] || 'MISS') : 'MISS');
+      var meta = semEvMeta(st);
+      var quote = (ev && ev.quote) ? ev.quote : '';
+      var reason = (ev && ev.reason) ? ev.reason : (st === 'MISS' ? '未发现对应原句（模型未给出证据）' : '');
+      var ts = (ev && ev.quoteTs) ? ev.quoteTs : '';
+      var conf = (ev && ev.confidence != null) ? (' · 置信 ' + Math.round(Number(ev.confidence) * 100) + '%') : '';
+      rows += '<div class="semEvRow">'
+        + '<span class="semEvTag" style="color:' + meta.c + ';background:' + meta.b + '">' + meta.t + '</span>'
+        + '<span class="semEvPt">' + stdId + '-' + pId + ' ' + esc(semPointNameOf(stdId, pId)) + '</span>'
+        + ((ts || conf) ? '<span class="semEvTs">' + esc(ts) + conf + '</span>' : '')
+        + (quote ? '<span class="semEvQ">「' + esc(quote) + '」</span>' : '')
+        + (reason ? '<span class="semEvRs">' + esc(reason) + '</span>' : '')
+        + '</div>';
+    }
+    if(!rows) return '';
+    var subTxt = (sem.passed != null) ? ('通过 ' + sem.passed + '/' + sem.total + ' 子点达标') : ((sem.evs||[]).length + ' 条判定证据');
+    var uid = String(stdId).replace('.', '-');
+    return '<input type="checkbox" class="semEvTg" id="semEv-' + uid + '">'
+      + '<label for="semEv-' + uid + '" class="semEvLb">查看判定依据（' + subTxt + '）—— 逐子点证据原文与判定理由</label>'
+      + '<div class="semEvBd">' + rows + '</div>';
+  }
+  function attachSemEvidence(r){
+    if(!r || !r.modules) return;
+    var box = document.getElementById('modules');
+    if(!box) return;
+    var cards = box.querySelectorAll('.std');
+    if(!cards.length) return;
+    var any = false;
+    for(var mi=0; mi<r.modules.length; mi++){
+      var m = r.modules[mi];
+      if(!m || !m.standards) continue;
+      for(var si=0; si<m.standards.length; si++){
+        var s = m.standards[si];
+        var sem = (s.complete && s.complete.sem) || null;
+        if(!sem || !sem.evs || !sem.evs.length) continue;
+        var card = null;
+        for(var c=0;c<cards.length;c++){
+          var idEl = cards[c].querySelector('.std-id');
+          if(idEl && String(idEl.textContent).trim() === String(s.id)){ card = cards[c]; break; }
+        }
+        if(!card) continue;
+        var bd = card.querySelector('.std-bd');
+        if(!bd || bd.querySelector('.semEvLb')) continue;   // 防重复注入
+        semEvEnsureStyle();
+        bd.insertAdjacentHTML('beforeend', semEvidenceHTML(s, sem));
+        any = true;
+      }
+    }
+    void any;
   }
 
   // ---- 状态条（常驻 #result 顶部） ----

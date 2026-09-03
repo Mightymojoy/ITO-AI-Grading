@@ -242,7 +242,7 @@
           if(s.complete.level === 0) s.quality.score = 1;
           s.score = Math.round(s.complete.level * s.quality.score * 20);
           s.complete.detail = '语义判定 v4.9：流畅度质量 ' + q22 + '/5（冗余负证驱动）';
-          s.complete.sem = {mode:'sem', std:'2.2', evs: evList.slice(0,8)};
+          s.complete.sem = {mode:'sem', std:'2.2', evs: evList};
           continue;
         }
 
@@ -262,7 +262,7 @@
           var hit = evList.some(function(e){ return e.subId === def.id + '-' + p.id && (e.state === 'HIT' || e.state === 'EQUIV'); });
           return !hit;
         }).map(function(p){ return '未达标子点：' + p.name; });
-        s.complete.sem = { mode:'sem', passed: lr.passed, total: lr.total, states: lr.states };
+        s.complete.sem = { mode:'sem', passed: lr.passed, total: lr.total, full: lr.full, half: lr.half, states: lr.states, evs: evList };
         // 质量：沿用原关键词质量因子结果；档位封顶口径与 app-core 一致
         var qs = s.quality && s.quality.score != null ? s.quality.score : 3;
         if(lr.level === 0.5 && qs > 3) qs = 3;
@@ -397,12 +397,13 @@
   return {
     CFG: CFG,
     POINTS: POINTS,
+    POINTS_22: POINTS_22,
     buildJudges: buildJudges,
     truncate: truncate,
     levelFromEvs: levelFromEvs,
     quality22: quality22,
     apply: apply,
     recompute: recompute,
-    _v: '4.9.0'
+    _v: '4.9.2'
   };
 });
