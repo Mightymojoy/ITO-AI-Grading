@@ -1257,6 +1257,8 @@ document.addEventListener('DOMContentLoaded', function(){
           t1 = (typeof pickTop1 === 'function') ? pickTop1(all) : null;
           if(t1 && typeof syncTop1ToFeishu === 'function') syncTop1ToFeishu(all, t1);
           if(_origRC) _origRC(all);
+          // v4.9.3：批量比较卡重绘后为每张评分卡注入判定依据
+          try{ attachSemEvidence(all); }catch(e){ console.error('[v4.9.3] batch attachSemEvidence:', e); }
         }catch(e){ console.error('[v4.9] 批量 TOP1 重算异常:', e); }
         if(t1 && typeof toastErr === 'function') toastErr('语义评分全部完成｜TOP1 = ' + t1.host + '（' + t1.total + ' 分，已按语义分重算）');
       }
@@ -1349,34 +1351,46 @@ document.addEventListener('DOMContentLoaded', function(){
       + '<label for="semEv-' + uid + '" class="semEvLb">查看判定依据（' + subTxt + '）—— 逐子点证据原文与判定理由</label>'
       + '<div class="semEvBd">' + rows + '</div>';
   }
-  function attachSemEvidence(r){
-    if(!r || !r.modules) return;
-    var box = document.getElementById('modules');
-    if(!box) return;
-    var cards = box.querySelectorAll('.std');
-    if(!cards.length) return;
-    var any = false;
-    for(var mi=0; mi<r.modules.length; mi++){
-      var m = r.modules[mi];
-      if(!m || !m.standards) continue;
-      for(var si=0; si<m.standards.length; si++){
-        var s = m.standards[si];
-        var sem = (s.complete && s.complete.sem) || null;
-        if(!sem || !sem.evs || !sem.evs.length) continue;
-        var card = null;
-        for(var c=0;c<cards.length;c++){
-          var idEl = cards[c].querySelector('.std-id');
-          if(idEl && String(idEl.textContent).trim() === String(s.id)){ card = cards[c]; break; }
+  function attachSemEvidence(rOrResults){
+    if(!rOrResults) return;
+    // 兼容：单 r（每日评分 / 一键完整日报·子结果）或数组（批量 TOP1 比较卡 all）
+    var arr = Array.isArray(rOrResults) ? rOrResults : [rOrResults];
+    if(!arr.length) return;
+    // 平铺每张卡：{stdId, sem}（按 r→module→standard 顺序，匹配 DOM 顺序）
+    var list = [];
+    for(var ri=0; ri<arr.length; ri++){
+      var r = arr[ri]; if(!r || !r.modules) continue;
+      for(var mi=0; mi<r.modules.length; mi++){
+        var m = r.modules[mi]; if(!m || !m.standards) continue;
+        for(var si=0; si<m.standards.length; si++){
+          var s = m.standards[si];
+          var sem = (s && s.complete && s.complete.sem) || null;
+          if(!sem || !sem.evs || !sem.evs.length) continue;
+          list.push({ stdId: String(s.id || ''), sem: sem });
         }
-        if(!card) continue;
-        var bd = card.querySelector('.std-bd');
-        if(!bd || bd.querySelector('.semEvLb')) continue;   // 防重复注入
-        semEvEnsureStyle();
-        bd.insertAdjacentHTML('beforeend', semEvidenceHTML(s, sem));
-        any = true;
       }
     }
-    void any;
+    if(!list.length) return;
+    // 全文档扫描 .std 卡（每日评分 #modules + 批量比较卡任意容器共用 class 结构）
+    var cards = document.querySelectorAll('.std');
+    if(!cards.length) return;
+    var consumed = 0;
+    for(var c=0; c<cards.length && consumed<list.length; c++){
+      var idEl = cards[c].querySelector('.std-id');
+      if(!idEl) continue;
+      var cid = String(idEl.textContent || '').trim();
+      if(!cid) continue;
+      var match = null;
+      for(var i=consumed; i<list.length; i++){
+        if(list[i].stdId === cid){ match = list[i]; consumed = i + 1; break; }
+      }
+      if(!match) continue;
+      var bd = cards[c].querySelector('.std-bd');
+      if(!bd || bd.querySelector('.semEvLb')) continue;     // 防重复注入
+      semEvEnsureStyle();
+      var fakeS = { id: cid, complete: { sem: match.sem } };
+      bd.insertAdjacentHTML('beforeend', semEvidenceHTML(fakeS, match.sem));
+    }
   }
 
   // ---- 状态条（常驻 #result 顶部） ----
