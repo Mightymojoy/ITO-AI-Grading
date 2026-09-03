@@ -408,6 +408,7 @@ function v4ArchRender(type){
         + '<span style="min-width:78px">' + esc(r.date || '—') + '</span>'
         + '<b style="min-width:64px">' + esc(r.host || '—') + '</b>'
         + '<span style="min-width:52px;color:var(--gold)"><b>' + r.total + '</b> 分</span>'
+        + (r.c1Score !== null && r.c1Score !== undefined ? '<span style="font-size:11px;color:var(--text2);min-width:64px">c1 <b style="color:var(--ink)">' + r.c1Score + '</b></span>' : '')
         + (r.grade ? '<span style="font-size:10.5px;color:var(--text3);border:1px solid #e6ddc8;border-radius:4px;padding:0 4px">' + esc(r.grade) + '</span>' : '')
         + '<span style="font-size:11px;color:var(--text2);flex:1;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc((r.product || '—')) + '</span>'
         + '<label for="' + uid + '" class="v4his-lb">查看完整评分记录</label>'
@@ -535,7 +536,7 @@ function v4DetailSave(r){
     var dupIdx = -1;
     for(var i=0;i<ds.length;i++){ if(String(ds[i].ts) === String(ts) && ds[i].host === r.host && ds[i].date === String(r.date||'')){ dupIdx = i; break; } }
     if(dupIdx >= 0) ds[dupIdx] = det; else ds.push(det);
-    if(ds.length > 400) ds = ds.slice(ds.length - 400);
+    if(ds.length > 300) ds = ds.slice(ds.length - 300);    // v4.10.1：上限 400 → 300（每条 detail ≈10-15KB，300 条 ≈3-4MB，留余量给摘要库 + golden/problems）
     localStorage.setItem('grading_detail_v1', JSON.stringify(ds));
   }catch(e){ console.error('[v4.10] 完整评分记录存档异常:', e); }
 }
