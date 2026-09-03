@@ -111,7 +111,9 @@ server.listen(PORT, '127.0.0.1', () => {
   lines.push('  评分公式   : level × quality × 20（不动）；语义只覆写"判卷依据"');
   lines.push('  DeepSeek   : ' + (hasKey ? 'Key 已注入 ✓ 语义判定可用' : 'Key 未配置 ✗ 自动降级为关键词版'));
   lines.push('');
-  lines.push('  首次配置 Key（一次性）：把 sk- 开头的 Key 存到仓库根 sem_key_local.txt，重启本脚本即可');
+  lines.push('  首次配置 Key（一次性）：把 sk- 开头的 Key 存到文件');
+  lines.push('    ' + KEYFILE);
+  lines.push('    （已被 .gitignore 排除，绝不进仓库），重启本脚本即可');
   lines.push('  关闭本窗口 = 停止工作台');
   lines.push('');
   console.log(lines.join('\n'));
