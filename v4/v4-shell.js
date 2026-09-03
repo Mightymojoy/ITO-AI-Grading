@@ -488,15 +488,24 @@ function v4SemPointName(stdId, subId){
   }catch(e){}
   return '';
 }
-// 压缩快照（quote 截 120 / reason 截 150，防 localStorage 膨胀；上限 400 条）
+// 压缩快照（quote 截 120 / reason 截 150，防 localStorage 膨胀；上限 300 条）
+// v4.10.3：扩捕 weight/weighted/name/desc + 派生概要（核心优势/核心问题/最优能力/最弱能力/一句话总评）——对齐截图形态
 function v4DetailSnapshot(r, ts){
   var mods = [];
   for(var mi=0; mi<(r.modules||[]).length; mi++){
     var m = r.modules[mi]; if(!m || !m.standards) continue;
-    var sm = {key:String(m.key||m.id||''), name:String(m.name||m.title||m.key||''), score:(m.score!=null?m.score:null), stds:[]};
+    var sm = {key:String(m.key||m.id||''), name:String(m.name||m.title||m.key||''),
+              score:(m.score!=null?m.score:null),
+              weight:(m.weight!=null?m.weight:null),
+              weighted:(m.weighted!=null?m.weighted:null),
+              analyze:!!m.analyze, stds:[]};
     for(var si=0; si<m.standards.length; si++){
       var s = m.standards[si]; if(!s) continue;
-      var ss = {id:String(s.id||''), label:String(s.label||s.name||''), score:(s.score!=null?s.score:null), level:(s.level!=null?s.level:null)};
+      var ss = {id:String(s.id||''), label:String(s.label||s.name||''),
+                name:String(s.name||s.label||''),
+                desc:String(s.desc||''),
+                score:(s.score!=null?s.score:null),
+                level:(s.level!=null?s.level:null)};
       var sem = (s.complete && s.complete.sem) || null;
       if(sem && sem.evs && sem.evs.length){
         var evs = [];
@@ -518,8 +527,35 @@ function v4DetailSnapshot(r, ts){
   }
   var c1Score = null;
   for(var k=0;k<mods.length;k++){ if(mods[k].key === 'c1'){ c1Score = mods[k].score; break; } }
+  // 派生概要：对齐 app-core L615-634 / L658-663 公式（核心优势/问题 + 最优/最弱能力 + 一句话总评）
+  var scored = mods.filter(function(x){ return (x.weight||0) > 0; });
+  var sortedM = scored.slice().sort(function(a,b){ return (b.score||0) - (a.score||0); });
+  var best = sortedM[0], worst = sortedM[sortedM.length-1];
+  // 全局最强/最弱子标准（核心优势/核心问题）
+  var bestStd = null, worstStd = null;
+  for(var i=0;i<mods.length;i++) for(var j=0;j<mods[i].stds.length;j++){
+    var s2 = mods[i].stds[j];
+    if(!bestStd || (s2.score||0) > (bestStd.score||0)) bestStd = s2;
+    if(!worstStd || (s2.score||0) < (worstStd.score||0)) worstStd = s2;
+  }
+  var strength = '';
+  if(bestStd && (bestStd.score||0) >= 80) strength = bestStd.name + ' ' + bestStd.score + '分';
+  else strength = (best ? best.name + ' ' + best.score + '分' : '—');
+  var problem = (worstStd ? worstStd.name + ' ' + worstStd.score + '分' : '—');
+  // 一句话总评：4 条件规则（app-core L658-663 同款）
+  var tagline = '';
+  var tot = r.total || 0, g = r.grade || '';
+  if(best && (best.score||0) >= 75 && worst && (worst.score||0) <= 30) tagline = '「会讲产品，但还没形成完整成交闭环」——' + best.name + ' 明显强于 ' + worst.name;
+  else if(worst && (worst.score||0) <= 30) tagline = '「' + worst.name + '是最大短板」——需优先补齐再谈整体提升';
+  else if(tot >= 80) tagline = '「整体表现优秀，保持并精细化」';
+  else tagline = '「整体处于' + g + '级，需按改进建议逐项训练」';
+
   return {ts: ts, host: r.host, date: String(r.date||'未填'), studio: String(r.studio||''), product: String(r.product||''),
-          total: r.total, grade: String(r.grade||''), c1Score: c1Score, semUsed: !!(r.__sem && r.__sem.used), mods: mods};
+          total: r.total, grade: String(r.grade||''), c1Score: c1Score,
+          bestKey: best?best.key:null, worstKey: worst?worst.key:null,
+          bestStdId: bestStd?bestStd.id:null, worstStdId: worstStd?worstStd.id:null,
+          strength: strength, problem: problem, tagline: tagline,
+          semUsed: !!(r.__sem && r.__sem.used), mods: mods};
 }
 // 落库（在 v4.3 链 orig push 摘要后调用；同 r 对象只存一次，防 renderResult 重入重复）
 function v4DetailSave(r){
@@ -562,50 +598,116 @@ function v4HisEnsureStyle(){
 }
 // 完整评分记录 HTML（存档 detail → 模块分卡 + 每子点判定证据）
 function v4DetailHTML(det){
-  var h = '<div style="font-size:12px;color:var(--text2);margin-bottom:6px">'
-    + '<b style="color:var(--ink)">' + esc(det.host || '') + '</b>'
-    + (det.date ? ' ｜ ' + esc(det.date) : '')
-    + (det.studio ? ' ｜ ' + esc(det.studio) : '')
-    + ' ｜ 总分 <b style="color:var(--gold)">' + det.total + '</b>'
-    + (det.grade ? '（' + esc(det.grade) + ' 级）' : '')
-    + (det.semUsed ? ' ｜ <span style="color:#3d6b35">语义判定</span>' : ' ｜ <span style="color:#9a927f">关键词规则</span>')
-    + '</div>';
-  if(det.product) h += '<div style="font-size:11.5px;color:var(--text2);margin-bottom:4px">考核产品：' + esc(det.product) + '</div>';
-  var any = false;
+  // ---- v4.10.3：按截图样式重写（综合总分头 + 模块胶囊 + 子点判定三段卡）----
+  var h = '';
+  // ---- 顶部：综合总分头（截图"67/D级"大字号区）----
+  var gCl = (det.grade === 'A' || det.grade === 'B') ? 'var(--gold)' : (det.grade === 'C' ? 'var(--warn)' : 'var(--danger)');
+  h += '<div style="display:flex;gap:14px;align-items:flex-start;padding:8px 10px;background:var(--card);border:1px solid var(--border);border-radius:8px;margin-bottom:8px">'
+    + '<div style="text-align:center;flex:none">'
+    + '<div style="font-size:34px;font-weight:800;color:' + gCl + ';line-height:1">' + (det.total || 0) + '</div>'
+    + '<div style="font-size:10px;color:var(--text3);margin-top:2px">综合得分 / 100</div>'
+    + '<div style="display:inline-block;margin-top:4px;padding:1px 8px;border-radius:10px;background:' + gCl + ';color:#fff;font-size:11px;font-weight:700">' + esc(det.grade || '') + ' 级</div>'
+    + '</div>'
+    + '<div style="flex:1;min-width:0;font-size:12px;line-height:1.75;color:var(--text1)">'
+    + '<div style="font-weight:700;color:var(--ink);margin-bottom:4px">' + esc(det.host || '') + (det.studio ? ' · ' + esc(det.studio) : '') + (det.date ? ' · ' + esc(det.date) : '') + '</div>'
+    + '<div><b style="color:var(--gold)">核心优势：</b>' + esc(det.strength || '—') + '</div>'
+    + '<div><b style="color:var(--danger)">核心问题：</b>' + esc(det.problem || '—') + '</div>'
+    + (det.bestKey ? '<div><b>最优能力：</b>' + esc(v4ModNameByKey(det.mods, det.bestKey) + ' ' + v4ModScoreByKey(det.mods, det.bestKey) + ' 分') + '</div>' : '')
+    + (det.worstKey ? '<div><b>最弱能力：</b>' + esc(v4ModNameByKey(det.mods, det.worstKey) + ' ' + v4ModScoreByKey(det.mods, det.worstKey) + ' 分') + '</div>' : '')
+    + '<div><b style="color:var(--gold)">一句话总评：</b>' + esc(det.tagline || '—') + '</div>'
+    + '</div></div>';
+  if(det.product) h += '<div style="font-size:11.5px;color:var(--text2);margin-bottom:6px">考核产品：<b style="color:var(--ink)">' + esc(det.product) + '</b> ｜ ' + (det.semUsed ? '<span style="color:#3d6b35;font-weight:700">语义判定</span>' : '<span style="color:#9a927f">关键词规则</span>') + '</div>';
+  // ---- 模块胶囊区（截图"6+2 胶囊"三列布局）----
+  h += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px">';
   for(var mi=0; mi<(det.mods||[]).length; mi++){
-    var m = det.mods[mi];
-    if(!m || !m.stds || !m.stds.length) continue;
+    var m = det.mods[mi]; if(!m) continue;
+    var isAna = !(m.weight && m.weight > 0);
+    var sc = (m.score != null ? m.score : 0);
+    var scoreCl = isAna ? 'var(--text3)' : (sc >= 75 ? 'var(--ok)' : (sc < 45 ? 'var(--danger)' : 'var(--warn)'));
+    h += '<div style="text-align:center;padding:6px 4px;border:1px solid ' + (isAna ? '#e8e3d3' : 'var(--border)') + ';border-radius:6px;background:' + (isAna ? '#f6f4ee' : '#fdfbf4') + '">'
+      + '<div style="font-size:11px;color:var(--text2);line-height:1.2">' + esc(m.name || m.key || '') + '</div>'
+      + '<div style="font-size:10px;color:var(--text3);margin-top:1px">' + (isAna ? '分析项' : ('权重 ' + m.weight + '%')) + '</div>'
+      + '<div style="font-size:18px;font-weight:800;color:' + scoreCl + ';margin-top:2px">' + sc + '</div>'
+      + '<div style="font-size:10px;color:var(--text3)">' + (isAna ? '不计入总分' : ('加权 ' + m.weighted)) + '</div>'
+      + '</div>';
+  }
+  h += '</div>';
+  // ---- 能力明细 + 子点判定三段卡（截图样式）----
+  var any = false;
+  for(var mi2=0; mi2<(det.mods||[]).length; mi2++){
+    var m2 = det.mods[mi2]; if(!m2 || !m2.stds || !m2.stds.length) continue;
     any = true;
-    h += '<div style="margin-top:6px;padding:6px 8px;border:1px solid #efe6d2;border-radius:6px;background:#fdfbf4">'
-      + '<div style="font-size:11.5px;font-weight:700;margin-bottom:2px">' + esc(m.name || m.key || '')
-      + (m.score!=null ? ' —— <span style="color:var(--gold)">' + m.score + ' 分</span>' : '') + '</div>';
-    for(var si=0; si<m.stds.length; si++){
-      var s = m.stds[si];
-      h += '<div style="font-size:11.5px;margin-top:3px;line-height:1.5">'
-        + '<b style="color:#5a4632">' + esc(s.id || '') + '</b> ' + esc(s.label || '')
-        + (s.score!=null ? ' · <b>' + s.score + '</b>' : '')
-        + (s.level!=null ? '（Lv ' + s.level + '）' : '')
-        + '</div>';
-      if(s.sem && s.sem.evs && s.sem.evs.length){
-        h += '<div style="margin:1px 0 0 12px;font-size:10.5px;color:var(--text2)">';
-        for(var ei=0; ei<s.sem.evs.length; ei++){
-          var ev = s.sem.evs[ei];
-          var meta = v4SemMeta(ev.state);
-          h += '<div style="padding:2px 0;border-bottom:1px dashed #efe6d2;line-height:1.5">'
-            + '<span style="display:inline-block;padding:0 5px;border-radius:3px;font-size:10px;color:' + meta.c + ';background:' + meta.b + '">' + meta.t + '</span>'
-            + ' <span style="color:#5a4632">' + esc(ev.subId || '') + (function(){ var pn = v4SemPointName(s.id, ev.subId); return pn ? ' ' + esc(pn) : ''; })() + '</span>'
-            + ((ev.quoteTs || ev.confidence != null) ? ' <span style="color:#b0a48e">' + esc(ev.quoteTs || '') + (ev.confidence != null ? ' · 置信 ' + Math.round(Number(ev.confidence) * 100) + '%' : '') + '</span>' : '')
-            + (ev.quote ? '<div style="color:#6b5b45;margin-top:1px">「' + esc(ev.quote) + '」</div>' : '')
-            + (ev.reason ? '<div style="color:#9a927f">' + esc(ev.reason) + '</div>' : '')
-            + '</div>';
-        }
-        h += '</div>';
+    var wLabel2 = (m2.weight && m2.weight > 0) ? ('权重 ' + m2.weight + '% · 能力分 ' + m2.score + ' · 加权 ' + m2.weighted) : '权重 0% · 只分析不计分';
+    h += '<div style="margin-top:8px;padding:6px 8px;border:1px solid #efe6d2;border-radius:6px;background:#fdfbf4">'
+      + '<div style="font-size:12px;font-weight:700;color:var(--ink);margin-bottom:4px">' + esc(m2.name || m2.key || '') + ' <span style="font-weight:400;color:var(--text3);font-size:11px">· ' + wLabel2 + '</span></div>';
+    for(var si=0; si<m2.stds.length; si++){
+      var s = m2.stds[si];
+      // 子点判定三态徽标（完成度 + 质量星 + 子点分）
+      var evs = (s.sem && s.sem.evs) || [];
+      var hitCnt = 0, missCnt = 0, totalKw = evs.length;
+      for(var ei=0; ei<evs.length; ei++){
+        var st = evs[ei].state;
+        if(st === 'HIT' || st === 'EQUIV' || st === 'UNCLEAR') hitCnt++; else missCnt++;
       }
+      var cmpN = totalKw ? (hitCnt + '/' + totalKw) : '—';
+      var qCl = 'var(--text3)';
+      if(totalKw) qCl = (hitCnt >= totalKw * 0.8) ? 'var(--ok)' : (hitCnt >= totalKw * 0.5 ? 'var(--warn)' : 'var(--danger)');
+      var scCl = s.score != null ? (s.score >= 80 ? 'var(--ok)' : (s.score >= 45 ? 'var(--warn)' : 'var(--danger)')) : 'var(--text3)';
+      var lvTxt = s.level != null ? ('Lv ' + s.level) : '—';
+      h += '<div style="margin-top:6px;padding:5px 8px;background:#fff;border:1px solid #f1ebd9;border-radius:5px">'
+        // 子点编号 + 子点名 + 三态徽标
+        + '<div style="display:flex;align-items:center;gap:6px;font-size:11.5px;flex-wrap:wrap">'
+        + '<span style="font-weight:700;color:#5a4632">' + esc(s.id || '') + '</span>'
+        + '<span style="font-weight:600;color:var(--ink)">' + esc(s.name || s.label || '') + '</span>'
+        + '<span style="display:inline-block;padding:0 5px;border-radius:3px;font-size:10px;background:' + qCl + ';color:#fff">完成度 ' + cmpN + '</span>'
+        + '<span style="display:inline-block;padding:0 5px;border-radius:3px;font-size:10px;background:' + qCl + ';color:#fff">质量 ' + lvTxt + '</span>'
+        + '<span style="display:inline-block;padding:0 5px;border-radius:3px;font-size:10px;background:' + scCl + ';color:#fff;font-weight:700">' + (s.score != null ? (s.score + ' 分') : '—') + '</span>'
+        + '</div>';
+      // 评判标准原句
+      if(s.desc) h += '<div style="margin-top:3px;font-size:10.5px;color:var(--text2);line-height:1.5">评判标准：' + esc(s.desc) + '</div>';
+      // ---- 命中区（HIT/EQUIV/UNCLEAR）----
+      var hitRows = '';
+      var missRows = '';
+      for(var ei2=0; ei2<evs.length; ei2++){
+        var ev2 = evs[ei2];
+        var st2 = ev2.state;
+        var meta = v4SemMeta(st2);
+        var subNm = v4SemPointName(s.id, ev2.subId);
+        var line = '<div style="display:flex;align-items:flex-start;gap:5px;padding:3px 0;line-height:1.5">'
+          + '<span style="display:inline-block;padding:0 6px;border-radius:3px;font-size:10px;color:' + meta.c + ';background:' + meta.b + ';font-weight:700;flex:none">' + meta.t + '</span>'
+          + '<span style="font-size:11px;color:var(--ink);flex:none">' + esc(ev2.subId || '') + (subNm ? ' ' + esc(subNm) : '') + '</span>'
+          + (ev2.quoteTs ? '<span style="font-size:10px;color:#b0a48e;flex:none">[' + esc(ev2.quoteTs) + ']</span>' : '')
+          + ((ev2.quote || ev2.reason) ? '<div style="flex:1;font-size:10.5px;color:var(--text2);line-height:1.5;margin-top:1px">'
+            + (ev2.quote ? '<div style="color:#6b5b45">「' + esc(ev2.quote) + '」</div>' : '')
+            + (ev2.reason ? '<div style="color:#9a927f">' + esc(ev2.reason) + '</div>' : '')
+            + '</div>' : '')
+          + '</div>';
+        if(st2 === 'HIT' || st2 === 'EQUIV' || st2 === 'UNCLEAR') hitRows += line; else missRows += line;
+      }
+      if(hitRows){
+        h += '<div style="margin-top:5px"><div style="font-size:10.5px;color:var(--gold);font-weight:700;margin-bottom:2px">命中（' + hitCnt + '）</div>' + hitRows + '</div>';
+      }
+      if(missRows){
+        h += '<div style="margin-top:5px"><div style="font-size:10.5px;color:var(--danger);font-weight:700;margin-bottom:2px">未命中（' + missCnt + '）</div>' + missRows + '</div>';
+      }
+      h += '</div>';
     }
     h += '</div>';
   }
   if(!any) h += '<div class="v4his-none">该记录无模块明细存档</div>';
   return h;
+}
+// 取 mod 名（按 key 查 det.mods）
+function v4ModNameByKey(mods, key){
+  if(!mods || !key) return '';
+  for(var i=0;i<mods.length;i++){ if(mods[i] && mods[i].key === key) return mods[i].name || key; }
+  return key;
+}
+// 取 mod 分（按 key 查 det.mods）
+function v4ModScoreByKey(mods, key){
+  if(!mods || !key) return '—';
+  for(var i=0;i<mods.length;i++){ if(mods[i] && mods[i].key === key) return (mods[i].score != null ? mods[i].score : '—'); }
+  return '—';
 }
 // 从 detail 库按 ts + host 双键取完整记录（无 → 返回 null）
 // v4.10.2：仅按 ts 匹配在批量同毫秒场景会错配（两条摘要 ts 相同 → 返回第一条）→ 追加 host 校验

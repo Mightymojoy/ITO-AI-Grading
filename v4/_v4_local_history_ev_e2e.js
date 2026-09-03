@@ -131,6 +131,74 @@ if (!SRT_SRC || !fs.existsSync(SRT_SRC)) { console.error('SRT 源不存在:', SR
   console.log('含完整存档行:', htab.withDetail, '| 仅摘要行:', htab.withoutDetail);
   console.log('展开第一行:', JSON.stringify(htab.opened, null, 1));
 
+  // 断言 3：v4.10.3 数据补存——头部概要（strength/problem/tagline/bestKey/worstKey）+ 模块 weight/weighted
+  const v4103 = await page.evaluate(() => {
+    const dets = JSON.parse(localStorage.getItem('grading_detail_v1') || '[]');
+    if (!dets.length) return { ok: false, reason: 'no detail' };
+    const d = dets[dets.length - 1];
+    const mods = d.mods || [];
+    let withWeight = 0, withWeighted = 0;
+    for (let i = 0; i < mods.length; i++) {
+      if (mods[i].weight != null) withWeight++;
+      if (mods[i].weighted != null) withWeighted++;
+    }
+    return {
+      ok: true,
+      hasStrength: typeof d.strength === 'string' && d.strength.length > 0,
+      hasProblem: typeof d.problem === 'string' && d.problem.length > 0,
+      hasTagline: typeof d.tagline === 'string' && d.tagline.length > 0,
+      hasBestKey: typeof d.bestKey === 'string' && d.bestKey.length > 0,
+      hasWorstKey: typeof d.worstKey === 'string' && d.worstKey.length > 0,
+      hasBestStdId: typeof d.bestStdId === 'string' && d.bestStdId.length > 0,
+      hasWorstStdId: typeof d.worstStdId === 'string' && d.worstStdId.length > 0,
+      modN: mods.length, withWeight, withWeighted,
+      strength: d.strength, problem: d.problem, tagline: d.tagline,
+      bestKey: d.bestKey, worstKey: d.worstKey
+    };
+  });
+  console.log('\n=== v4.10.3 数据补存断言 ===');
+  console.log(JSON.stringify(v4103, null, 2));
+
+  // 断言 4：v4.10.3 渲染——展开可见头部概要 + 模块胶囊 + 子点三态徽标 + 命中/未命中分块
+  const v4103Render = await page.evaluate(() => {
+    const box = document.getElementById('v4arch-history');
+    if (!box) return { found: false };
+    const rows = box.querySelectorAll('.v4his-row');
+    const first = rows[0];
+    if (!first) return { found: true, rowN: 0 };
+    const tg = first.querySelector('.v4his-tg');
+    if (tg) tg.checked = true;
+    const det = first.querySelector('.v4his-det');
+    if (!det) return { found: true, hasDet: false };
+    const txt = det.textContent;
+    return {
+      found: true, hasDet: true,
+      visible: det.offsetHeight > 0,
+      // 头部概要区（核心优势/核心问题/最优能力/最弱能力/一句话总评）
+      hasStrength: txt.indexOf('核心优势') >= 0,
+      hasProblem: txt.indexOf('核心问题') >= 0,
+      hasBest: txt.indexOf('最优能力') >= 0,
+      hasWorst: txt.indexOf('最弱能力') >= 0,
+      hasTagline: txt.indexOf('一句话总评') >= 0,
+      hasBigTotal: /^\s*(\d{1,3})\s/.test(det.innerHTML.slice(0, 200)) || /\b\d{2,3}<\//.test(det.innerHTML.slice(0, 500)),
+      // 模块胶囊区——能力分大字号 + 加权 + 权重
+      hasWeightChip: txt.indexOf('权重 ') >= 0,
+      hasWeightedChip: txt.indexOf('加权 ') >= 0,
+      hasNotCounted: txt.indexOf('不计入总分') >= 0,
+      // 子点三态徽标
+      hasCompleteChip: txt.indexOf('完成度 ') >= 0,
+      hasQualityChip: txt.indexOf('质量 ') >= 0,
+      hasStdScore: /分\s*<\/span>/.test(det.innerHTML) || /\d+\s*分/.test(txt),
+      // 命中 / 未命中分块
+      hasHitBlock: txt.indexOf('命中（') >= 0,
+      hasMissBlock: txt.indexOf('未命中（') >= 0,
+      // 评判标准原句
+      hasCriteria: txt.indexOf('评判标准：') >= 0
+    };
+  });
+  console.log('\n=== v4.10.3 渲染断言 ===');
+  console.log(JSON.stringify(v4103Render, null, 2));
+
   // 截图
   await page.evaluate(() => {
     document.querySelectorAll('.v4his-row').forEach((r, i) => {
@@ -148,7 +216,16 @@ if (!SRT_SRC || !fs.existsSync(SRT_SRC)) { console.error('SRT 源不存在:', SR
     && lib.detN >= 1 && lib.tsMatch === true && lib.modN >= 3 && lib.stdN >= 10 && lib.evN >= 5
     && htab.found && htab.rowN >= 1 && htab.tgN >= 1 && htab.lbN >= 1
     && htab.withDetail >= 1
-    && htab.opened && htab.opened.visible && htab.opened.hasScore && htab.opened.hasEv;
+    && htab.opened && htab.opened.visible && htab.opened.hasScore && htab.opened.hasEv
+    // v4.10.3 数据补存 + 渲染升级
+    && v4103.ok && v4103.hasStrength && v4103.hasProblem && v4103.hasTagline
+    && v4103.hasBestKey && v4103.hasWorstKey && v4103.hasBestStdId && v4103.hasWorstStdId
+    && v4103.modN >= 3 && v4103.withWeight >= 3 && v4103.withWeighted >= 3
+    && v4103Render.found && v4103Render.hasDet && v4103Render.visible
+    && v4103Render.hasStrength && v4103Render.hasProblem && v4103Render.hasBest && v4103Render.hasWorst && v4103Render.hasTagline
+    && v4103Render.hasWeightChip && v4103Render.hasWeightedChip && v4103Render.hasNotCounted
+    && v4103Render.hasCompleteChip && v4103Render.hasQualityChip && v4103Render.hasStdScore
+    && v4103Render.hasHitBlock && v4103Render.hasMissBlock && v4103Render.hasCriteria;
   console.log(pass ? '\n=== HISTORY EV E2E PASS ===' : '\n=== HISTORY EV E2E FAIL ===');
   process.exit(pass ? 0 : 1);
 })().catch(e => { console.error('E2E 异常:', e); process.exit(1); });
