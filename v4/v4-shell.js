@@ -1280,13 +1280,13 @@ document.addEventListener('DOMContentLoaded', function(){
     _semEvStyleInjected = true;
     try{
       var st = document.createElement('style');
-      st.textContent = '#modules .semEvTg{display:none}'
-        + '#modules .semEvLb{display:block;cursor:pointer;font-size:11px;color:#9a7b2d;margin-top:6px;user-select:none;-webkit-user-select:none}'
-        + '#modules .semEvLb:hover{color:#c9a962}'
-        + '#modules .semEvLb:before{content:"\\25B8  "}'
-        + '#modules .semEvTg:checked + .semEvLb:before{content:"\\25BE  "}'
-        + '#modules .semEvBd{display:none;margin-top:6px;border:1px solid #efe6d2;background:#fdfbf4;border-radius:6px;padding:6px 10px}'
-        + '#modules .semEvTg:checked + .semEvLb + .semEvBd{display:block}'
+      st.textContent = '.semEvTg{display:none}'
+        + '.semEvLb{display:block;cursor:pointer;font-size:11px;color:#9a7b2d;margin-top:6px;user-select:none;-webkit-user-select:none}'
+        + '.semEvLb:hover{color:#c9a962}'
+        + '.semEvLb:before{content:"\\25B8  "}'
+        + '.semEvTg:checked + .semEvLb:before{content:"\\25BE  "}'
+        + '.semEvBd{display:none;margin-top:6px;border:1px solid #efe6d2;background:#fdfbf4;border-radius:6px;padding:6px 10px}'
+        + '.semEvTg:checked + .semEvLb + .semEvBd{display:block}'
         + '.semEvRow{font-size:11.5px;line-height:1.6;padding:4px 0;border-bottom:1px dashed #efe6d2;word-break:break-all}'
         + '.semEvRow:last-child{border-bottom:none}'
         + '.semEvTag{display:inline-block;padding:0 6px;border-radius:4px;font-size:10.5px;margin-right:6px;vertical-align:1px}'
@@ -1351,46 +1351,80 @@ document.addEventListener('DOMContentLoaded', function(){
       + '<label for="semEv-' + uid + '" class="semEvLb">查看判定依据（' + subTxt + '）—— 逐子点证据原文与判定理由</label>'
       + '<div class="semEvBd">' + rows + '</div>';
   }
-  function attachSemEvidence(rOrResults){
-    if(!rOrResults) return;
-    // 兼容：单 r（每日评分 / 一键完整日报·子结果）或数组（批量 TOP1 比较卡 all）
-    var arr = Array.isArray(rOrResults) ? rOrResults : [rOrResults];
-    if(!arr.length) return;
-    // 平铺每张卡：{stdId, sem}（按 r→module→standard 顺序，匹配 DOM 顺序）
-    var list = [];
-    for(var ri=0; ri<arr.length; ri++){
-      var r = arr[ri]; if(!r || !r.modules) continue;
-      for(var mi=0; mi<r.modules.length; mi++){
-        var m = r.modules[mi]; if(!m || !m.standards) continue;
-        for(var si=0; si<m.standards.length; si++){
-          var s = m.standards[si];
-          var sem = (s && s.complete && s.complete.sem) || null;
-          if(!sem || !sem.evs || !sem.evs.length) continue;
-          list.push({ stdId: String(s.id || ''), sem: sem });
-        }
+  // 平铺单 r 的全部语义判定卡（r→module→standard 顺序）
+  function semEvFlat(r){
+    var out = [];
+    if(!r || !r.modules) return out;
+    for(var mi=0; mi<r.modules.length; mi++){
+      var m = r.modules[mi]; if(!m || !m.standards) continue;
+      for(var si=0; si<m.standards.length; si++){
+        var s = m.standards[si];
+        var sem = (s && s.complete && s.complete.sem) || null;
+        if(!sem || !sem.evs || !sem.evs.length) continue;
+        out.push({ stdId: String(s.id || ''), sem: sem });
       }
     }
-    if(!list.length) return;
-    // 全文档扫描 .std 卡（每日评分 #modules + 批量比较卡任意容器共用 class 结构）
-    var cards = document.querySelectorAll('.std');
-    if(!cards.length) return;
-    var consumed = 0;
-    for(var c=0; c<cards.length && consumed<list.length; c++){
+    return out;
+  }
+  // 在 cards 范围内按 .std-id 精确匹配注入（不依赖 DOM 顺序 / 游标，杜绝跨主播错配）
+  function semEvInject(cards, list){
+    var injected = 0;
+    if(!cards || !list || !list.length) return injected;
+    for(var c=0; c<cards.length; c++){
       var idEl = cards[c].querySelector('.std-id');
       if(!idEl) continue;
       var cid = String(idEl.textContent || '').trim();
       if(!cid) continue;
-      var match = null;
-      for(var i=consumed; i<list.length; i++){
-        if(list[i].stdId === cid){ match = list[i]; consumed = i + 1; break; }
-      }
-      if(!match) continue;
+      var item = null;
+      for(var i=0; i<list.length; i++){ if(list[i].stdId === cid){ item = list[i]; break; } }
+      if(!item) continue;
       var bd = cards[c].querySelector('.std-bd');
       if(!bd || bd.querySelector('.semEvLb')) continue;     // 防重复注入
       semEvEnsureStyle();
-      var fakeS = { id: cid, complete: { sem: match.sem } };
-      bd.insertAdjacentHTML('beforeend', semEvidenceHTML(fakeS, match.sem));
+      var fakeS = { id: cid, complete: { sem: item.sem } };
+      bd.insertAdjacentHTML('beforeend', semEvidenceHTML(fakeS, item.sem));
+      injected++;
     }
+    return injected;
+  }
+  // 批量（≥2 主播）：renderBatchCompare 按总分降序渲染每个 <details>（summary 含 host · total 分），
+  // 用 summary 的 host+total 双键锚定对应 r，再在 details 范围内按 .std-id 注入 → 不受排序与残留卡干扰
+  function semEvBatchAttach(results){
+    var dets = document.querySelectorAll('#batchCompare details');
+    if(!dets.length) return 0;
+    var used = {};
+    var totalInjected = 0;
+    for(var d=0; d<dets.length; d++){
+      var sm = dets[d].querySelector('summary');
+      if(!sm) continue;
+      var txt = sm.textContent || '';
+      var host = String((txt.split('·')[0] || '')).trim();
+      var totalEl = sm.querySelector('b');
+      var total = totalEl ? parseFloat(String(totalEl.textContent || '').replace(/[^0-9.-]/g, '')) : NaN;
+      var r = null;
+      for(var i=0; i<results.length; i++){
+        if(used[i] || !results[i]) continue;
+        var hSame = (String(results[i].host || '').trim() === host);
+        var tSame = isNaN(total) ? true : (Number(results[i].total) === total);
+        if(hSame && tSame){ r = results[i]; used[i] = true; break; }
+      }
+      if(!r) continue;                       // details 无对应语义结果 → 跳过
+      totalInjected += semEvInject(dets[d].querySelectorAll('.std'), semEvFlat(r));
+    }
+    return totalInjected;
+  }
+  function attachSemEvidence(rOrResults){
+    if(!rOrResults) return;
+    if(Array.isArray(rOrResults) && rOrResults.length > 1){
+      try{ semEvBatchAttach(rOrResults); }catch(e){ console.error('[v4.9.4] batch attachSemEvidence:', e); }
+      return;
+    }
+    var r = Array.isArray(rOrResults) ? rOrResults[0] : rOrResults;
+    if(!r || !r.modules) return;
+    var list = semEvFlat(r);
+    if(!list.length) return;
+    // 单条（每日评分 / 一键日报子结果）：全文档 .std 卡按 .std-id 精确匹配注入
+    semEvInject(document.querySelectorAll('.std'), list);
   }
 
   // ---- 状态条（常驻 #result 顶部） ----

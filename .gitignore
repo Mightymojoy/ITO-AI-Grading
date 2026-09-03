@@ -18,3 +18,6 @@ sem_key_local.txt
 
 # 注意：v4/data/ 是同步产出的静态数据，必须提交，
 # 否则 GitHub Pages 上的工作台读不到飞书表格。
+
+# v4 本地验证截图（不入仓，E2E 临时产物）
+v4/_ev_*.png
