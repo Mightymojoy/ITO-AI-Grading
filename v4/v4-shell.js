@@ -1241,7 +1241,14 @@ document.addEventListener('DOMContentLoaded', function(){
     // 重渲染（单主播报告 / 批量比较卡 / 各库面板）
     try{ if(typeof renderResult === 'function') renderResult(r); }catch(e){}
     // v4.9.2：重渲染后为每张语义判定卡注入「判定依据」逐子点证据（有依可寻）
-    try{ attachSemEvidence(r); }catch(e){ console.error('[v4.9.2] attachSemEvidence:', e); }
+    // v4.9.5：批量挂起中（r 属于批量数组）跳过单条注入——此时 DOM 已首轮渲染全部主播的同 id 卡，
+    //         单条按 .std-id 匹配会把 r1 证据错配注入未完成的 r2 卡；统一等批量全部完成后由 semEvBatchAttach 注入
+    try{
+      var _inBatch = false;
+      var _ba = window._v4LastBatchResults;
+      if(_ba && r){ for(var _bi=0; _bi<_ba.length; _bi++){ if(_ba[_bi] === r){ _inBatch = true; break; } } }
+      if(!_inBatch){ attachSemEvidence(r); }
+    }catch(e){ console.error('[v4.9.2] attachSemEvidence:', e); }
     try{ renderGoldenLib(); }catch(e){}
     try{ renderHistoryLib(); }catch(e){}
     try{ if(typeof renderProblemLib === 'function') renderProblemLib(); }catch(e){}
@@ -1275,6 +1282,7 @@ document.addEventListener('DOMContentLoaded', function(){
   // 证据源：V4S.apply 覆写后 s.complete.sem = {mode,passed,total,full,half,states,evs}
   // evs 元素：{subId,state,confidence,quoteTs,quote,reason}（模型真实返回，逐条展示）
   var _semEvStyleInjected = false;
+  var _semEvSeq = 0;       // v4.9.5：semEvTg id 唯一序号（批量两主播同 stdId 时避免 label for 错乱）
   function semEvEnsureStyle(){
     if(_semEvStyleInjected) return;
     _semEvStyleInjected = true;
@@ -1346,7 +1354,7 @@ document.addEventListener('DOMContentLoaded', function(){
     }
     if(!rows) return '';
     var subTxt = (sem.passed != null) ? ('通过 ' + sem.passed + '/' + sem.total + ' 子点达标') : ((sem.evs||[]).length + ' 条判定证据');
-    var uid = String(stdId).replace('.', '-');
+    var uid = String(stdId).replace('.', '-') + '-' + (++_semEvSeq);     // v4.9.5 加序号：批量两位主播卡 1.1 同 id 会让 label for 错乱 toggle 第一张
     return '<input type="checkbox" class="semEvTg" id="semEv-' + uid + '">'
       + '<label for="semEv-' + uid + '" class="semEvLb">查看判定依据（' + subTxt + '）—— 逐子点证据原文与判定理由</label>'
       + '<div class="semEvBd">' + rows + '</div>';

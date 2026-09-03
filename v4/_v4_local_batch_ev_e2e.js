@@ -67,16 +67,28 @@ const DST2 = path.join(__dirname, '_赵亚男_2026-08-18_综合_原文.srt');
 
   await page.waitForTimeout(2000);   // 让 attachSemEvidence + renderBatchCompare 落定
 
-  // 断言：批量比较卡内 .std 卡是否有判定依据
+  // 断言：批量比较卡内 .std 卡是否有判定依据 + v4.9.5 id 唯一性 + label for 精确匹配
   const ev = await page.evaluate(() => {
     const batch = document.getElementById('batchCompare');
     const all = document.querySelectorAll('.std');
-    let inBatch = 0, evInBatch = 0;
+    let inBatch = 0, evInBatch = 0, mismatchedLabel = 0;
+    const idSet = new Set(), dupIds = [];
     all.forEach(c => {
       const inB = batch && batch.contains(c);
       if (inB) {
         inBatch++;
-        if (c.querySelector('.semEvLb')) evInBatch++;
+        const tg = c.querySelector('.semEvTg');
+        const lb = c.querySelector('.semEvLb');
+        if (tg && lb) {
+          evInBatch++;
+          const tid = tg.id || '';
+          const lfor = lb.getAttribute('for') || '';
+          if (tid !== lfor) mismatchedLabel++;        // v4.9.5：每卡 label for 必须等于自己 checkbox id（防批量同 id 错乱）
+          if (tid) {
+            if (idSet.has(tid)) dupIds.push(tid);
+            else idSet.add(tid);
+          }
+        }
       }
     });
     return {
@@ -84,6 +96,8 @@ const DST2 = path.join(__dirname, '_赵亚男_2026-08-18_综合_原文.srt');
       stdsTotal: all.length,
       stdsInBatch: inBatch,
       stdsWithEvidenceInBatch: evInBatch,
+      mismatchedLabel: mismatchedLabel,
+      dupIds: dupIds,
       batchVisible: batch && batch.offsetHeight > 0
     };
   });
@@ -92,6 +106,8 @@ const DST2 = path.join(__dirname, '_赵亚男_2026-08-18_综合_原文.srt');
   console.log('批量容器可见:', ev.batchVisible, '| display:', ev.batchDisplay);
   console.log('全文档 .std 卡总数:', ev.stdsTotal, '| 在 batchCompare 容器内:', ev.stdsInBatch);
   console.log('批量容器内带判定依据卡:', ev.stdsWithEvidenceInBatch, '/', ev.stdsInBatch);
+  console.log('v4.9.5 id 唯一性: 重复 id =', ev.dupIds.length, ev.dupIds.length ? '[' + ev.dupIds.slice(0,3).join(',') + ']' : '');
+  console.log('v4.9.5 label for 错配卡:', ev.mismatchedLabel);
   console.log('页面错误数:', errors.length);
   if (errors.length) errors.slice(0, 5).forEach(e => console.log('  ' + e));
 
@@ -111,7 +127,9 @@ const DST2 = path.join(__dirname, '_赵亚男_2026-08-18_综合_原文.srt');
 
   const pass = ev.batchVisible && ev.stdsInBatch >= 20
     && ev.stdsWithEvidenceInBatch >= 15
-    && ev.stdsWithEvidenceInBatch === ev.stdsInBatch;
+    && ev.stdsWithEvidenceInBatch === ev.stdsInBatch
+    && ev.mismatchedLabel === 0
+    && ev.dupIds.length === 0;
   console.log(pass ? '\n=== BATCH EV E2E PASS ===' : '\n=== BATCH EV E2E FAIL ===');
   process.exit(pass ? 0 : 1);
 })().catch(e => { console.error('E2E 异常:', e); process.exit(1); });
