@@ -1034,6 +1034,241 @@ document.addEventListener('DOMContentLoaded', function(){
   if(rb) rb.onclick = function(){ v4FsReload(); };
 });
 
+// =====================================================
+// ---------- 7.9 v4.9.0 语义评分（壳层 patch：判定层换源，公式不动） ----------
+// 原则：把 runGrading 的关键词命中判定，换成"文字语义是否达标"的判定——
+//   ① patch runGrading：仍先同步跑关键词版出结构骨架 r（兜底），并在 r 上挂 __semCtx
+//   ② 落库入口（addHistoryRecord / collectProblems）认领 r → 触发云端语义判定
+//   ③ 判定成功 → semantic-core.apply() 按证据包覆写各子标准 level/quality/score，
+//      重算模块分/总分/等级 → flush 统一落库（历史/4tab/问题库）→ 重渲染
+//   ④ 判定失败/超时 → 自动降级：保留关键词版分数并标注"降级"，绝不整批失败
+// 铁律：app-core.js 一字不动；v3 分析系统不碰；本模块全部走 window patch
+// =====================================================
+(function(){
+  if(typeof runGrading !== 'function' || typeof window.V4SEM !== 'object') return;
+
+  var V4S = window.V4SEM;
+  var _coreRunGrading = runGrading;              // app-core 原版（关键词引擎，唯一计分公式来源）
+  var _v46AHR  = window.addHistoryRecord;         // v4.6 链：history push + 4tab 路由 + 优秀案例
+  var _origCP  = collectProblems;                 // app-core 问题沉淀
+  var _origAFF = window.autoFillFeishu;           // v4.7.9 链：飞书主表 + syncFeishuLibs + syncWeekMonth（已包装评分日期）
+  var _origRC  = typeof renderBatchCompare === 'function' ? renderBatchCompare : null;
+  var _origAFR = (typeof autoFullReport === 'function') ? autoFullReport : null;  // 一键完整日报（视觉 GPT 报告，豁免语义）
+
+  // ---- 开关与 API 地址（设置页可覆盖；semantic_enabled='0' 关闭） ----
+  function semEnabled(){
+    try{ return localStorage.getItem('semantic_enabled') !== '0'; }catch(e){ return true; }
+  }
+  function semApiUrl(){
+    try{ return localStorage.getItem('semantic_api_url') || V4S.CFG.apiUrl; }catch(e){ return V4S.CFG.apiUrl; }
+  }
+
+  // ① patch runGrading：同步骨架 + 挂语义上下文（不触发，等落库入口认领）
+  // 豁免：一键完整日报(autoFullReport) 走视觉 GPT 口径，其画面分数取同步快照，
+  //       若参与异步语义会导致"画面分 ≠ 飞书分"，故运行期间整体豁免语义。
+  window.runGrading = function(segs, productKey){
+    var r = _coreRunGrading(segs, productKey);
+    if(r && !r.noProduct && r.modules && semEnabled() && !window.V4SEM_EXEMPT){
+      r.__semCtx = { segs: segs || [], productKey: productKey, t: Date.now() };
+      r.__semPending = false;
+      r.__semDone = false;
+      r.__semUpgrading = false;
+      r.__semFlushed = false;
+    }
+    return r;
+  };
+
+  // ①' 豁免包装：autoFullReport 运行期间置全局标志 → runGrading 不挂 __semCtx（async → Promise 链复位）
+  if(_origAFR){
+    window.autoFullReport = function(){
+      window.V4SEM_EXEMPT = true;
+      var p = _origAFR.apply(this, arguments);
+      if(p && typeof p.then === 'function'){
+        return p.then(function(v){ window.V4SEM_EXEMPT = false; return v; },
+                      function(e){ window.V4SEM_EXEMPT = false; throw e; });
+      }
+      window.V4SEM_EXEMPT = false;
+      return p;
+    };
+  }
+
+  // 认领：语义候选结果被落库入口触达时 → 启动云端升级并挂起本次落库
+  function semClaim(r){
+    if(!r || !r.__semCtx || r.__semDone) return false;
+    if(!semEnabled()) return false;
+    if(!r.__semPending){
+      r.__semPending = true;
+      semUpgrade(r);
+    }
+    return true;
+  }
+
+  // ② patch addHistoryRecord（run / batchRun 场景认领点）
+  window.addHistoryRecord = function(r){
+    if(semClaim(r)) return;                       // 挂起：语义版落库由 flush 统一执行
+    return _v46AHR.apply(this, arguments);
+  };
+
+  // ②' patch collectProblems（transcribeVideo 场景认领点；run/batch 场景里作二次挂起闸）
+  window.collectProblems = function(r){
+    if(r && r.__semCtx && (r.__semPending || r.__semDone)) return 0;   // 挂起/已完成 → 由 flush 统一跑
+    if(semClaim(r)) return 0;
+    return _origCP.apply(this, arguments);
+  };
+
+  // ②'' patch autoFillFeishu（飞书主表直写入口：renderResult 内部 / batchRun / 一键日报 都会经过）
+  //      语义候选在判定完成前一律挂起 → 飞书只收语义版（或降级关键词版），杜绝"本地语义、飞书旧分"分叉；
+  //      判定完成后由 semFinish 显式 flush 一次（__semFlushed 标记），renderResult 重渲染不再双写。
+  window.autoFillFeishu = function(r){
+    if(r && r.__semCtx){
+      if(!r.__semDone) return;                 // 语义进行中 → 挂起
+      if(r.__semFlushed) return;               // 已由 flush 写飞书 → 防 renderResult 重渲染双写
+    }
+    return _origAFF.apply(this, arguments);
+  };
+
+  // ③ 批量渲染钩子：记录最近一批结果，供语义全部完成后重绘 TOP1 比较卡
+  if(_origRC){
+    window.renderBatchCompare = function(results){
+      window._v4LastBatchResults = results;
+      return _origRC.apply(this, arguments);
+    };
+  }
+
+  // ---- 组装云端请求 ----
+  function semPayload(segs, productKey){
+    var judges = [];
+    try{ judges = V4S.buildJudges(); }catch(e){}
+    var text = '';
+    try{ text = V4S.truncate(segs || []); }catch(e){}
+    var prodName = '';
+    try{
+      if(typeof GRADING_STANDARD !== 'undefined' && GRADING_STANDARD.sellpoints && productKey && GRADING_STANDARD.sellpoints[productKey]){
+        prodName = GRADING_STANDARD.sellpoints[productKey].name;
+      }
+    }catch(e){}
+    return { product: prodName, judges: judges, text: text, _v: '4.9.0' };
+  }
+
+  // ---- 异步升级（防重入；超时/失败 → 降级保留关键词版） ----
+  function semUpgrade(r){
+    if(r.__semUpgrading) return;
+    r.__semUpgrading = true;
+    var ctx = r.__semCtx || {};
+    var url = semApiUrl();
+    var payload = semPayload(ctx.segs, ctx.productKey);
+    if(!payload.text || !payload.judges.length){
+      r.__sem = { used:false, degraded:true, reason:'empty text/judges' };
+      semFinish(r);
+      return;
+    }
+    semStatusText('评分引擎：语义判定中…（新标准：按文字意思是否达标，非关键词命中）', '#f0ead6', '#9a7b2d');
+    var ctrl = null;
+    if(typeof AbortController !== 'undefined') ctrl = new AbortController();
+    var tm = setTimeout(function(){ try{ ctrl && ctrl.abort(); }catch(e){} r.__semAborted = true; }, V4S.CFG.timeoutMs || 25000);
+    fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload), signal: ctrl ? ctrl.signal : undefined })
+      .then(function(resp){
+        clearTimeout(tm);
+        if(!resp.ok) throw new Error('HTTP ' + resp.status);
+        return resp.json();
+      })
+      .then(function(data){
+        if(data && data.ok && data.evidences && data.evidences.length){
+          var app = V4S.apply(r, data);
+          r.__sem = { used:true, mode:'semantic', applied: app.applied, flags: app.flags,
+                      api: url, ms: Date.now() - (ctx.t || Date.now()), judged: data.evidences.length };
+        } else {
+          r.__sem = { used:false, degraded:true, reason: (data && data.error) || '空判定结果' };
+        }
+        semFinish(r);
+      })
+      .catch(function(err){
+        clearTimeout(tm);
+        r.__sem = { used:false, degraded:true, reason: (r.__semAborted ? '云端判定超时(' + Math.round((V4S.CFG.timeoutMs||25000)/1000) + 's)' : String((err && err.message) || err)) };
+        semFinish(r);
+      });
+  }
+
+  // ---- flush：语义版/降级版 统一落库 + 重渲染（一次评分只落一次库） ----
+  function semFinish(r){
+    if(r.__semDone) return;
+    r.__semDone = true;
+    r.__semPending = false;
+    r.__semUpgrading = false;
+    var sem = r.__sem || {};
+    try{
+      // 本地：历史 + 4tab 路由 + 优秀案例（v4.6 链）；问题库（按语义版重抽）；飞书（主表 + 同步库 + 周月汇总）
+      _v46AHR(r);
+      _origCP(r);
+      r.__semFlushed = true;          // 先标记：renderResult 重渲染时 autoFillFeishu 不再重复写飞书
+      _origAFF(r);
+    }catch(e){ console.error('[v4.9] 语义落库异常:', e); }
+    // 重渲染（单主播报告 / 批量比较卡 / 各库面板）
+    try{ if(typeof renderResult === 'function') renderResult(r); }catch(e){}
+    try{ renderGoldenLib(); }catch(e){}
+    try{ renderHistoryLib(); }catch(e){}
+    try{ if(typeof renderProblemLib === 'function') renderProblemLib(); }catch(e){}
+    try{ if(typeof renderProblemDetail === 'function') renderProblemDetail(); }catch(e){}
+    // 批量场景：全部主播升级完成后重算 TOP1 并重同步飞书 + 重绘
+    if(window._v4LastBatchResults){
+      var all = window._v4LastBatchResults;
+      var pending = 0;
+      for(var i=0;i<all.length;i++){ if(typeof all[i].total === 'number' && all[i].__semCtx && !all[i].__semDone) pending++; }
+      if(pending === 0){
+        var t1 = null;
+        try{
+          t1 = (typeof pickTop1 === 'function') ? pickTop1(all) : null;
+          if(t1 && typeof syncTop1ToFeishu === 'function') syncTop1ToFeishu(all, t1);
+          if(_origRC) _origRC(all);
+        }catch(e){ console.error('[v4.9] 批量 TOP1 重算异常:', e); }
+        if(t1 && typeof toastErr === 'function') toastErr('语义评分全部完成｜TOP1 = ' + t1.host + '（' + t1.total + ' 分，已按语义分重算）');
+      }
+    }
+    // 状态条更新
+    if(sem.used){
+      semStatusText('评分完成：按【语义达标】判定（子点证据 ' + (sem.judged||0) + ' 条）· ' + r.total + ' 分 ' + r.grade + ' 级', '#e8ece4', '#3d6b35');
+    } else if(sem.degraded){
+      semStatusText('⚠ 语义判定暂不可用（' + (sem.reason||'未知') + '）——本次已降级为关键词规则，请检查云端 /api/semantic-judge', '#f6e3dd', '#b3452e');
+    }
+  }
+
+  // ---- 状态条（常驻 #result 顶部） ----
+  function semStatusText(msg, bg, color){
+    try{
+      var el = document.getElementById('semStatus');
+      if(!el){
+        var box = document.getElementById('result');
+        if(!box) return;
+        el = document.createElement('div');
+        el.id = 'semStatus';
+        el.style.cssText = 'font-size:12px;padding:5px 10px;border-radius:6px;margin:6px 0;display:none';
+        box.insertBefore(el, box.firstChild);
+      }
+      if(msg){ el.style.display = 'block'; el.textContent = msg; }
+      else { el.style.display = 'none'; return; }
+      if(bg) el.style.background = bg;
+      if(color) el.style.color = color;
+    }catch(e){}
+  }
+
+  // 设置页回填 + 版本口径（v4.9）
+  try{
+    if(typeof v4RenderSettings === 'function'){
+      var _origRS = v4RenderSettings;
+      window.v4RenderSettings = function(){
+        _origRS.apply(this, arguments);
+        var box = document.getElementById('set-current');
+        if(box){
+          var extra = document.createElement('div');
+          extra.style.marginTop = '6px';
+          extra.innerHTML = '评分引擎：<b>语义判定 v4.9</b>（云端 ' + '<b>' + semApiUrl() + '</b>' + '）——关键词只做兜底降级<br>语义开关：' + (semEnabled() ? '<b style="color:var(--ok)">开</b>（评分按文字意思是否达标给分）' : '<b style="color:var(--danger)">关</b>（回退 v3.9 关键词引擎）');
+          box.appendChild(extra);
+        }
+      };
+    }
+  }catch(e){}
+})();
+
 // ---------- 8. 启动 ----------
 (function(){
   var t = document.getElementById('tbToday');

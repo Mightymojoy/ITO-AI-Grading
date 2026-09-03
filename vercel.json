@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/semantic-judge.js": {
+      "maxDuration": 60
+    }
+  }
+}
