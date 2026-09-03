@@ -38,6 +38,7 @@ const DST2 = path.join(__dirname, '_赵亚男_2026-08-18_综合_原文.srt');
     localStorage.setItem('semantic_enabled', 'true');
     localStorage.removeItem('semantic_api_url');
     localStorage.removeItem('grading_history_v1');
+    localStorage.removeItem('grading_detail_v1');
   });
   await page.reload({ waitUntil: 'load' }).catch(() => {});
   await page.waitForTimeout(2000);
@@ -119,6 +120,60 @@ const DST2 = path.join(__dirname, '_赵亚男_2026-08-18_综合_原文.srt');
   console.log('页面错误数:', errors.length);
   if (errors.length) errors.slice(0, 5).forEach(e => console.log('  ' + e));
 
+  // === v4.10：批量场景历史明细落库 + 历史 tab 展开断言 ===
+  const hdet = await page.evaluate(() => {
+    const hist = JSON.parse(localStorage.getItem('grading_history_v1') || '[]');
+    const dets = JSON.parse(localStorage.getItem('grading_detail_v1') || '[]');
+    return {
+      histN: hist.length, detN: dets.length,
+      histHosts: hist.map(x => x.host + '(' + (x.product||'').slice(0,10) + ')'),
+      detHosts: dets.map(x => x.host + '(' + x.total + ')'),
+      tsAllMatch: hist.every((h, i) => dets[i] && String(dets[i].ts) === String(h.ts))
+    };
+  });
+  console.log('\n=== v4.10 批量明细落库断言 ===');
+  console.log('摘要条数:', hdet.histN, '| 明细条数:', hdet.detN, '| ts 同源关联:', hdet.tsAllMatch);
+  console.log('摘要主播:', hdet.histHosts.join(' / '));
+  console.log('明细主播:', hdet.detHosts.join(' / '));
+
+  await page.evaluate(() => { location.hash = '#/history'; });
+  await page.waitForTimeout(1200);
+  // 归档查看器默认停在最新日期视图 → 点「全月」chip 才展示全部（两主播日期不同：08-19 / 08-18）
+  await page.evaluate(() => {
+    const allChip = document.querySelector('#v4arch-history .arch-chip[data-act="day"][data-v="all"]');
+    if (allChip) allChip.click();
+  });
+  await page.waitForTimeout(500);
+  const htab = await page.evaluate(() => {
+    const box = document.getElementById('v4arch-history');
+    const rows = box ? box.querySelectorAll('.v4his-row') : [];
+    let tgN = 0, lbN = 0, withDetail = 0, detHeights = [];
+    rows.forEach(r => {
+      if (r.querySelector('.v4his-tg')) tgN++;
+      if (r.querySelector('.v4his-lb')) lbN++;
+      const det = r.querySelector('.v4his-det');
+      if (det) {
+        if (det.querySelector('.v4his-none')) return;
+        withDetail++;
+        const tg = r.querySelector('.v4his-tg');
+        if (tg) tg.checked = true;
+      }
+    });
+    rows.forEach(r => { const det = r.querySelector('.v4his-det'); if (det) detHeights.push(det.offsetHeight); });
+    const sample = rows[0] && rows[0].querySelector('.v4his-det');
+    return {
+      rowN: rows.length, tgN, lbN, withDetail,
+      detHeights, detVisible: detHeights.every(h => h > 0),
+      sampleText: sample ? sample.textContent.replace(/\s+/g, ' ').slice(0, 200) : ''
+    };
+  });
+  console.log('\n=== v4.10 批量历史 tab 展开断言 ===');
+  console.log('明细行数:', htab.rowN, '| checkbox:', htab.tgN, '| label:', htab.lbN, '| 含完整存档行:', htab.withDetail);
+  console.log('展开块高度:', htab.detHeights, '| 全部可见:', htab.detVisible);
+  console.log('首行展开示例:', htab.sampleText);
+
+  await page.screenshot({ path: path.join(__dirname, '_ev_history_batch_shot.png'), fullPage: true });
+
   // 截图（先展开前 2 张卡）
   await page.evaluate(() => {
     document.querySelectorAll('#batchCompare .std').forEach((c, i) => {
@@ -137,7 +192,9 @@ const DST2 = path.join(__dirname, '_赵亚男_2026-08-18_综合_原文.srt');
     && ev.stdsWithEvidenceInBatch >= 15
     && ev.stdsWithEvidenceInBatch === ev.stdsInBatch
     && ev.mismatchedLabel === 0
-    && ev.dupIds.length === 0;
+    && ev.dupIds.length === 0
+    && hdet.detN === hdet.histN && hdet.detN === 2 && hdet.tsAllMatch
+    && htab.rowN === 2 && htab.withDetail === 2 && htab.tgN === 2 && htab.lbN === 2 && htab.detVisible;
   console.log(pass ? '\n=== BATCH EV E2E PASS ===' : '\n=== BATCH EV E2E FAIL ===');
   process.exit(pass ? 0 : 1);
 })().catch(e => { console.error('E2E 异常:', e); process.exit(1); });

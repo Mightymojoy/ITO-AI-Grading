@@ -393,13 +393,30 @@ function v4ArchRender(type){
     }
     h += '</table><div style="margin-top:6px;font-size:11.5px;color:var(--text3)">沉淀规则（v4.3 起）：每次单主播/批量评分自动记录当日前 3 条优秀案例（≥90 分高质量证据段落），按 主播+日期+原文 去重</div>';
   } else {
+    // v4.10：历史评分明细行 = 摘要 + checkbox 展开「完整评分记录」（默认折叠，点开才显示）
     rows.sort(function(a,b){ return (b.ts||0)-(a.ts||0); });
-    h += '<table><tr><th style="width:11%">日期</th><th style="width:12%">主播</th><th style="width:8%">总分</th><th style="width:12%">c1 产品理解</th><th>考核产品</th></tr>';
+    v4HisEnsureStyle();
+    var hisDetN = 0, hisMissN = 0;
+    h += '<div style="font-size:11px;color:var(--text3);margin-bottom:4px">点击行内「查看完整评分记录」展开该次评分的模块分卡与逐子点判定证据；再点收起</div>';
     for(var e2=0;e2<rows.length;e2++){
       var r = rows[e2];
-      h += '<tr><td>' + esc(r.date || '—') + '</td><td><b>' + esc(r.host || '—') + '</b></td><td><b style="color:var(--gold)">' + r.total + '</b></td><td>' + (r.c1Score !== null && r.c1Score !== undefined ? r.c1Score : '—') + '</td><td style="font-size:11.5px;color:var(--text2)">' + v4ExpandCell(r.product || '—', 44) + '</td></tr>';
+      var det = v4DetailByTs(r.ts);
+      var uid = 'v4his-' + String(r.ts) + '-' + e2;
+      h += '<div class="v4his-row">'
+        + '<input type="checkbox" class="v4his-tg" id="' + uid + '">'
+        + '<div class="v4his-sum">'
+        + '<span style="min-width:78px">' + esc(r.date || '—') + '</span>'
+        + '<b style="min-width:64px">' + esc(r.host || '—') + '</b>'
+        + '<span style="min-width:52px;color:var(--gold)"><b>' + r.total + '</b> 分</span>'
+        + (r.grade ? '<span style="font-size:10.5px;color:var(--text3);border:1px solid #e6ddc8;border-radius:4px;padding:0 4px">' + esc(r.grade) + '</span>' : '')
+        + '<span style="font-size:11px;color:var(--text2);flex:1;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc((r.product || '—')) + '</span>'
+        + '<label for="' + uid + '" class="v4his-lb">查看完整评分记录</label>'
+        + '</div>'
+        + '<div class="v4his-det">' + (det ? v4DetailHTML(det) : '<div class="v4his-none">该记录无完整明细存档（升级 v4.10 前产生的数据，需重新评分后才会沉淀逐子点证据）</div>') + '</div>'
+        + '</div>';
+      if(det) hisDetN++; else hisMissN++;
     }
-    h += '</table>';
+    h += '<div style="margin-top:4px;font-size:11px;color:var(--text3)">完整存档 ' + hisDetN + ' 条 ｜ 仅摘要 ' + hisMissN + ' 条（v4.10 起每次评分自动沉淀完整明细）</div>';
   }
   box.innerHTML = h;
 }
@@ -446,6 +463,168 @@ function v4FeishuUrl(fkey){
 }
 // v4.6 起：侧边栏 7 项一律在工作台内渲染，不再 window.open 跳飞书（保留 url 仅用于设置页展示）
 
+// ---------- 7.10 v4.10 完整评分记录存档（历史 tab 行展开查看明细，B-双写一期本地） ----------
+// 需求：历史评分每条可点开 → 查看完整评分记录（模块分卡 + 逐子点判定证据），默认折叠。
+// 实现：grading_detail_v1 = [{ts, host, date, studio, product, total, grade, c1Score, semUsed, mods:[{key,name,score,stds:[{id,label,score,level,sem:{evs}}]}]}]
+//       ts 与 grading_history_v1 摘要条目同源关联；快照在 v4.3 链 orig push 后落（唯一落库总闸）。
+// 铁律：app-core.js 一字不动；全走 v4-shell 纯加法。
+function v4SemMeta(state){
+  switch(state){
+    case 'HIT':     return {t:'达标', c:'#3d6b35', b:'#e8ece4'};
+    case 'EQUIV':   return {t:'换说法达标', c:'#2f5f8f', b:'#e3edf7'};
+    case 'NEGATE':  return {t:'讲错', c:'#b3452e', b:'#f6e3dd'};
+    case 'UNCLEAR': return {t:'存疑待人工', c:'#9a7b2d', b:'#f6f0d8'};
+    case 'MISS':    return {t:'未讲到', c:'#7d828b', b:'#eef0f3'};
+    default:        return {t:String(state||'?'), c:'#7d828b', b:'#eef0f3'};
+  }
+}
+function v4SemPointName(stdId, subId){
+  try{
+    var pid = String(subId || '').split('-')[1] || '';
+    var V4SW = (typeof window.V4SEM === 'object') ? window.V4SEM : null;
+    var def = V4SW ? (V4SW.POINTS[stdId] || V4SW.POINTS_22) : null;
+    if(def && def.points){ for(var i=0;i<def.points.length;i++){ if(def.points[i].id === pid) return def.points[i].name; } }
+  }catch(e){}
+  return '';
+}
+// 压缩快照（quote 截 120 / reason 截 150，防 localStorage 膨胀；上限 400 条）
+function v4DetailSnapshot(r, ts){
+  var mods = [];
+  for(var mi=0; mi<(r.modules||[]).length; mi++){
+    var m = r.modules[mi]; if(!m || !m.standards) continue;
+    var sm = {key:String(m.key||m.id||''), name:String(m.name||m.title||m.key||''), score:(m.score!=null?m.score:null), stds:[]};
+    for(var si=0; si<m.standards.length; si++){
+      var s = m.standards[si]; if(!s) continue;
+      var ss = {id:String(s.id||''), label:String(s.label||s.name||''), score:(s.score!=null?s.score:null), level:(s.level!=null?s.level:null)};
+      var sem = (s.complete && s.complete.sem) || null;
+      if(sem && sem.evs && sem.evs.length){
+        var evs = [];
+        for(var ei=0; ei<sem.evs.length; ei++){
+          var ev = sem.evs[ei] || {};
+          evs.push({
+            subId: String(ev.subId||''), state: String(ev.state||''),
+            confidence: (ev.confidence!=null ? ev.confidence : null),
+            quoteTs: String(ev.quoteTs||''),
+            quote: String(ev.quote||'').slice(0,120),
+            reason: String(ev.reason||'').slice(0,150)
+          });
+        }
+        ss.sem = {passed: (sem.passed!=null?sem.passed:null), total: (sem.total!=null?sem.total:null), evs: evs};
+      }
+      sm.stds.push(ss);
+    }
+    mods.push(sm);
+  }
+  var c1Score = null;
+  for(var k=0;k<mods.length;k++){ if(mods[k].key === 'c1'){ c1Score = mods[k].score; break; } }
+  return {ts: ts, host: r.host, date: String(r.date||'未填'), studio: String(r.studio||''), product: String(r.product||''),
+          total: r.total, grade: String(r.grade||''), c1Score: c1Score, semUsed: !!(r.__sem && r.__sem.used), mods: mods};
+}
+// 落库（在 v4.3 链 orig push 摘要后调用；同 r 对象只存一次，防 renderResult 重入重复）
+function v4DetailSave(r){
+  try{
+    if(!r || typeof r.total !== 'number' || !r.host || r.host === '未识别') return;
+    if(r.__v410Saved) return;                                     // 同一评分对象只落一次
+    var lib = v4ReadLS('grading_history_v1', '[]');
+    var last = lib.length ? lib[lib.length-1] : null;
+    if(!last || String(last.host||'') !== String(r.host||'')) return;   // 摘要最后一条必须是本次，防批量错配
+    var ts = (last.ts != null) ? last.ts : Date.now();
+    r.__v410Saved = true;
+    var det = v4DetailSnapshot(r, ts);
+    var ds = v4ReadLS('grading_detail_v1', '[]');
+    var dupIdx = -1;
+    for(var i=0;i<ds.length;i++){ if(String(ds[i].ts) === String(ts) && ds[i].host === r.host && ds[i].date === String(r.date||'')){ dupIdx = i; break; } }
+    if(dupIdx >= 0) ds[dupIdx] = det; else ds.push(det);
+    if(ds.length > 400) ds = ds.slice(ds.length - 400);
+    localStorage.setItem('grading_detail_v1', JSON.stringify(ds));
+  }catch(e){ console.error('[v4.10] 完整评分记录存档异常:', e); }
+}
+// 展开块样式（独立注入，不依赖 v4.9 闭包）
+var _v4HisStyleInjected = false;
+function v4HisEnsureStyle(){
+  if(_v4HisStyleInjected) return;
+  _v4HisStyleInjected = true;
+  try{
+    var st = document.createElement('style');
+    st.textContent = '.v4his-row{border:1px solid #efe6d2;border-radius:6px;margin:5px 0;background:#fff}'
+      + '.v4his-tg{display:none}'
+      + '.v4his-sum{display:flex;align-items:center;gap:8px;font-size:12px;padding:6px 10px;flex-wrap:wrap}'
+      + '.v4his-lb{margin-left:auto;cursor:pointer;color:#9a7b2d;font-size:11px;user-select:none;-webkit-user-select:none;white-space:nowrap}'
+      + '.v4his-lb:hover{color:#c9a962}'
+      + '.v4his-lb:before{content:"\\25B8  "}'
+      + '.v4his-tg:checked ~ .v4his-sum .v4his-lb:before{content:"\\25BE  "}'
+      + '.v4his-det{display:none;padding:8px 10px;border-top:1px dashed #efe6d2}'
+      + '.v4his-tg:checked ~ .v4his-det{display:block}'
+      + '.v4his-none{font-size:11px;color:#b0a48e}';
+    document.head.appendChild(st);
+  }catch(e){}
+}
+// 完整评分记录 HTML（存档 detail → 模块分卡 + 每子点判定证据）
+function v4DetailHTML(det){
+  var h = '<div style="font-size:12px;color:var(--text2);margin-bottom:6px">'
+    + '<b style="color:var(--ink)">' + esc(det.host || '') + '</b>'
+    + (det.date ? ' ｜ ' + esc(det.date) : '')
+    + (det.studio ? ' ｜ ' + esc(det.studio) : '')
+    + ' ｜ 总分 <b style="color:var(--gold)">' + det.total + '</b>'
+    + (det.grade ? '（' + esc(det.grade) + ' 级）' : '')
+    + (det.semUsed ? ' ｜ <span style="color:#3d6b35">语义判定</span>' : ' ｜ <span style="color:#9a927f">关键词规则</span>')
+    + '</div>';
+  if(det.product) h += '<div style="font-size:11.5px;color:var(--text2);margin-bottom:4px">考核产品：' + esc(det.product) + '</div>';
+  var any = false;
+  for(var mi=0; mi<(det.mods||[]).length; mi++){
+    var m = det.mods[mi];
+    if(!m || !m.stds || !m.stds.length) continue;
+    any = true;
+    h += '<div style="margin-top:6px;padding:6px 8px;border:1px solid #efe6d2;border-radius:6px;background:#fdfbf4">'
+      + '<div style="font-size:11.5px;font-weight:700;margin-bottom:2px">' + esc(m.name || m.key || '')
+      + (m.score!=null ? ' —— <span style="color:var(--gold)">' + m.score + ' 分</span>' : '') + '</div>';
+    for(var si=0; si<m.stds.length; si++){
+      var s = m.stds[si];
+      h += '<div style="font-size:11.5px;margin-top:3px;line-height:1.5">'
+        + '<b style="color:#5a4632">' + esc(s.id || '') + '</b> ' + esc(s.label || '')
+        + (s.score!=null ? ' · <b>' + s.score + '</b>' : '')
+        + (s.level!=null ? '（Lv ' + s.level + '）' : '')
+        + '</div>';
+      if(s.sem && s.sem.evs && s.sem.evs.length){
+        h += '<div style="margin:1px 0 0 12px;font-size:10.5px;color:var(--text2)">';
+        for(var ei=0; ei<s.sem.evs.length; ei++){
+          var ev = s.sem.evs[ei];
+          var meta = v4SemMeta(ev.state);
+          h += '<div style="padding:2px 0;border-bottom:1px dashed #efe6d2;line-height:1.5">'
+            + '<span style="display:inline-block;padding:0 5px;border-radius:3px;font-size:10px;color:' + meta.c + ';background:' + meta.b + '">' + meta.t + '</span>'
+            + ' <span style="color:#5a4632">' + esc(ev.subId || '') + (function(){ var pn = v4SemPointName(s.id, ev.subId); return pn ? ' ' + esc(pn) : ''; })() + '</span>'
+            + ((ev.quoteTs || ev.confidence != null) ? ' <span style="color:#b0a48e">' + esc(ev.quoteTs || '') + (ev.confidence != null ? ' · 置信 ' + Math.round(Number(ev.confidence) * 100) + '%' : '') + '</span>' : '')
+            + (ev.quote ? '<div style="color:#6b5b45;margin-top:1px">「' + esc(ev.quote) + '」</div>' : '')
+            + (ev.reason ? '<div style="color:#9a927f">' + esc(ev.reason) + '</div>' : '')
+            + '</div>';
+        }
+        h += '</div>';
+      }
+    }
+    h += '</div>';
+  }
+  if(!any) h += '<div class="v4his-none">该记录无模块明细存档</div>';
+  return h;
+}
+// 从 detail 库按 ts 取完整记录（无 → 返回 null）
+function v4DetailByTs(ts){
+  try{
+    var ds = v4ReadLS('grading_detail_v1', '[]');
+    for(var i=0;i<ds.length;i++){ if(String(ds[i].ts) === String(ts)) return ds[i]; }
+  }catch(e){}
+  return null;
+}
+// patch clearHistoryLib：清摘要库时同步清明细库（防孤儿）
+(function(){
+  if(typeof clearHistoryLib !== 'function') return;
+  var origCL = clearHistoryLib;
+  window.clearHistoryLib = function(){
+    var out = origCL.apply(this, arguments);
+    try{ localStorage.removeItem('grading_detail_v1'); }catch(e){}
+    return out;
+  };
+})();
+
 // ---------- 7.6 优秀案例TOP3 本地沉淀（v4.3：包装 addHistoryRecord，评分时顺带存当日前3优秀案例） ----------
 // 新键 grading_cases_lib_v1：{date, host, studio, product, mod, std, ts, ev}
 (function(){
@@ -454,6 +633,8 @@ function v4FeishuUrl(fkey){
   window.addHistoryRecord = function(r){
     var out = orig.apply(this, arguments);
     try{
+      // ---- v4.10：完整评分记录存档（grading_detail_v1，orig push 摘要后取最后一条 ts 关联）----
+      try{ v4DetailSave(r); }catch(e){ console.error('[v4.10] v4DetailSave:', e); }
       // ---- v4.6：一次评分 → 路由写入多个 tab（主播日报 / 周总结 / 月总结 / 明星主播）----
       try{ v4RouteScore(r); }catch(e){ console.error('[v4.6] 评分路由写入异常:', e); }
       // ---- 优秀案例 TOP3（原有逻辑不变）----
