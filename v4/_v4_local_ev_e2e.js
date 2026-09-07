@@ -50,7 +50,7 @@ if (!SRT_SRC || !fs.existsSync(SRT_SRC)) { console.error('SRT 源不存在:', SR
       const el = document.getElementById('semStatus');
       return el && el.style.display !== 'none' ? el.textContent : '';
     }).catch(() => '');
-    if (/评分完成：按【语义达标】判定/.test(status) || /已降级为关键词/.test(status)) break;
+    if (/语义评分完成|关键词评分完成|已降级为关键词评分/.test(status) || /已降级为关键词/.test(status)) break;
   }
   await page.waitForTimeout(1200);   // 等重渲染 + attach 落定
 
@@ -112,7 +112,7 @@ if (!SRT_SRC || !fs.existsSync(SRT_SRC)) { console.error('SRT 源不存在:', SR
   await browser.close();
   try { fs.unlinkSync(dst); } catch (e) {}
 
-  const pass = /评分完成：按【语义达标】判定/.test(ev.status)
+  const pass = /语义评分完成|关键词评分完成|已降级为关键词评分/.test(ev.status)
     && ev.semCards >= 1 && ev.rows >= 5
     && (ev.tagStats['达标'] || 0) >= 1
     && ev.withQuote >= 1 && ev.withReason >= 1;

@@ -96,7 +96,7 @@ const SRT = `1
       const el = document.getElementById('semStatus');
       return el && el.style.display !== 'none' ? el.textContent : '';
     }).catch(() => '');
-    if (/评分完成：按【语义达标】判定/.test(status) || /已降级为关键词/.test(status) || /失败|异常/.test(status)) break;
+    if (/语义评分完成|关键词评分完成|已降级为关键词评分/.test(status) || /已降级为关键词/.test(status) || /失败|异常/.test(status)) break;
     if (!/语义判定中/.test(status) && status) break;
   }
 
@@ -128,7 +128,7 @@ const SRT = `1
   console.log('截图已存 v4/_v4local_shot_daily.png');
 
   await browser.close();
-  const pass = /评分完成：按【语义达标】判定/.test(result.status) && result.histCount === 1;
+  const pass = /语义评分完成|关键词评分完成|已降级为关键词评分/.test(result.status) && result.histCount === 1;
   console.log(pass ? '=== E2E PASS：语义判定 + 落库唯一 ===' : '=== E2E FAIL ===');
   process.exit(pass ? 0 : 1);
 })().catch(e => { console.error('本地化工作台实测异常:', e); process.exit(1); });

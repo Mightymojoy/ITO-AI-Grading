@@ -153,7 +153,8 @@ function v4Probe(lightId, url, txtId){
   var txt = document.getElementById(txtId);
   var ctrl = ('AbortController' in window) ? new AbortController() : null;
   var timer = ctrl ? setTimeout(function(){ ctrl.abort(); }, 2500) : null;
-  fetch(url, {signal: ctrl ? ctrl.signal : undefined}).then(function(){
+  fetch(url, {signal: ctrl ? ctrl.signal : undefined}).then(function(resp){
+    if(!resp.ok) throw new Error('HTTP ' + resp.status);
     if(timer) clearTimeout(timer);
     light.className = 'light on';
     txt.textContent = '已连接';
@@ -555,7 +556,9 @@ function v4DetailSnapshot(r, ts){
           bestKey: best?best.key:null, worstKey: worst?worst.key:null,
           bestStdId: bestStd?bestStd.id:null, worstStdId: worstStd?worstStd.id:null,
           strength: strength, problem: problem, tagline: tagline,
-          semUsed: !!(r.__sem && r.__sem.used), mods: mods};
+          semUsed: !!(r.__sem && r.__sem.used), mods: mods,
+          scoreType:r.scoreType || 'text',
+          fullDaily:r.fullDaily ? JSON.parse(JSON.stringify(r.fullDaily,function(k,v){return k==='repB64'?undefined:v;})) : null};
 }
 // 落库（在 v4.3 链 orig push 摘要后调用；同 r 对象只存一次，防 renderResult 重入重复）
 function v4DetailSave(r){
@@ -563,10 +566,10 @@ function v4DetailSave(r){
     if(!r || typeof r.total !== 'number' || !r.host || r.host === '未识别') return;
     if(r.__v410Saved) return;                                     // 同一评分对象只落一次
     var lib = v4ReadLS('grading_history_v1', '[]');
-    var last = lib.length ? lib[lib.length-1] : null;
+    var last = r.resultId ? lib.find(function(x){return x.resultId===r.resultId;}) : (lib.length ? lib[lib.length-1] : null);
     if(!last || String(last.host||'') !== String(r.host||'')) return;   // 摘要最后一条必须是本次，防批量错配
     var ts = (last.ts != null) ? last.ts : Date.now();
-    r.__v410Saved = true;
+    // Mark saved only after storage succeeds.
     var det = v4DetailSnapshot(r, ts);
     var ds = v4ReadLS('grading_detail_v1', '[]');
     var dupIdx = -1;
@@ -574,7 +577,8 @@ function v4DetailSave(r){
     if(dupIdx >= 0) ds[dupIdx] = det; else ds.push(det);
     if(ds.length > 300) ds = ds.slice(ds.length - 300);    // v4.10.1：上限 400 → 300（每条 detail ≈10-15KB，300 条 ≈3-4MB，留余量给摘要库 + golden/problems）
     localStorage.setItem('grading_detail_v1', JSON.stringify(ds));
-  }catch(e){ console.error('[v4.10] 完整评分记录存档异常:', e); }
+    r.__v410Saved = true;
+  }catch(e){ console.error('[v4.10] 完整评分记录存档异常:', e); r.__storageError='完整报告保存失败，请导出备份'; }
 }
 // 展开块样式（独立注入，不依赖 v4.9 闭包）
 var _v4HisStyleInjected = false;
@@ -598,6 +602,7 @@ function v4HisEnsureStyle(){
 }
 // 完整评分记录 HTML（存档 detail → 模块分卡 + 每子点判定证据）
 function v4DetailHTML(det){
+  if(det && det.fullDaily) return buildGptDailyHTML(det.fullDaily);
   // ---- v4.10.3：按截图样式重写（综合总分头 + 模块胶囊 + 子点判定三段卡）----
   var h = '';
   // ---- 顶部：综合总分头（截图"67/D级"大字号区）----
@@ -742,7 +747,7 @@ function v4DetailByTs(ts, host){
       // ---- v4.10：完整评分记录存档（grading_detail_v1，orig push 摘要后取最后一条 ts 关联）----
       try{ v4DetailSave(r); }catch(e){ console.error('[v4.10] v4DetailSave:', e); }
       // ---- v4.6：一次评分 → 路由写入多个 tab（主播日报 / 周总结 / 月总结 / 明星主播）----
-      try{ v4RouteScore(r); }catch(e){ console.error('[v4.6] 评分路由写入异常:', e); }
+      try{ v4RouteScore(r); }catch(e){ console.error('[v4.6] 评分路由写入异常:', e); r.__storageError='日报缓存保存失败，请导出备份'; }
       // ---- 优秀案例 TOP3（原有逻辑不变）----
       if(r && r.cases && r.cases.good && r.cases.good.length && r.host && r.host !== '未识别'){
         var lib = v4ReadLS('grading_cases_lib_v1', '[]');
@@ -811,6 +816,9 @@ function v4ScoreRow(r, extra){
   var mods = (r && r.modules) || [];
   for(var i=0;i<mods.length;i++){ if(mods[i] && mods[i].key) ms[mods[i].key] = mods[i].score; }
   var row = {
+    _updatedAt: r.updatedAt || new Date().toISOString(),
+    _resultId: r.resultId || '',
+    '评分类型': r.scoreType === 'full-daily' ? '完整日报' : '文本评分',
     '日期':     (r.date || '未填'),
     '主播':     r.host,
     '直播间':   r.studio || '',
@@ -835,7 +843,10 @@ function v4FsUpsert(lsKey, row, keyFields){
     }
     if(same){ dupIdx = i; break; }
   }
-  if(dupIdx >= 0) cache[dupIdx] = row; else cache.push(row);
+  if(dupIdx >= 0){
+    cache=cache.filter(function(old){return !keyFields.every(function(k){return String(old[k]||'')===String(row[k]||'');});});
+    cache.splice(Math.min(dupIdx,cache.length),0,row);
+  }else cache.push(row);
   if(cache.length > 3000) cache = cache.slice(cache.length - 3000);
   localStorage.setItem(lsKey, JSON.stringify(cache));
   return cache.length;
@@ -914,6 +925,7 @@ var V4_LAST_SCORE_DATE = '';
   if(typeof syncTop1ToFeishu !== 'function') return;
   var orig = syncTop1ToFeishu;
   window.syncTop1ToFeishu = function(results, top1){
+    if((results || []).some(function(r){return r.__semCtx && !r.__semDone;})) return;
     var out = orig.apply(this, arguments);
     try{
       if(!top1 || !top1.host || typeof top1.total !== 'number') return out;
@@ -939,7 +951,7 @@ var V4_LAST_SCORE_DATE = '';
         '参评人数':     valid.length,
         '是否明星主播': v4IsStar(top1.host) ? '是' : '否'
       };
-      var n = v4FsUpsert(V4_FS_LOCAL_KEY.top1, row, ['主播', '日期']);
+      var n = v4FsUpsert(V4_FS_LOCAL_KEY.top1, row, ['日期']);
       // TOP1 若是明星主播 → 明星 tab 也补一份（幂等，与 ④ 去重键一致不会重复）
       if(v4IsStar(top1.host)){
         v4FsUpsert(V4_FS_LOCAL_KEY.weekstar, v4ScoreRow(top1, {'周次': v4WeekKey(top1.date || '')}), ['主播', '日期']);
@@ -1010,7 +1022,9 @@ function v4FsShowSync(){
   var el = document.getElementById('fsSyncAt');
   if(el) el.textContent = V4_FS_STATE.syncedAt ? ('最近同步：' + V4_FS_STATE.syncedAt) : '';
 }
+var V4_FS_REQUEST_ID = 0;
 function v4FeishuLoad(key){
+  var requestId = ++V4_FS_REQUEST_ID;
   V4_FS_STATE.key = key;
   var box = document.getElementById('v4arch-feishu');
   var st = document.getElementById('fsStatus');
@@ -1034,6 +1048,7 @@ function v4FeishuLoad(key){
       v4FsFillSel(key);
       // 后台加载 data/<key>.js 做合并（去重：以同步产物为准覆盖同 主播+日期）
       v4FsEnsure(key).then(function(synced){
+        if(requestId !== V4_FS_REQUEST_ID || V4_FS_STATE.key !== key) return;
         if(!synced || !synced.rows || !synced.rows.length) return;
         var merged = mergeDaily(localCache, synced.rows);
         V4_FS_STATE.columns = v4FsCols(merged, V4_FS_BASE_COLS[key] || V4_FS_DAILY_COLS);
@@ -1049,6 +1064,7 @@ function v4FeishuLoad(key){
   }
 
   return v4FsEnsure(key).then(function(d){
+    if(requestId !== V4_FS_REQUEST_ID || V4_FS_STATE.key !== key) return;
     if(!d || !d.ok){ v4FsNoData(key); return; }
     V4_FS_STATE.table = d.table || null;
     V4_FS_STATE.columns = d.columns || [];
@@ -1323,22 +1339,24 @@ function v4FsReload(){
 function v4FsCols(rows, fixed){
   if(!rows || !rows.length) return fixed.slice();
   var extra = {};
-  rows.forEach(function(r){ Object.keys(r).forEach(function(k){ if(fixed.indexOf(k) < 0) extra[k] = 1; }); });
+  rows.forEach(function(r){ Object.keys(r).forEach(function(k){ if(k.charAt(0)!=='_' && fixed.indexOf(k) < 0) extra[k] = 1; }); });
   return fixed.concat(Object.keys(extra));
 }
 function dailyCols(rows){ return v4FsCols(rows, V4_FS_DAILY_COLS); }
 function dateDesc(a,b){ var da=String(a['日期']||''), db=String(b['日期']||''); return da>db?-1:da<db?1:0; }
 // 合并：本地缓存（评分实时产生）+ 同步产物（飞书历史），以同步产物为准覆盖同(主播+日期)
 function mergeDaily(local, synced){
-  var map = {};
-  synced.forEach(function(r){ var k = (r['主机']||r['主播']||'') + '|' + (r['日期']||''); map[k] = r; });
+  var map = Object.create(null);
+  function key(r){return JSON.stringify([r['主机']||r['主播']||'', r['日期']||'']);}
+  synced.forEach(function(r){map[key(r)]=r;});
   local.forEach(function(r){
-    var k = (r['主播']||'') + '|' + (r['日期']||'');
-    if(!map[k]) map[k] = r; // 本地有、飞书没有 → 保留（可能是还没回写成功的新评分）
+    var old=map[key(r)];
+    // Undated snapshots cannot prove that they include this local revision.
+    var remoteTime=old && Date.parse(old._updatedAt || '');
+    var localTime=Date.parse(r._updatedAt || '');
+    if(!old || !remoteTime || !localTime || localTime >= remoteTime) map[key(r)]=r;
   });
-  var out = [];
-  for(var k in map) out.push(map[k]);
-  return out.sort(dateDesc);
+  return Object.keys(map).map(function(k){return map[k];}).sort(dateDesc);
 }
 document.addEventListener('DOMContentLoaded', function(){
   var rb = document.getElementById('fsReloadBtn');
@@ -1346,25 +1364,15 @@ document.addEventListener('DOMContentLoaded', function(){
 });
 
 // =====================================================
-// ---------- 7.9 v4.9.0 语义评分（壳层 patch：判定层换源，公式不动） ----------
-// 原则：把 runGrading 的关键词命中判定，换成"文字语义是否达标"的判定——
-//   ① patch runGrading：仍先同步跑关键词版出结构骨架 r（兜底），并在 r 上挂 __semCtx
-//   ② 落库入口（addHistoryRecord / collectProblems）认领 r → 触发云端语义判定
-//   ③ 判定成功 → semantic-core.apply() 按证据包覆写各子标准 level/quality/score，
-//      重算模块分/总分/等级 → flush 统一落库（历史/4tab/问题库）→ 重渲染
-//   ④ 判定失败/超时 → 自动降级：保留关键词版分数并标注"降级"，绝不整批失败
-// 铁律：app-core.js 一字不动；v3 分析系统不碰；本模块全部走 window patch
+// ---------- v4.11 语义判定适配器 ----------
+// v4Evaluate 返回最终评分 Promise；不渲染、不落库、不发送飞书请求。
+// workflow.js 负责任务归属、最终提交和页面状态；评分公式仍由 semantic-core 维护。
 // =====================================================
 (function(){
   if(typeof runGrading !== 'function' || typeof window.V4SEM !== 'object') return;
 
   var V4S = window.V4SEM;
   var _coreRunGrading = runGrading;              // app-core 原版（关键词引擎，唯一计分公式来源）
-  var _v46AHR  = window.addHistoryRecord;         // v4.6 链：history push + 4tab 路由 + 优秀案例
-  var _origCP  = collectProblems;                 // app-core 问题沉淀
-  var _origAFF = window.autoFillFeishu;           // v4.7.9 链：飞书主表 + syncFeishuLibs + syncWeekMonth（已包装评分日期）
-  var _origRC  = typeof renderBatchCompare === 'function' ? renderBatchCompare : null;
-  var _origAFR = (typeof autoFullReport === 'function') ? autoFullReport : null;  // 一键完整日报（视觉 GPT 报告，豁免语义）
 
   // ---- 开关与 API 地址（设置页可覆盖；semantic_enabled='0' 关闭） ----
   function semEnabled(){
@@ -1385,77 +1393,20 @@ document.addEventListener('DOMContentLoaded', function(){
     try{ return localStorage.getItem('semantic_api_url') || V4S.CFG.apiUrl; }catch(e){ return V4S.CFG.apiUrl; }
   }
 
-  // ① patch runGrading：同步骨架 + 挂语义上下文（不触发，等落库入口认领）
-  // 豁免：一键完整日报(autoFullReport) 走视觉 GPT 口径，其画面分数取同步快照，
-  //       若参与异步语义会导致"画面分 ≠ 飞书分"，故运行期间整体豁免语义。
-  window.runGrading = function(segs, productKey){
+  window.runGrading = function(segs, productKey, options){
     var r = _coreRunGrading(segs, productKey);
-    if(r && !r.noProduct && r.modules && semEnabled() && !window.V4SEM_EXEMPT){
-      r.__semCtx = { segs: segs || [], productKey: productKey, t: Date.now() };
-      r.__semPending = false;
-      r.__semDone = false;
-      r.__semUpgrading = false;
-      r.__semFlushed = false;
+    if(r && !r.noProduct && r.modules && semEnabled() && !(options && options.skipSemantic)){
+      r.__semCtx={segs:segs || [], productKey:productKey, t:Date.now()};
     }
     return r;
   };
-
-  // ①' 豁免包装：autoFullReport 运行期间置全局标志 → runGrading 不挂 __semCtx（async → Promise 链复位）
-  if(_origAFR){
-    window.autoFullReport = function(){
-      window.V4SEM_EXEMPT = true;
-      var p = _origAFR.apply(this, arguments);
-      if(p && typeof p.then === 'function'){
-        return p.then(function(v){ window.V4SEM_EXEMPT = false; return v; },
-                      function(e){ window.V4SEM_EXEMPT = false; throw e; });
-      }
-      window.V4SEM_EXEMPT = false;
-      return p;
-    };
-  }
-
-  // 认领：语义候选结果被落库入口触达时 → 启动云端升级并挂起本次落库
-  function semClaim(r){
-    if(!r || !r.__semCtx || r.__semDone) return false;
-    if(!semEnabled()) return false;
-    if(!r.__semPending){
-      r.__semPending = true;
-      semUpgrade(r);
-    }
-    return true;
-  }
-
-  // ② patch addHistoryRecord（run / batchRun 场景认领点）
-  window.addHistoryRecord = function(r){
-    if(semClaim(r)) return;                       // 挂起：语义版落库由 flush 统一执行
-    return _v46AHR.apply(this, arguments);
+  window.v4Evaluate = async function(segs, productKey, job){
+    var r=window.runGrading(segs,productKey);
+    if(r.noProduct) return r;
+    if(r.__semCtx) await semUpgrade(r,job);
+    return r;
   };
-
-  // ②' patch collectProblems（transcribeVideo 场景认领点；run/batch 场景里作二次挂起闸）
-  window.collectProblems = function(r){
-    if(r && r.__semCtx && (r.__semPending || r.__semDone)) return 0;   // 挂起/已完成 → 由 flush 统一跑
-    if(semClaim(r)) return 0;
-    return _origCP.apply(this, arguments);
-  };
-
-  // ②'' patch autoFillFeishu（飞书主表直写入口：renderResult 内部 / batchRun / 一键日报 都会经过）
-  //      语义候选在判定完成前一律挂起 → 飞书只收语义版（或降级关键词版），杜绝"本地语义、飞书旧分"分叉；
-  //      判定完成后由 semFinish 显式 flush 一次（__semFlushed 标记），renderResult 重渲染不再双写。
-  window.autoFillFeishu = function(r){
-    if(r && r.__semCtx){
-      if(!r.__semDone) return;                 // 语义进行中 → 挂起
-      if(r.__semFlushed) return;               // 已由 flush 写飞书 → 防 renderResult 重渲染双写
-    }
-    return _origAFF.apply(this, arguments);
-  };
-
-  // ③ 批量渲染钩子：记录最近一批结果，供语义全部完成后重绘 TOP1 比较卡
-  if(_origRC){
-    window.renderBatchCompare = function(results){
-      window._v4LastBatchResults = results;
-      return _origRC.apply(this, arguments);
-    };
-  }
+  window.v4AttachSemanticEvidence=attachSemEvidence;
 
   // ---- 组装云端请求 ----
   function semPayload(segs, productKey){
@@ -1473,96 +1424,23 @@ document.addEventListener('DOMContentLoaded', function(){
   }
 
   // ---- 异步升级（防重入；超时/失败 → 降级保留关键词版） ----
-  function semUpgrade(r){
-    if(r.__semUpgrading) return;
-    r.__semUpgrading = true;
-    var ctx = r.__semCtx || {};
-    var url = semApiUrl();
-    var payload = semPayload(ctx.segs, ctx.productKey);
-    if(!payload.text || !payload.judges.length){
-      r.__sem = { used:false, degraded:true, reason:'empty text/judges' };
-      semFinish(r);
-      return;
-    }
-    semStatusText('评分引擎：语义判定中…（新标准：按文字意思是否达标，非关键词命中）', '#f0ead6', '#9a7b2d');
-    var ctrl = null;
-    if(typeof AbortController !== 'undefined') ctrl = new AbortController();
-    var tm = setTimeout(function(){ try{ ctrl && ctrl.abort(); }catch(e){} r.__semAborted = true; }, V4S.CFG.timeoutMs || 25000);
-    fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload), signal: ctrl ? ctrl.signal : undefined })
-      .then(function(resp){
-        clearTimeout(tm);
-        if(!resp.ok) throw new Error('HTTP ' + resp.status);
-        return resp.json();
-      })
-      .then(function(data){
-        if(data && data.ok && data.evidences && data.evidences.length){
-          var app = V4S.apply(r, data);
-          r.__sem = { used:true, mode:'semantic', applied: app.applied, flags: app.flags,
-                      api: url, ms: Date.now() - (ctx.t || Date.now()), judged: data.evidences.length };
-        } else {
-          r.__sem = { used:false, degraded:true, reason: (data && data.error) || '空判定结果' };
-        }
-        semFinish(r);
-      })
-      .catch(function(err){
-        clearTimeout(tm);
-        r.__sem = { used:false, degraded:true, reason: (r.__semAborted ? '云端判定超时(' + Math.round((V4S.CFG.timeoutMs||25000)/1000) + 's)' : String((err && err.message) || err)) };
-        semFinish(r);
-      });
-  }
-
-  // ---- flush：语义版/降级版 统一落库 + 重渲染（一次评分只落一次库） ----
-  function semFinish(r){
-    if(r.__semDone) return;
-    r.__semDone = true;
-    r.__semPending = false;
-    r.__semUpgrading = false;
-    var sem = r.__sem || {};
+  async function semUpgrade(r,job){
+    var ctx=r.__semCtx, url=semApiUrl();
+    var payload=semPayload(ctx.segs,ctx.productKey);
+    V4Jobs.progress(job,'语义评分中…');
     try{
-      // 本地：历史 + 4tab 路由 + 优秀案例（v4.6 链）；问题库（按语义版重抽）；飞书（主表 + 同步库 + 周月汇总）
-      _v46AHR(r);
-      _origCP(r);
-      r.__semFlushed = true;          // 先标记：renderResult 重渲染时 autoFillFeishu 不再重复写飞书
-      _origAFF(r);
-    }catch(e){ console.error('[v4.9] 语义落库异常:', e); }
-    // 重渲染（单主播报告 / 批量比较卡 / 各库面板）
-    try{ if(typeof renderResult === 'function') renderResult(r); }catch(e){}
-    // v4.9.2：重渲染后为每张语义判定卡注入「判定依据」逐子点证据（有依可寻）
-    // v4.9.5：批量挂起中（r 属于批量数组）跳过单条注入——此时 DOM 已首轮渲染全部主播的同 id 卡，
-    //         单条按 .std-id 匹配会把 r1 证据错配注入未完成的 r2 卡；统一等批量全部完成后由 semEvBatchAttach 注入
-    try{
-      var _inBatch = false;
-      var _ba = window._v4LastBatchResults;
-      if(_ba && r){ for(var _bi=0; _bi<_ba.length; _bi++){ if(_ba[_bi] === r){ _inBatch = true; break; } } }
-      if(!_inBatch){ attachSemEvidence(r); }
-    }catch(e){ console.error('[v4.9.2] attachSemEvidence:', e); }
-    try{ renderGoldenLib(); }catch(e){}
-    try{ renderHistoryLib(); }catch(e){}
-    try{ if(typeof renderProblemLib === 'function') renderProblemLib(); }catch(e){}
-    try{ if(typeof renderProblemDetail === 'function') renderProblemDetail(); }catch(e){}
-    // 批量场景：全部主播升级完成后重算 TOP1 并重同步飞书 + 重绘
-    if(window._v4LastBatchResults){
-      var all = window._v4LastBatchResults;
-      var pending = 0;
-      for(var i=0;i<all.length;i++){ if(typeof all[i].total === 'number' && all[i].__semCtx && !all[i].__semDone) pending++; }
-      if(pending === 0){
-        var t1 = null;
-        try{
-          t1 = (typeof pickTop1 === 'function') ? pickTop1(all) : null;
-          if(t1 && typeof syncTop1ToFeishu === 'function') syncTop1ToFeishu(all, t1);
-          if(_origRC) _origRC(all);
-          // v4.9.3：批量比较卡重绘后为每张评分卡注入判定依据
-          try{ attachSemEvidence(all); }catch(e){ console.error('[v4.9.3] batch attachSemEvidence:', e); }
-        }catch(e){ console.error('[v4.9] 批量 TOP1 重算异常:', e); }
-        if(t1 && typeof toastErr === 'function') toastErr('语义评分全部完成｜TOP1 = ' + t1.host + '（' + t1.total + ' 分，已按语义分重算）');
-      }
+      if(!payload.text || !payload.judges.length) throw new Error('缺少有效逐字稿或判定标准');
+      var data=await V4Jobs.request(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)},job,V4S.CFG.timeoutMs || 25000);
+      V4Jobs.assertActive(job);
+      if(!data.evidences || !data.evidences.length) throw new Error('空判定结果');
+      var app=V4S.apply(r,data);
+      r.__sem={used:true,mode:'semantic',applied:app.applied,flags:app.flags,api:url,ms:Date.now()-ctx.t,judged:data.evidences.length};
+    }catch(e){
+      V4Jobs.assertActive(job);
+      r.__sem={used:false,degraded:true,reason:e.message};
     }
-    // 状态条更新
-    if(sem.used){
-      semStatusText('评分完成：按【语义达标】判定（子点证据 ' + (sem.judged||0) + ' 条）· ' + r.total + ' 分 ' + r.grade + ' 级', '#e8ece4', '#3d6b35');
-    } else if(sem.degraded){
-      semStatusText('⚠ 语义判定暂不可用（' + (sem.reason||'未知') + '）——本次已降级为关键词规则，请检查云端 /api/semantic-judge', '#f6e3dd', '#b3452e');
-    }
+    r.__semDone=true;
+    return r;
   }
 
   // ---- 判定依据明细 v4.9.2：每张语义判定卡可展开查看逐子点证据（有依可寻） ----
@@ -1719,7 +1597,7 @@ document.addEventListener('DOMContentLoaded', function(){
     var list = semEvFlat(r);
     if(!list.length) return;
     // 单条（每日评分 / 一键日报子结果）：全文档 .std 卡按 .std-id 精确匹配注入
-    semEvInject(document.querySelectorAll('.std'), list);
+    semEvInject(document.querySelectorAll('#singleReport .std'), list);
   }
 
   // ---- 状态条（常驻 #result 顶部） ----

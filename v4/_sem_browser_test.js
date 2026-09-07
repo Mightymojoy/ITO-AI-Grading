@@ -83,7 +83,7 @@ const SRT = `1
       const el = document.getElementById('semStatus');
       return el && el.style.display !== 'none' ? el.textContent : '';
     }).catch(() => '');
-    if (/评分完成：按【语义达标】判定/.test(status) || /已降级为关键词/.test(status) || /失败|异常/.test(status)) break;
+    if (/语义评分完成|关键词评分完成|已降级为关键词评分/.test(status) || /已降级为关键词/.test(status) || /失败|异常/.test(status)) break;
     if (!/语义判定中/.test(status) && status) break;
   }
 

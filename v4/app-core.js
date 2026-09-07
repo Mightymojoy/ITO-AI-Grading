@@ -1,17 +1,26 @@
 // =====================================================
-// v4 app-core.js —— 评分引擎核心（自 v3/index.html 内联脚本原样提取，字符级零改动）
+// v4 app-core.js —— 评分计算、报告渲染和兼容入口
 // 来源：v3.9 (07a97a7) v3/index.html L279-L2917 ｜ 提取日期：2026-08-28
-// 约束：本文件禁止修改任何逻辑；v4 只允许改壳层（index.html / v4-shell.js）
+// v4.11：保留评分公式，入口由 workflow.js 统一调度。
 // =====================================================
 // =====================================================
-// v4 app-core.js —— 评分引擎核心（自 v3/index.html 内联脚本原样提取，字符级零改动）
+// v4.11：任务、取消、最终落库和同步由 workflow.js 负责。
 // 来源：v3.9 (07a97a7) v3/index.html L279-L2917 ｜ 提取日期：2026-08-28
-// 约束：本文件禁止修改任何逻辑；v4 只允许改壳层（index.html / v4-shell.js）
+// v4.11：保留评分公式，入口由 workflow.js 统一调度。
 // =====================================================
 // ================= 工具 =================
 function $(id){return document.getElementById(id)}
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
-function toastErr(m){var e=$('errbar');e.style.display='block';e.textContent=m;setTimeout(function(){e.style.display='none'},6000)}
+function toastErr(m){
+  var e=$('errbar'); if(!e) return;
+  clearTimeout(toastErr.timer);
+  e.style.display='block'; e.textContent=m; e.setAttribute('role','status');
+  var good=/^(✓|✅|完整日报完成|评分完成|批量评分完成)/.test(m);
+  var bad=/(失败|异常|无法|错误|请先|不能为空)/.test(m);
+  e.style.background=good?'#e8ece4':bad?'#fdecea':'#f1e9d8';
+  e.style.color=good?'var(--ok)':bad?'var(--danger)':'var(--text)';
+  toastErr.timer=setTimeout(function(){e.style.display='none'},6000);
+}
 
 // 云端/本地飞书写回端点（部署版 = Vercel Serverless；本地 = asr 服务 3712）
 // 可通过 localStorage('feishu_fill_url') 覆盖
@@ -49,33 +58,7 @@ function effectiveStudio(r){
 }
 
 // V3.2：评分完成后自动调 /api/feishu-fill 回填（失败/未配置仅 toast，不阻塞评分）
-function autoFillFeishu(r){
-  try{
-    if(typeof r.total !== 'number') return;
-    if(!r.host || r.host === '未识别' || r.host === '未填') return;
-    if(!r.date || r.date === '未填') return;
-    fetch(FEISHU_FILL_URL, {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ host: r.host, date: r.date, studio: effectiveStudio(r), result: r })
-    }).then(function(rs){ return rs.json(); }).then(function(j){
-      if(j.ok){
-        toastErr('✓ 已回填飞书' + (j.created ? '（新建记录）' : '') + '：' + r.host + ' ' + r.date + '（' + r.total + ' 分 / ' + j.fieldsWritten + ' 字段）');
-      } else if(j.skipped){
-        // 跳过不报错，仅短提示
-        toastErr('ⓘ 飞书回填跳过：' + j.reason);
-      } else {
-        toastErr('✗ 飞书回填失败：' + (j.reason || j.error || '未知错误'));
-      }
-    }).catch(function(e){
-      // 服务未启/网络断，不阻塞评分
-      console.log('飞书回填异常（不影响评分）:', e.message);
-    });
-    // V3.3：同步折叠块数据（金句/问题/历史评分）到飞书同步表
-    syncFeishuLibs(r);
-    // V3.8：评分后实时更新当前周/月总结
-    try{ syncWeekMonth(); }catch(e3){ console.log('syncWeekMonth 异常:', e3.message); }
-  }catch(e){ console.log('autoFillFeishu 包装异常:', e.message); }
-}
+function autoFillFeishu(r){ return V4Jobs.sync(r); }
 
 // V3.8：评分后实时聚合更新当前周/月总结（周起始~周结束 / 当月）
 function syncWeekMonth(){
@@ -106,7 +89,7 @@ function syncWeekMonth(){
 }
 
 // V3.3：把本场金句/问题/历史评分同步到飞书对应表（黄金话术库/问题话术库/历史评分）
-function syncFeishuLibs(r){
+function buildFeishuLibPayload(r){
   try{
     var payload = {golden: [], problems: [], history: [], cases: [], stars: []};
     // 金句（4星+）
@@ -143,21 +126,13 @@ function syncFeishuLibs(r){
       }
     }
     if(!payload.golden.length && !payload.problems.length && !payload.history.length) return;
-    // 云端 + 本地都同步（FEISHU_SYNC_URL 自动判断环境）
-    fetch(FEISHU_SYNC_URL, {
-      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)
-    }).then(function(rs){ return rs.json(); }).then(function(j){
-      if(j.ok && j.total > 0){
-        toastErr('✓ 飞书同步：写入 ' + j.written + ' / 去重 ' + j.skipped + (j.failed ? ' / 失败 ' + j.failed : ''));
-      } else if(j.skipped){
-        toastErr('ⓘ 飞书同步跳过：' + j.reason);
-      }
-    }).catch(function(e){ console.log('飞书同步异常:', e.message); });
-  }catch(e){ console.log('syncFeishuLibs 异常:', e.message); }
+    return payload;
+  }catch(e){ throw e; }
 }
+function syncFeishuLibs(r){ return V4Jobs.syncLibs(r); }
 
 // V3.4：批量评分完成后，把 TOP1 评选结果同步到飞书 TOP1 表
-function syncTop1ToFeishu(results, top1){
+function buildTop1Payload(results, top1){
   try{
     if(!top1 || !top1.host) return;
     var valid = results.filter(function(r){ return typeof r.total === 'number'; });
@@ -188,15 +163,10 @@ function syncTop1ToFeishu(results, top1){
       second: second ? second.host : '', diff: second ? Math.round((top1.total - second.total)*10)/10 : '',
       c1Check: c1Chk
     }]};
-    fetch(FEISHU_SYNC_URL, {
-      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)
-    }).then(function(rs){ return rs.json(); }).then(function(j){
-      if(j.ok && j.total > 0){
-        toastErr('✓ TOP1 已同步飞书：' + top1.host + '（' + top1.total + ' 分）' + (j.written ? ' 新建' : ' 更新'));
-      }
-    }).catch(function(e){ console.log('TOP1 飞书同步异常:', e.message); });
-  }catch(e){ console.log('syncTop1ToFeishu 异常:', e.message); }
+    return payload;
+  }catch(e){ throw e; }
 }
+function syncTop1ToFeishu(results, top1){ return V4Jobs.syncTop1(results, top1); }
 
 // ================= 1. 解析器（SRT / [HH:MM] / 纯文本 → 段落） =================
 function parseTranscript(text){
@@ -917,7 +887,7 @@ function fmtTs(sec){
 // C 方案：评分后自动收集问题入库（A），人工可标记优先级 P0/P1/P2（B）
 var PROBLEM_LS_KEY = 'grading_problem_lib_v1';
 function getProblemLib(){ try{ return JSON.parse(localStorage.getItem(PROBLEM_LS_KEY) || '[]'); }catch(e){ return []; } }
-function saveProblemLib(lib){ try{ localStorage.setItem(PROBLEM_LS_KEY, JSON.stringify(lib)); }catch(e){} }
+function saveProblemLib(lib){ localStorage.setItem(PROBLEM_LS_KEY, JSON.stringify(lib)); }
 
 // 收集问题：从评分结果 r 提取四类问题 → 入库
 function collectProblems(r){
@@ -1001,7 +971,7 @@ function collectProblems(r){
 
     if(added > 0){ saveProblemLib(lib); }
     return added;
-  }catch(e){ return 0; }
+  }catch(e){ r.__storageError='问题库保存失败，请导出报告备份'; return 0; }
 }
 
 // 问题库聚合：按主播/类型/时间
@@ -1245,10 +1215,9 @@ function renderResult(r){
     if(r.date && r.date !== '未填'){ $('dateInput').value = r.date; }
   }catch(e){}
   // V3.2：评分完成后自动回填飞书（按 主播+日期 匹配，失败不阻塞评分）
-  autoFillFeishu(r);
+  LAST_RESULT = r; // 显示和导出始终指向同一份已完成结果
   // 单主播模式：显示单人报告，隐藏批量对比区
   $('singleReport').style.display = 'block';
-  $('batchCompare').style.display = 'none';
   $('totalScore').textContent = r.total;
   var gb = $('gradeBadge');
   gb.textContent = r.grade + ' 级';
@@ -1769,7 +1738,9 @@ function gptAbilityOverride(segs, raw, key, maxScore){
 // 完整日报渲染（GPT 风格：综合判断/代表画面/服化道表/5能力/次日必做）
 function renderGptDaily(rd){
   var box = $('visionReportBlock');
-  if(!box) return;
+  if(box) box.innerHTML = buildGptDailyHTML(rd);
+}
+function buildGptDailyHTML(rd){
   var G = rd.grade, gCl = G==='A' ? 'var(--gold)' : (G==='B' ? '#d4a94c' : 'var(--danger)');
   var h = '<div style="border:1.5px solid var(--gold);border-radius:10px;padding:14px;background:linear-gradient(180deg,#fffdf6,#fff)">';
   h += '<div style="font-size:15px;font-weight:700;color:var(--text1)">主播综合评估日报 · ' + esc(rd.host) + '</div>';
@@ -1811,42 +1782,45 @@ function renderGptDaily(rd){
     for(var i=0;i<rd.nextDo.length;i++) h += '<div style="font-size:12px;background:#faf8f3;border-radius:5px;padding:4px 8px;margin:3px 0">● ' + esc(rd.nextDo[i]) + '</div>';
   }
   h += '</div>';
-  box.innerHTML = h;
+  return h;
 }
 // 完整自动日报主流程：视频 → 并行转写 + 抽帧视觉 → 双引擎 → GPT 风格日报
-async function autoFullReport(){
-  var f = $('visionVideoInput') && $('visionVideoInput').files[0];
+function autoFullReport(){ return V4Jobs.fullReport(); }
+async function buildFullReport(job){
+  var f = job.file;
   if(!f){ toastErr('请先选择视频文件（完整日报用）'); return; }
-  var host = $('visionHostInput').value.trim();
+  var host = job.meta.host;
   if(!host){ toastErr('请填写主播名'); return; }
   var btn = $('visionAutoBtn'), st = $('visionStatus');
-  btn.disabled = true; st.style.display = 'inline';
+  btn.disabled = true; st.style.display = 'none'; // 进度统一显示在任务面板
   st.textContent = '完整日报生成中：上传+转写+抽帧+视觉分析…（10 分钟视频约 3-8 分钟）';
   try{
     // 1) 并行：转写（能力评估）+ 抽帧（服化道）
     st.textContent = '上传视频 + 转写 + 抽帧中…';
-    var [trResp, exResp] = await Promise.all([
-      fetch(ASR_URL + '/api/transcribe', {method:'POST', headers:{'Content-Type':'application/octet-stream','X-File-Name':encodeURIComponent(f.name)}, body:f}),
-      fetch(VISION_URL + '/api/extract', {method:'POST', headers:{'Content-Type':'application/octet-stream','X-File-Name':encodeURIComponent(f.name)}, body:f})
+    var upload = {method:'POST', headers:{'Content-Type':'application/octet-stream','X-File-Name':encodeURIComponent(f.name)}, body:f};
+    var parts = await Promise.all([
+      V4Jobs.cachedRequest(job, 'transcription', ASR_URL + '/api/transcribe', upload),
+      V4Jobs.cachedRequest(job, 'extraction', VISION_URL + '/api/extract', upload)
     ]);
-    var tr = await trResp.json(), ex = await exResp.json();
-    if(!tr.ok) throw new Error('转写失败：' + (tr.error||'').slice(0,120));
-    if(!ex.ok) throw new Error('抽帧失败：' + (ex.error||'').slice(0,120));
+    var tr = parts[0], ex = parts[1];
+    V4Jobs.assertActive(job);
     var segs = parseTranscript(tr.srt || '');
-    if(!segs.length) throw new Error('转写结果为空');
+    if(!segs.length) { delete job.cache.transcription; throw new Error('转写结果为空'); }
     var frames = ex.frames || [];
+    if(!frames.length) { delete job.cache.extraction; throw new Error('未提取到有效画面，请检查视频后重试'); }
     st.textContent = '转写 ' + segs.length + ' 段 ✓，抽帧 ' + frames.length + ' 张 ✓，视觉分析中…';
     // 2) 逐帧视觉描述
     var descs = [];
     for(var i=0;i<frames.length;i++){
       st.textContent = '视觉分析 ' + (i+1) + '/' + frames.length + '…';
-      var vr = await fetch(VISION_URL + '/api/vision', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({image:frames[i].file, prompt:''})});
-      var vd = await vr.json();
+      V4Jobs.progress(job, '视觉分析 ' + (i+1) + '/' + frames.length);
+      var vd = await V4Jobs.cachedRequest(job, 'frame-'+i, VISION_URL + '/api/vision', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({image:frames[i].file, prompt:''})});
+      if(!vd.desc || !vd.desc.trim()) { delete job.cache['frame-'+i]; throw new Error('第 '+(i+1)+' 帧没有有效分析，请重试此步骤'); }
       descs.push({ts:frames[i].tsSec, file:frames[i].file, desc:vd.desc||'', ok:!!vd.ok, b64:vd.image_b64||''});
     }
     var combined = descs.map(function(x){ return (x.ts!=null?'['+x.ts+'s] ':'') + x.desc; }).join('\n');
     // 3) 文本评分（能力评估）→ GPT 5项映射
-    var r = runGrading(segs, 'auto');
+    var r = runGrading(segs, job.meta.productKey, {skipSemantic:true});
     if(r.noProduct) throw new Error('未识别到产品讲解，无法自动评分');
     var mods = {}; r.modules.forEach(function(m){ mods[m.key]=m; });
     var raw = fullText(segs);
@@ -1860,6 +1834,7 @@ async function autoFullReport(){
     var outfitRes = judgeOutfit(combined, host);
     var total = abSum + outfitRes.total;
     var grade = total >= 85 ? 'A' : (total >= 70 ? 'B' : (total >= 60 ? 'C' : 'D'));
+    if(outfitRes.gradeLimit && grade === 'A') grade = 'B';
     // 4) 综合判断 + 次日必做
     var bestA = [pos,flu,ext,dis,emo].slice().sort(function(a,b){return (b.score/b.max)-(a.score/a.max)})[0];
     var worstA = [pos,flu,ext,dis,emo].slice().sort(function(a,b){return (a.score/a.max)-(b.score/b.max)})[0];
@@ -1872,200 +1847,24 @@ async function autoFullReport(){
     // 5) 代表画面（选道具帧，用视觉接口回传的 base64）
     var repFrame = descs[4] || descs[0];
     var repB64 = (repFrame && repFrame.b64) ? 'data:image/jpeg;base64,' + repFrame.b64 : '';
-    // 6) 渲染
-    renderGptDaily({host:host, studio:r.meta && r.meta.studio || '', video:f.name, total:total, grade:grade, judgment:judgment,
-      outfit:outfitRes, abilities:{pos:pos,flu:flu,ext:ext,dis:dis,emo:emo}, repB64:repB64, repTs:repFrame?repFrame.ts:'',
-      nextDo:nextDo, product:r.sellpoints?r.sellpoints.product:'', cover:r.sellpoints?(r.sellpoints.covered+'/'+r.sellpoints.total):'', baselineErr:r.baseline?r.baseline.errors:0});
-    // V3.10 全联动修复：一键完整日报也要触发全部飞书写回（主播日报/金句/问题/历史/周月/明星）
-    try{
-      r.host = host;
-      r.date = $('dateInput').value.trim() || new Date().toISOString().slice(0,10);
-      r.studio = $('studioSelect').value || (r.meta && r.meta.studio) || '';
-      r.product = r.sellpoints ? r.sellpoints.product : '';
-      r.golden = r.golden || {items:[]};
-      autoFillFeishu(r);   // 内部含 syncFeishuLibs（金句/问题/历史/明星）
-      try{ syncWeekMonth(); }catch(e3){ console.log('周月更新异常:', e3.message); }
-    }catch(e2){ console.log('完整日报飞书写回异常:', e2.message); }
-    toastErr('完整日报完成：' + total + '分 ' + grade + '级（能力' + abSum + ' + 服化道' + outfitRes.total + '）');
-  }catch(e){
-    toastErr('完整日报失败：' + e.message);
-  }finally{
-    btn.disabled = false;
-  }
+    V4Jobs.assertActive(job);
+    r.host=host; r.date=job.meta.date; r.studio=job.meta.studio;
+    r.product=r.sellpoints ? r.sellpoints.product : '';
+    r.textScore={total:r.total,grade:r.grade};
+    r.total=total; r.grade=grade; r.scoreType='full-daily'; r.segCount=segs.length;
+    r.fullDaily={host:host,studio:r.studio,date:r.date,video:f.name,total:total,grade:grade,judgment:judgment,
+      outfit:outfitRes,abilities:{pos:pos,flu:flu,ext:ext,dis:dis,emo:emo},repB64:repB64,repTs:repFrame?repFrame.ts:'',
+      nextDo:nextDo,product:r.product,cover:r.sellpoints?(r.sellpoints.covered+'/'+r.sellpoints.total):'',baselineErr:r.baseline?r.baseline.errors:0};
+    return r;
+  }catch(e){ throw e; }
 }
 
 // ================= 6. 视频转写入口（本地 SenseVoice / 云端可插拔） =================
 var ASR_URL = localStorage.getItem('asr_url') || 'http://127.0.0.1:3712';
-async function transcribeVideo(){
-  var f = $('videoInput').files[0];
-  if(!f){ toastErr('请先选择视频文件（MKV/MP4/AVI 等）'); return; }
-  var btn = $('transBtn'), st = $('transStatus');
-  btn.disabled = true;
-  st.style.display = 'inline';
-  st.textContent = '上传 + 转写中…（10 分钟切片约 1-3 分钟；长场本地较慢）';
-  try{
-    var resp = await fetch(ASR_URL + '/api/transcribe', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/octet-stream', 'X-File-Name': encodeURIComponent(f.name)},
-      body: f
-    });
-    var d = await resp.json();
-    if(!d.ok) throw new Error(d.error || '转写失败');
-    st.textContent = '转写完成，自动评分中…';
-    var segs = parseTranscript(d.srt || '');
-    if(segs.length === 0) throw new Error('转写结果为空（视频可能无有效语音）');
-    // 自动填充元数据（文件名解析）
-    var meta = autoDetectMeta(f.name);
-    if(meta.studio) $('studioSelect').value = meta.studio;
-    if(meta.host) $('hostInput').value = meta.host;
-    if(meta.date) $('dateInput').value = meta.date;
-    // 自动评分（auto 时文件名含产品名 → 优先文件名识别）
-    var productKey = $('productSelect').value;
-    if(productKey === 'auto'){
-      var fk0 = detectProductFromName(f.name, d.srt || '');
-      if(fk0 && GRADING_STANDARD.sellpoints[fk0]) productKey = fk0;
-    }
-    var r = runGrading(segs, productKey);
-    if(r.noProduct){
-      // 回退：视频文件名含产品名 → 自动选该品
-      var fk = detectProductFromName(f.name, d.srt || '');
-      if(fk && GRADING_STANDARD.sellpoints[fk]){
-        productKey = fk;
-        r = runGrading(segs, productKey);
-      } else {
-        st.textContent = '⚠ ' + (r.pkgHint || '未识别到产品讲解') + '——请手动选择考核标准后重新评分';
-        st.style.color = 'var(--danger)';
-        return;
-      }
-    }
-    r.host = $('hostInput').value.trim() || '未填';
-    r.studio = $('studioSelect').value;
-    r.date = $('dateInput').value.trim() || '未填';
-    r.product = (r.autoMatch && r.autoMatch.auto) ? (GRADING_STANDARD.sellpoints[r.autoMatch.fromKey].name + '（自动匹配：讲品特征/识别' + r.autoMatch.detected + '品）') : GRADING_STANDARD.sellpoints[productKey].name;
-    r.segCount = segs.length;
-    LAST_RESULT = r;
-    renderResult(r);
-    try{ addGoldenToLib(r.host, r.studio, r.date, r.product, r.golden); renderGoldenLib(); }catch(e){}
-    try{ var np = collectProblems(r); renderProblemLib(); renderProblemDetail(); if(np>0) toastErr('问题库 +' + np + ' 条'); }catch(e){}
-    localStorage.setItem('last_srt', d.srt || '');
-    st.textContent = '✅ 转写 + 评分完成（' + segs.length + ' 段）';
-    // 滚动到结果
-    $('result').scrollIntoView({behavior:'smooth'});
-  }catch(e){
-    st.textContent = '❌ ' + e.message;
-    var msg = e.message || '';
-    if(msg.indexOf('Failed to fetch') >= 0 || msg.indexOf('load failed') >= 0 || msg.indexOf('NetworkError') >= 0){
-      toastErr('无法连接转写服务——请在 grading-v2/asr 目录启动：node server-asr.js（首次需等模型加载）');
-    } else {
-      toastErr(e.message);
-    }
-    console.error(e);
-  }finally{
-    btn.disabled = false;
-  }
-}
+function transcribeVideo(){ return V4Jobs.transcribe(); }
 
 // ================= 6.5 多主播批量评分 + 每日 TOP1 评选（TOP1 评选机制 V2） =================
-function batchRun(){
-  var files = $('batchInput').files;
-  if(!files || files.length < 2){ toastErr('请至少选择 2 个主播的逐字稿文件（Ctrl/Shift 多选）'); return; }
-  var productKey = $('productSelect').value;
-  $('loading').style.display = 'inline';
-  $('batchStatus').style.display = 'inline';
-  $('batchStatus').textContent = '批量评分中：' + files.length + ' 个文件…';
-  var results = [], done = 0;
-  for(var i=0;i<files.length;i++){
-    (function(file){
-      var reader = new FileReader();
-      reader.onload = function(e){
-        try{
-          var text = e.target.result;
-          var segs = parseTranscript(text);
-          if(!segs.length) throw new Error('未提取到有效话术段');
-          var meta = autoDetectMeta(file.name);
-          var useKey = productKey;
-          if(useKey === 'auto'){
-            // auto 时文件名含产品名 → 优先文件名识别（避免双肩包系列误判）
-            var fk0 = detectProductFromName(file.name, text);
-            if(fk0 && GRADING_STANDARD.sellpoints[fk0]) useKey = fk0;
-          }
-          var r = runGrading(segs, useKey);
-          if(r.noProduct){
-            // 回退：文件名含产品名 → 自动选该品
-            var fk = detectProductFromName(file.name, text);
-            if(fk && GRADING_STANDARD.sellpoints[fk]){
-              useKey = fk;
-              r = runGrading(segs, useKey);
-            } else {
-              results.push({error: (r.pkgHint || '未识别到产品讲解') + '——请手动选考核标准', fileName: file.name, host: '未识别产品'});
-              finishOne();
-              return;
-            }
-          }
-          r.host = meta.host || fallbackHostFromFile(file.name) || $('hostInput').value.trim() || '未识别';
-          r.studio = meta.studio || $('studioSelect').value;
-          r.date = meta.date || $('dateInput').value.trim() || '未填';
-          r.product = (r.autoMatch && r.autoMatch.auto) ? (GRADING_STANDARD.sellpoints[r.autoMatch.fromKey].name + '（自动匹配：讲品特征/识别' + r.autoMatch.detected + '品）') : (GRADING_STANDARD.sellpoints[useKey] ? GRADING_STANDARD.sellpoints[useKey].name + '（按文件名识别）' : '未知');
-          r.segCount = segs.length;
-          r.fileName = file.name;
-          results.push(r);
-          try{ addGoldenToLib(r.host, r.studio, r.date, r.product, r.golden); renderGoldenLib(); }catch(e2){ console.error(e2); }
-        }catch(err){
-          results.push({error: err.message, fileName: file.name, host: '解析失败'});
-          console.error('批量评分异常:', file.name, err);
-        }
-        finishOne();
-      };
-      reader.onerror = function(){
-        results.push({error: '文件读取失败', fileName: file.name, host: '读取失败'});
-        console.error('FileReader 失败:', file.name);
-        finishOne();
-      };
-      reader.readAsText(file, 'utf-8');
-      function finishOne(){
-        done++;
-        if(done === files.length){
-          $('loading').style.display = 'none';
-          $('batchStatus').style.display = 'none';
-          var okN = results.filter(function(r){ return typeof r.total === 'number'; }).length;
-          var failN = results.length - okN;
-          // V3：批量结果全部写入历史库（供"历史进步"标准对比）
-          for(var hi=0; hi<results.length; hi++){
-            if(typeof results[hi].total === 'number') addHistoryRecord(results[hi]);
-          }
-          try{ renderHistoryLib(); }catch(e){}
-          // V3.5 修复：批量评分也要同步每份结果到飞书4张表（主播日报/黄金话术库/问题话术库/历史评分）
-          for(var hi=0; hi<results.length; hi++){
-            if(typeof results[hi].total === 'number'){
-              try{ autoFillFeishu(results[hi]); }catch(e2){ console.error('autoFillFeishu 异常:', e2); }
-            }
-          }
-          var t1 = pickTop1(results);
-          var msg = '批量评分完成：' + okN + '/' + results.length + ' 个有效';
-          if(t1) msg += '｜TOP1 = ' + t1.host + '（' + t1.total + ' 分）';
-          if(failN > 0) msg += '｜' + failN + ' 个失败';
-          msg += '（结果已展开在下方"TOP1 卡"区域）';
-          toastErr(msg);
-          renderBatchCompare(results);
-          // V3.4：批量完成后同步 TOP1 评选结果到飞书 TOP1 表
-          try{ syncTop1ToFeishu(results, t1); }catch(e){ console.error(e); }
-          // 批量问题沉淀：每份有效结果自动入库
-          try{
-            var lib = getProblemLib();
-            var before = lib.length;
-            for(var pi=0; pi<results.length; pi++){
-              if(typeof results[pi].total === 'number') collectProblems(results[pi]);
-            }
-            renderProblemLib();
-            renderProblemDetail();
-            var np = getProblemLib().length - before;
-            if(np > 0) toastErr('讲品问题库 +' + np + ' 条（含共性/1对1清单，见下方问题库面板）');
-          }catch(e){ console.error(e); }
-        }
-      }
-    })(files[i]);
-  }
-}
+function batchRun(){ return V4Jobs.batch(); }
 
 // 批量模式：生成单个主播的完整细节报告 HTML（供折叠块逐条核对；与 renderResult 同源逻辑，注意两处需同步维护）
 function buildReportHTML(r){
@@ -2208,7 +2007,7 @@ function pickTop1(results){
     return analyzeSum(b) - analyzeSum(a);
   });
   var winner = sortedPool[0] || null;
-  return winner;
+  return winner && checkTop1Criteria(winner, pool).length ? winner : null;
 }
 
 // V3：c1 产品理解是否任一子标准 0 分（B 方案硬淘汰线）
@@ -2246,23 +2045,24 @@ function getHistoryLib(){
   try{ return JSON.parse(localStorage.getItem('grading_history_v1') || '[]'); }catch(e){ return []; }
 }
 function saveHistoryLib(lib){
-  try{ localStorage.setItem('grading_history_v1', JSON.stringify(lib)); }catch(e){}
+  localStorage.setItem('grading_history_v1', JSON.stringify(lib));
 }
 function addHistoryRecord(r){
   if(typeof r.total !== 'number' || !r.host || r.host === '未识别') return;
   var lib = getHistoryLib();
+  if(r.resultId && lib.some(function(x){return x.resultId === r.resultId;})) return;
   var c1s = null;
   for(var i=0;i<(r.modules||[]).length;i++){ if(r.modules[i].key === 'c1') c1s = r.modules[i].score; }
-  lib.push({host: r.host, date: r.date || '未填', total: r.total, c1Score: c1s, product: r.product || '', ts: Date.now()});
+  lib.push({host: r.host, date: r.date || '未填', total: r.total, c1Score: c1s, product: r.product || '', resultId:r.resultId || '', scoreType:r.scoreType || 'text', ts: Date.now()});
   // 上限 5000 条防膨胀
   if(lib.length > 5000) lib = lib.slice(lib.length - 5000);
   saveHistoryLib(lib);
 }
 
 // V3：该主播历史平均分（同品优先，无则全量）
-function hostHistoryAvg(host, product){
-  var lib = getHistoryLib();
-  var mine = lib.filter(function(x){ return x.host === host && typeof x.total === 'number'; });
+function hostHistoryAvg(host, product, records){
+  var lib = records || getHistoryLib();
+  var mine = lib.filter(function(x){ return x.host === host && x.scoreType !== 'full-daily' && typeof x.total === 'number'; });
   if(!mine.length) return null;
   var sameProd = product ? mine.filter(function(x){ return x.product === product; }) : [];
   var pool = sameProd.length ? sameProd : mine;
@@ -2332,7 +2132,7 @@ function checkTop1Criteria(r, validPool){
   }
   if(r.total >= maxTotal && validPool.length > 1) met.push({k:'h', label:'横向最优', desc:'全场最高分 ' + r.total + ' 分，优于当日全部参评主播'});
   // ② 历史进步
-  var hAvg = hostHistoryAvg(r.host, r.product);
+  var hAvg = hostHistoryAvg(r.host, r.product, r.__historyBaseline);
   if(hAvg && r.total >= hAvg.avg + 5) met.push({k:'h2', label:'历史进步', desc:'较历史平均 ' + hAvg.avg + ' 分（' + hAvg.count + ' 次' + (hAvg.isSameProd ? '，同品' : '') + '）提升 ' + Math.round((r.total - hAvg.avg) * 10) / 10 + ' 分'});
   // ③ 特殊之处
   var special = [];
@@ -2352,7 +2152,6 @@ function checkTop1Criteria(r, validPool){
 function renderBatchCompare(results){
   // 批量模式：只显示批量对比区，隐藏单主播报告
   $('result').style.display = 'block';
-  $('singleReport').style.display = 'none';
   $('batchCompare').style.display = 'block';
   var valid = results.filter(function(r){ return typeof r.total === 'number'; });
   // V3：淘汰池（c1 有 0 分子标准）与候选池（通过 c1 检查）
@@ -2509,60 +2308,7 @@ function batchHint(input){
   if(n < 2) toastErr('至少选 2 个主播文件才能做 TOP1 评选（已选 ' + n + ' 个）');
 }
 
-function run(){
-  var file = $('fileInput').files[0];
-  if(!file){ toastErr('请先选择逐字稿文件（.srt / .txt）'); return; }
-  var reader = new FileReader();
-  reader.onload = function(e){
-    var text = e.target.result;
-    var segs = parseTranscript(text);
-    if(segs.length === 0){ toastErr('解析失败：未提取到有效话术段，请检查文件格式'); return; }
-    var productKey = $('productSelect').value;
-    if(productKey === 'auto'){
-      // auto 时文件名含产品名 → 优先文件名识别（避免双肩包系列误判）
-      var fk0 = detectProductFromName(file.name, text);
-      if(fk0 && GRADING_STANDARD.sellpoints[fk0]) productKey = fk0;
-    }
-    // V3.1：单主播 run 也用文件名解析主播/直播间/日期（与 batchRun 一致，避免依赖手填）
-    var meta2 = autoDetectMeta(file.name);
-    $('loading').style.display = 'inline';
-    setTimeout(function(){
-      try{
-        var r = runGrading(segs, productKey);
-        if(r.noProduct){
-          // 回退：文件名含产品名 → 按文件名识别并自动选标准（如"Truffle Pro_原文.srt"）
-          var fk = detectProductFromName(file.name, text);
-          if(fk && GRADING_STANDARD.sellpoints[fk]){
-            productKey = fk;
-            r = runGrading(segs, productKey);
-          } else {
-            $('loading').style.display = 'none';
-            toastErr((r.pkgHint || '未识别到产品讲解（逐字稿需含产品名/别名）') + '——请手动选择考核标准后重新评分');
-            return;
-          }
-        }
-        r.host = meta2.host || fallbackHostFromFile(file.name) || $('hostInput').value.trim() || '未识别';
-        r.studio = meta2.studio || $('studioSelect').value;
-        r.date = $('dateInput').value.trim() || '未填';
-        r.product = (r.autoMatch && r.autoMatch.auto) ? (GRADING_STANDARD.sellpoints[r.autoMatch.fromKey].name + '（自动匹配：讲品特征/识别' + r.autoMatch.detected + '品）') : (GRADING_STANDARD.sellpoints[productKey] ? GRADING_STANDARD.sellpoints[productKey].name + '（按文件名识别）' : '未知');
-        r.segCount = segs.length;
-        LAST_RESULT = r;
-        renderResult(r);
-        // V3：单主播评分也写入历史库（供"历史进步"标准对比）
-        try{ addHistoryRecord(r); renderHistoryLib(); }catch(e){}
-        // 金句自动入库（3 星及以上，V2：日报完成后自动提取）
-        try{ addGoldenToLib(r.host, r.studio, r.date, r.product, r.golden); renderGoldenLib(); }catch(e){}
-        // 讲品问题自动入库
-        try{ var np2 = collectProblems(r); renderProblemLib(); renderProblemDetail(); if(np2>0) toastErr('讲品问题库 +' + np2 + ' 条'); }catch(e){}
-      }catch(err){
-        toastErr('评分出错：' + err.message);
-        console.error(err);
-      }
-      $('loading').style.display = 'none';
-    }, 50);
-  };
-  reader.readAsText(file, 'utf-8');
-}
+function run(){ return V4Jobs.runText(); }
 
 function loadSample(){
   var sample = [
@@ -2633,12 +2379,13 @@ function exportReport(fmt){
     lines.push('    训练动作：' + t2.action);
     lines.push('    下周验证：' + t2.verify);
   }
-  var content = lines.join('\n');
-  var blob = new Blob([content], {type:'text/plain;charset=utf-8'});
+  var content = fmt === 'json' ? JSON.stringify(V4Jobs.publicResult(r), null, 2) : lines.join('\n');
+  var blob = new Blob([content], {type:(fmt === 'json' ? 'application/json' : 'text/plain')+';charset=utf-8'});
   var a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = '评分报告_' + (r.host||'主播') + '_' + (r.date||'').replace(/-/g,'') + '.' + (fmt==='json'?'json':'txt');
   a.click();
+  setTimeout(function(){URL.revokeObjectURL(a.href);},1000);
 }
 
 // ============ 页面初始化 ============

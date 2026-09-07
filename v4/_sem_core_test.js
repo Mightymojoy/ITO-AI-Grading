@@ -21,7 +21,7 @@ ok(!!STD && !!STD.modules, 'standard.js 加载');
 
 // ---- 1. 加载 semantic-core ----
 const V4S = require(path.join(__dirname, 'semantic-core.js'));
-ok(!!V4S && V4S._v === '4.9.0', 'semantic-core 加载 v' + (V4S && V4S._v));
+ok(!!V4S && V4S._v === '4.9.2', 'semantic-core 加载 v' + (V4S && V4S._v));
 
 // ---- 2. buildJudges：从真实 standard 生成判定清单 ----
 const judges = V4S.buildJudges();
