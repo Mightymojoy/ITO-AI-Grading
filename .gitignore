@@ -21,6 +21,11 @@ sem_key_local.txt
 
 # v4 本地验证截图（不入仓，E2E 临时产物）
 v4/_ev_*.png
+v4/_v4local_shot_*.png
+v4/_*_shot*.png
+
+# v4 本地 E2E 生成的临时 SRT 输入（不入仓）
+v4/_*_原文.srt
 
 # v4.11 重构备份与验证产物（不入仓）
 v4/backup-before-*/

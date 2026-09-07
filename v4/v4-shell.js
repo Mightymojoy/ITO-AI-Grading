@@ -783,7 +783,7 @@ var V4_FS_LOCAL_KEY = {
   top1:     'v4_fs_top1_cache'
 };
 // 日报表固定列（与飞书多维表格「主播日报」逐字对齐）；日报/周总结/月总结/明星主播 共用
-var V4_FS_DAILY_COLS = ['日期','主播','直播间','综合评分','产品知识能力','逻辑组织能力(流畅度)','场景化表达能力(延展性)','可视化道具运用','情绪感染能力'];
+var V4_FS_DAILY_COLS = ['日期','主播','直播间','综合评分','产品知识能力','逻辑组织能力(流畅度)','场景化表达能力(延展性)','可视化道具运用','情绪感染能力','需求识别能力','临场反应能力','转化引导能力','改善建议'];
 // 各 tab 的自定义固定列（未列出的 tab 一律用 V4_FS_DAILY_COLS）
 var V4_FS_BASE_COLS = {
   top1: ['日期','主播','直播间','综合评分','等级','推荐标准','第二名','领先分差','参评人数','是否明星主播']
@@ -818,7 +818,6 @@ function v4ScoreRow(r, extra){
   var row = {
     _updatedAt: r.updatedAt || new Date().toISOString(),
     _resultId: r.resultId || '',
-    '评分类型': r.scoreType === 'full-daily' ? '完整日报' : '文本评分',
     '日期':     (r.date || '未填'),
     '主播':     r.host,
     '直播间':   r.studio || '',
@@ -827,8 +826,18 @@ function v4ScoreRow(r, extra){
     '逻辑组织能力(流畅度)':   (typeof ms.c2 === 'number') ? ms.c2 : '',
     '场景化表达能力(延展性)': (typeof ms.c3 === 'number') ? ms.c3 : '',
     '可视化道具运用':           (typeof ms.c4 === 'number') ? ms.c4 : '',
-    '情绪感染能力':           (typeof ms.c5 === 'number') ? ms.c5 : ''
+    '情绪感染能力':           (typeof ms.c5 === 'number') ? ms.c5 : '',
+    '需求识别能力':           (typeof ms.c6 === 'number') ? ms.c6 : '',
+    '临场反应能力':           (typeof ms.c7 === 'number') ? ms.c7 : '',
+    '转化引导能力':           (typeof ms.c8 === 'number') ? ms.c8 : ''
   };
+  // 改善建议（与后端 feishu-fill.js 同构：r.training ≤3 项聚合）
+  if(r.training && r.training.length){
+    var adv = r.training.slice(0,3).map(function(t){
+      return (t.mod || '') + ' ' + (typeof t.score === 'number' ? t.score + '分' : '') + '：' + (t.gap || '') + (t.action ? '（' + t.action + '）' : '');
+    }).filter(function(s){ return s.trim() !== '：'; }).join('；');
+    if(adv) row['改善建议'] = adv.length > 300 ? adv.slice(0,300) + '...' : adv;
+  }
   if(extra){ for(var k in extra){ row[k] = extra[k]; } }
   return row;
 }

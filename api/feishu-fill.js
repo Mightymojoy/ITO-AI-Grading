@@ -121,16 +121,30 @@ module.exports = async function handler(req, res){
       bad = r.baseline.errorsList.map(e => '['+(e.field||'')+'] '+(e.wrong||[]).join('/')).slice(0,3).join('; ');
     }
 
+    // 改善建议（r.training ≤3 项聚合：低分能力 + 缺口 + 训练动作）
+    let advice = '';
+    if(r.training && r.training.length){
+      advice = r.training.slice(0,3)
+        .map(t => (t.mod||'') + ' ' + (t.score != null ? t.score + '分' : '') + '：' + (t.gap||'') + (t.action ? '（' + t.action + '）' : ''))
+        .filter(s => s.trim() !== '：')
+        .join('；');
+      if(advice.length > 300) advice = advice.slice(0,300) + '...';
+    }
+
     const baseFields = {
       '综合评分': String(r.total != null ? r.total : ''),
       '产品知识能力': String(c.c1 != null ? c.c1 : ''),
       '逻辑组织能力(流畅度)': String(c.c2 != null ? c.c2 : ''),
       '场景化表达能力(延展性)': String(c.c3 != null ? c.c3 : ''),
       '可视化道具运用': String(c.c4 != null ? c.c4 : ''),
-      '情绪感染能力': String(c.c5 != null ? c.c5 : '')
+      '情绪感染能力': String(c.c5 != null ? c.c5 : ''),
+      '需求识别能力': String(c.c6 != null ? c.c6 : ''),
+      '临场反应能力': String(c.c7 != null ? c.c7 : ''),
+      '转化引导能力': String(c.c8 != null ? c.c8 : '')
     };
     if(golden) baseFields['黄金话术'] = golden;
     if(bad) baseFields['违规话术'] = bad;
+    if(advice) baseFields['改善建议'] = advice;
 
     // 匹配不到 → 自动创建记录（评分结果自动写入飞书的完整闭环）
     if(!rec){
