@@ -1785,15 +1785,15 @@ document.addEventListener('DOMContentLoaded', function(){
   }catch(e){ console.log('[v4.11.5] 识别接管跳过:', (e && e.message) || e); }
 })();
 
-// ---------- v4.11.6：自动识别主品判定接管（段归属 + 跨品共词去权） ----------
-// 背景：2026-09-07 甘晋铭讲 TRUFFLE PRO BACKPACK（双肩包）被误识别为 PISTACHIO Plus（行李箱）。
-// 根因：app-core 主品判定 score = exHits×1000 + sellHits 且对【整段全文】累计——而 productExclusive
-// 词表存在跨品共词（'刘知礼' 同时是 pistachio_plus 专属词 与 truffle_pro_backpack 头号卖点；'低调'/'抗菌'
-// 亦跨品）→ 讲双肩包每提一次刘知礼，行李箱就 +1000，被锁死为主品。
-// 本块纯加法：包装 window.runGrading，productKey 为 auto/空 时先用【段归属 + 独家专属词】算法自算主品：
-//   1) 每 30s 段独立计分：真·独家专属词(不出现在其他品任何词典)×1000 + 卖点关键词×1
-//   2) 段归属最高分品 → 主品 = 归属段累计字符数最多的品
-//   3) 找不到任何品特征 → 回落原 auto（保留 noProduct 兜底）
+// ---------- v4.11.7：自动识别主品判定接管（段归属 + name/aliases 强信号 + 跨品共词去权） ----------
+// 背景：v4.11.6 部署后甘晋铭讲 TRUFFLE PRO BACKPACK 仍被识别为 PISTACHIO Plus。
+// 根因：truffle_pro_backpack 的 productExclusive 词表是空的（v4.11.6 "真·独家词" 永远 0 分），
+// 只能拼卖点词×1，但 pistachio_plus 7 个卖点 vs truffle 卖点命中数仍胜出。
+// v4.11.7 强化：把 product.name 全名命中（×100）+ aliases 命中（×50）作为强归属信号。
+// 只要 transcript 出现「TRUFFLE PRO BACKPACK」/「双肩包」等 aliases，该段就强归 Truffle。
+// 段归属计分公式：
+//   product.name 全名匹配 ×100 + aliases 命中 ×50 + 真·独家专属词 ×10 + 卖点词 ×1
+// 段归属最高分品 → 主品 = 归属段累计字符数最多。
 (function(){
   try{
     if(typeof window === 'undefined' || typeof window.runGrading !== 'function') return;
@@ -1845,6 +1845,9 @@ document.addEventListener('DOMContentLoaded', function(){
     }
 
     // 段归属主品判定
+    // v4.11.7 强化：加 product.name 全名命中 ×100 + name 括号内中文别名命中 ×200 + aliases 命中 ×50
+    // 关键修复：truffle_pro_backpack.name = "TRUFFLE PRO BACKPACK（双肩包）" ——「双肩包」藏括号内
+    // 但 truffle.aliases 列表里没有单独的「双肩包」词，v4.11.6 漏了 → 加 name 括号内中文提取
     function v4AutoProductKey(segs){
       try{
         var STD = GRADING_STANDARD;
@@ -1861,8 +1864,26 @@ document.addEventListener('DOMContentLoaded', function(){
           for(var p=0;p<keys.length;p++){
             var pk = keys[p];
             var sc = 0;
+            // 1) product.name 全名匹配（×100）
+            var name = (STD.products[pk] && STD.products[pk].name) ? String(STD.products[pk].name).toLowerCase() : '';
+            if(name && t.indexOf(name) >= 0) sc += 100;
+            // 2) name 括号内中文别名（如"双肩包"）—— 强信号 ×200
+            var nameInner = '';
+            if(name){
+              var nm = name.match(/[（(]([^）)]+)[）)]/);
+              if(nm) nameInner = nm[1].toLowerCase();
+            }
+            if(nameInner && t.indexOf(nameInner) >= 0) sc += 200;
+            // 3) aliases 命中（×50/次）
+            var al = (STD.products[pk] && STD.products[pk].aliases) || [];
+            for(var aa=0;aa<al.length;aa++){
+              var aw = String(al[aa] || '').toLowerCase(); if(!aw) continue;
+              if(t.indexOf(aw) >= 0) sc += 50;
+            }
+            // 4) 真·独家专属词命中（×10）
             var excl = pool[pk] || [];
-            for(var x=0;x<excl.length;x++){ if(excl[x] && t.indexOf(excl[x]) >= 0) sc += 1000; }
+            for(var x=0;x<excl.length;x++){ if(excl[x] && t.indexOf(excl[x]) >= 0) sc += 10; }
+            // 5) 卖点词命中（×1，基础分）
             var sp = STD.sellpoints && STD.sellpoints[pk];
             var list = (sp && sp.list) || [];
             for(var l=0;l<list.length;l++){
@@ -1891,12 +1912,44 @@ document.addEventListener('DOMContentLoaded', function(){
       if(isAuto && segs && segs.length){
         var k = v4AutoProductKey(segs);
         if(k){ pk = k; }
-        else if(options && options._v4116Log !== true){ console.log('[v4.11.6] 自动识别无产品特征 → 回落原 auto（noProduct 兜底）'); }
-        if(k) console.log('[v4.11.6] 自动识别主品判定接管 →', k, '（原 auto）');
+        else if(options && options._v4116Log !== true){ console.log('[v4.11.7] 自动识别无产品特征 → 回落原 auto（noProduct 兜底）'); }
+        if(k) console.log('[v4.11.7] 自动识别主品判定接管 →', k, '（原 auto）');
       }
       return _gOrigRun(segs, pk, options);
     };
     window.v4AutoProductKey = v4AutoProductKey;   // 暴露供诊断
-    console.log('[v4.11.6] 主品自动识别接管已生效（段归属 + 跨品共词去权）');
-  }catch(e){ console.log('[v4.11.6] 主品判定接管跳过:', (e && e.message) || e); }
+    // v4.11.7 调试入口：浏览器 console 跑 `v4DebugAutoKey([{text:'...'}])` 可看每段归属
+    window.v4DebugAutoKey = function(segs){
+      var pool = v4BuildExclPool();
+      var STD = GRADING_STANDARD;
+      var keys = Object.keys(STD.products || {});
+      var t0 = String((segs[0] && segs[0].text) || '').toLowerCase();
+      var res = [];
+      for(var p=0;p<keys.length;p++){
+        var pk = keys[p];
+        var sc = 0, parts = [];
+        var name = (STD.products[pk] && STD.products[pk].name) || '';
+        if(name && t0.indexOf(String(name).toLowerCase()) >= 0){ sc += 100; parts.push('name×100('+name+')'); }
+        var al = (STD.products[pk] && STD.products[pk].aliases) || [];
+        for(var aa=0;aa<al.length;aa++){ var aw=String(al[aa]||'').toLowerCase(); if(aw && t0.indexOf(aw)>=0){ sc += 50; parts.push('alias×50('+aw+')'); break; } }
+        var excl = pool[pk] || [];
+        for(var x=0;x<excl.length;x++){ if(excl[x] && t0.indexOf(excl[x])>=0){ sc += 10; parts.push('excl×10('+excl[x]+')'); } }
+        var sp = STD.sellpoints && STD.sellpoints[pk];
+        var list = (sp && sp.list) || [];
+        for(var l=0;l<list.length;l++){
+          var kws = list[l].keywords || [];
+          for(var w=0;w<kws.length;w++){
+            var kw=kws[w]; if(!kw) continue;
+            if(t0.indexOf(String(kw).toLowerCase())>=0){ sc += 1; parts.push('sp('+list[l].title+')'); break; }
+          }
+        }
+        res.push({k:pk, sc:sc, parts:parts});
+      }
+      res.sort(function(a,b){ return b.sc - a.sc; });
+      console.log('[v4.11.7 诊断] 段文本头 80 字:', t0.slice(0,80));
+      res.forEach(function(r){ console.log('  ' + r.k + ' = ' + r.sc + ' 分 ' + (r.parts.length ? '← ' + r.parts.join(', ') : '(无命中)')); });
+      return res;
+    };
+    console.log('[v4.11.7] 主品自动识别接管已生效（段归属 + name/aliases 强信号 + 跨品共词去权）');
+  }catch(e){ console.log('[v4.11.7] 主品判定接管跳过:', (e && e.message) || e); }
 })();
