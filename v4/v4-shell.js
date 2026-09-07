@@ -1727,3 +1727,60 @@ document.addEventListener('DOMContentLoaded', function(){
     console.log('[v4.11.4] 云端后端切换生效 → fill=' + fill + ' sem=' + (window.V4SEM && window.V4SEM.CFG ? window.V4SEM.CFG.apiUrl : 'n/a'));
   }catch(e){ console.log('云端后端切换跳过:', (e && e.message) || e); }
 })();
+
+// ---------- v4.11.5：文件名自动识别修复（直播间简写 + 主播名剥离） ----------
+// 背景：2026-09-07 实测「2026-08-26-曲姝锜-轻熟.mkv」→ app-core 的 autoDetectMeta 把直播间
+// 简称「轻熟」误拼进主播名（host=「曲姝锜轻熟」），且直播间识别不到（原 studios 只给「云端」
+// 配了简写别名），表单直播间留空 → 下拉框默认第一项「摩登新贵女」→ 飞书写回错主播/错直播间。
+// 本块纯加法 monkey-patch：不改 app-core.js，仅覆盖 window.autoDetectMeta。
+(function(){
+  try{
+    if(typeof window === 'undefined' || typeof window.autoDetectMeta !== 'function') return;
+    var origDetect = window.autoDetectMeta;
+    // 直播间简称 → 全名（与文件命名约定「日期-主播-直播间简称」对齐，如 -轻熟- / -摩登-）
+    var STUDIO_ALIASES = [
+      {full:'轻熟质享客', shorts:['轻熟','轻熟质享客']},
+      {full:'摩登新贵女', shorts:['摩登','摩登新贵女']},
+      {full:'云端商务家', shorts:['云端','云端商务家']},
+      {full:'综合',       shorts:['综合']}
+    ];
+    window.autoDetectMeta = function(filename){
+      var meta = origDetect.call(this, filename);
+      if(!meta) meta = {studio:'', host:'', date:''};
+      var base = String(filename || '').replace(/\.[^.]*$/, '');
+      // 1) 直播间兜底：原识别留空时按简称（含完整名）再匹配
+      if(!meta.studio){
+        for(var i=0;i<STUDIO_ALIASES.length;i++){
+          for(var j=0;j<STUDIO_ALIASES[i].shorts.length;j++){
+            if(base.indexOf(STUDIO_ALIASES[i].shorts[j]) >= 0){ meta.studio = STUDIO_ALIASES[i].full; break; }
+          }
+          if(meta.studio) break;
+        }
+      }
+      // 2) 主播名清洗：把误拼进主播字段的直播间简称剥掉（曲姝锜轻熟 → 曲姝锜）
+      if(meta.host){
+        var cleaned = meta.host;
+        var hit = '';
+        for(var k=0;k<STUDIO_ALIASES.length;k++){
+          for(var s=0;s<STUDIO_ALIASES[k].shorts.length;s++){
+            var sh = STUDIO_ALIASES[k].shorts[s];
+            if(sh.length >= 2 && cleaned.indexOf(sh) >= 0 && cleaned !== sh){ hit = sh; break; }
+          }
+          if(hit) break;
+        }
+        if(hit) cleaned = cleaned.split(hit).join('');
+        cleaned = cleaned.replace(/[^一-龥]/g, '');
+        if(cleaned && cleaned.length >= 1 && cleaned.length <= 5){
+          meta.host = cleaned;
+        } else {
+          // 剥空/超长/含非中文 → fallback 重新提（fallback 取最长连续中文段，天然排除短简称）
+          var fb = '';
+          try{ if(typeof fallbackHostFromFile === 'function') fb = fallbackHostFromFile(base); }catch(e){}
+          if(fb) meta.host = fb;
+        }
+      }
+      return meta;
+    };
+    console.log('[v4.11.5] autoDetectMeta 已接管：直播间简写兜底 + 主播名剥离');
+  }catch(e){ console.log('[v4.11.5] 识别接管跳过:', (e && e.message) || e); }
+})();
