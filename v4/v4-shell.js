@@ -1652,3 +1652,33 @@ document.addEventListener('DOMContentLoaded', function(){
     setTimeout(function(){ try{ renderProblemLib(); }catch(e){} }, d);
   });
 })();
+
+// ---------- 9. autoFillMeta 日期补零补丁（v4.11.1） ----------
+// bug：文件名 2026.8.18-轻熟-赵亚男_原文.srt → autoDetectMeta 输出 meta.date = "2026-8-18"
+//      （1 位月/日）→ <input type="date"> 只接受严格 YYYY-MM-DD（4-2-2），写入被静默拒绝
+//      → toast 仍弹「已从文件名自动识别」，但日期框实际为空，用户误以为已填。
+// 修复：monkey-patch autoFillMeta，orig 调用后重新解析文件名，把 1 位月/日规范化补零再写入
+//      dateInput（不能在 orig 后回读 di.value——它已被 date input 静默清空，必须重算）。
+// 铁律：纯壳层加法，app-core.js 一字不动。
+(function(){
+  try{
+    var orig = window.autoFillMeta;
+    if(typeof orig !== 'function') return;
+    window.autoFillMeta = function(input){
+      var ret = orig(input);
+      try{
+        if(!input || !input.files || !input.files[0]) return ret;
+        var meta = (typeof window.autoDetectMeta === 'function') ? window.autoDetectMeta(input.files[0].name) : null;
+        var di = document.getElementById('dateInput');
+        if(meta && meta.date && di){
+          var m = String(meta.date).match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+          if(m){
+            var norm = m[1] + '-' + (m[2].length === 1 ? '0' + m[2] : m[2]) + '-' + (m[3].length === 1 ? '0' + m[3] : m[3]);
+            di.value = norm;
+          }
+        }
+      }catch(e){}
+      return ret;
+    };
+  }catch(e){}
+})();
