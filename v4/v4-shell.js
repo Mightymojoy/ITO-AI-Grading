@@ -783,7 +783,7 @@ var V4_FS_LOCAL_KEY = {
   top1:     'v4_fs_top1_cache'
 };
 // 日报表固定列（与飞书多维表格「主播日报」逐字对齐）；日报/周总结/月总结/明星主播 共用
-var V4_FS_DAILY_COLS = ['日期','主播','直播间','综合评分','产品知识能力','逻辑组织能力(流畅度)','场景化表达能力(策展性)','可操作化运用','情绪感染能力'];
+var V4_FS_DAILY_COLS = ['日期','主播','直播间','综合评分','产品知识能力','逻辑组织能力(流畅度)','场景化表达能力(延展性)','可视化道具运用','情绪感染能力'];
 // 各 tab 的自定义固定列（未列出的 tab 一律用 V4_FS_DAILY_COLS）
 var V4_FS_BASE_COLS = {
   top1: ['日期','主播','直播间','综合评分','等级','推荐标准','第二名','领先分差','参评人数','是否明星主播']
@@ -825,8 +825,8 @@ function v4ScoreRow(r, extra){
     '综合评分': r.total,
     '产品知识能力':         (typeof ms.c1 === 'number') ? ms.c1 : '',
     '逻辑组织能力(流畅度)':   (typeof ms.c2 === 'number') ? ms.c2 : '',
-    '场景化表达能力(策展性)': (typeof ms.c3 === 'number') ? ms.c3 : '',
-    '可操作化运用':           (typeof ms.c4 === 'number') ? ms.c4 : '',
+    '场景化表达能力(延展性)': (typeof ms.c3 === 'number') ? ms.c3 : '',
+    '可视化道具运用':           (typeof ms.c4 === 'number') ? ms.c4 : '',
     '情绪感染能力':           (typeof ms.c5 === 'number') ? ms.c5 : ''
   };
   if(extra){ for(var k in extra){ row[k] = extra[k]; } }
