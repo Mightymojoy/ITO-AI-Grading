@@ -287,8 +287,8 @@ var FEISHU_FILL_URL = 'http://127.0.0.1:3712/api/feishu-fill';
 var FEISHU_SYNC_URL = 'http://127.0.0.1:3712/api/feishu-sync';
 try{
   // 云端部署版：显式指向 Vercel 函数（GitHub Pages 无 /api）
-  FEISHU_FILL_URL = localStorage.getItem('feishu_fill_url') || 'https://cloud-five-pi.vercel.app/api/feishu-fill';
-  FEISHU_SYNC_URL = localStorage.getItem('feishu_sync_url') || 'https://cloud-five-pi.vercel.app/api/feishu-sync';
+  FEISHU_FILL_URL = localStorage.getItem('feishu_fill_url') || 'https://ito-ai-grading.vercel.app/api/feishu-fill';
+  FEISHU_SYNC_URL = localStorage.getItem('feishu_sync_url') || 'https://ito-ai-grading.vercel.app/api/feishu-sync';
   if(typeof location !== 'undefined' && (location.protocol === 'file:' || location.hostname === '127.0.0.1' || location.hostname === 'localhost')){
     FEISHU_FILL_URL = localStorage.getItem('feishu_fill_url') || 'http://127.0.0.1:3712/api/feishu-fill';
     FEISHU_SYNC_URL = localStorage.getItem('feishu_sync_url') || 'http://127.0.0.1:3712/api/feishu-sync';

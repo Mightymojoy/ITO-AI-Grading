@@ -1691,3 +1691,39 @@ document.addEventListener('DOMContentLoaded', function(){
     };
   }catch(e){}
 })();
+
+// ---------- v4.11.4：云端后端切换（GitHub Pages 线上默认端点） ----------
+// 背景：ito-ai-grading.vercel.app 已配全飞书凭证 + FEISHU_TABLE_ID + DEEPSEEK key（2026-09-07），
+// 且 api/feishu-fill.js 含 v4.11.3 的 c6-c7-c8 + 改善建议写入修复；cloud-five-pi 属别账号无法部署该修复。
+// 本块纯加法：线上（非 file:/127.0.0.1/localhost）把 app-core 默认云端端点与 semantic-core 判定端点
+// 切到 ito-ai-grading.vercel.app。localStorage 手动覆盖仍最优先——仅当值为空或仍指向旧 cloud-five-pi
+// 时自动改写迁移（老浏览器存过旧值也能平滑切走，无需手动清 localStorage）。
+(function(){
+  try{
+    if(typeof window === 'undefined' || typeof location === 'undefined') return;
+    var h = '';
+    try{ h = location.hostname; }catch(e){}
+    var isLocal = (location.protocol === 'file:' || h === '127.0.0.1' || h === 'localhost');
+    if(isLocal) return;               // 本地/8791 走既有 v4.9.1 接管块，不冲突
+    var NEW_BASE = 'https://ito-ai-grading.vercel.app';
+    function migrate(key, path){
+      var v = null;
+      try{ v = localStorage.getItem(key); }catch(e){}
+      if(v === null || String(v).indexOf('cloud-five-pi') >= 0){
+        var nv = NEW_BASE + path;
+        try{ localStorage.setItem(key, nv); }catch(e){}
+        return nv;
+      }
+      return String(v);               // 用户自定义非旧值 → 保留不动
+    }
+    var fill = migrate('feishu_fill_url', '/api/feishu-fill');
+    var sync = migrate('feishu_sync_url', '/api/feishu-sync');
+    if(typeof FEISHU_FILL_URL !== 'undefined') window.FEISHU_FILL_URL = fill;
+    if(typeof FEISHU_SYNC_URL !== 'undefined') window.FEISHU_SYNC_URL = sync;
+    if(typeof window.V4SEM === 'object' && window.V4SEM.CFG){
+      var sem = migrate('semantic_api_url', '/api/semantic-judge');
+      window.V4SEM.CFG.apiUrl = sem;
+    }
+    console.log('[v4.11.4] 云端后端切换生效 → fill=' + fill + ' sem=' + (window.V4SEM && window.V4SEM.CFG ? window.V4SEM.CFG.apiUrl : 'n/a'));
+  }catch(e){ console.log('云端后端切换跳过:', (e && e.message) || e); }
+})();

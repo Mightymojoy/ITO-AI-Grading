@@ -7,9 +7,9 @@
 // =====================================================
 const fs = require('fs'), vm = require('vm');
 
-const CLOUD_FILL = 'https://cloud-five-pi.vercel.app/api/feishu-fill';
-const CLOUD_SYNC = 'https://cloud-five-pi.vercel.app/api/feishu-sync';
-const CLOUD_WM   = 'https://cloud-five-pi.vercel.app/api/feishu-week-month';
+const CLOUD_FILL = 'https://ito-ai-grading.vercel.app/api/feishu-fill';
+const CLOUD_SYNC = 'https://ito-ai-grading.vercel.app/api/feishu-sync';
+const CLOUD_WM   = 'https://ito-ai-grading.vercel.app/api/feishu-week-month';
 
 // 沙箱加载评分引擎（真实前端代码）
 const sandbox = {

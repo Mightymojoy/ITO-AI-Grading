@@ -18,7 +18,7 @@ const { exec } = require('child_process');
 // 指向 127.0.0.1:3712（v3 asr 端口）——本地一体化模式（8791）下 3712 未启则 fetch 静默失败。
 // 本服务新增 /api/feishu-fill、/api/feishu-week-month、/api/feishu-sync 三条 POST 代理，
 // 原样转发到云端 Vercel 函数（飞书凭据所在），页面请求与响应均同源，免跨域。
-const CLOUD_HOST = 'cloud-five-pi.vercel.app';
+const CLOUD_HOST = 'ito-ai-grading.vercel.app';
 const PROXY_PATHS = ['/api/feishu-fill', '/api/feishu-week-month', '/api/feishu-sync'];
 
 const ROOT = path.join(__dirname, '..');
@@ -100,7 +100,7 @@ function routeJudge(req, res) {
   });
 }
 
-// ---- 飞书写回云端代理：POST body 原样转发 cloud-five-pi，响应原样回写 ----
+// ---- 飞书写回云端代理：POST body 原样转发 ito-ai-grading.vercel.app，响应原样回写 ----
 function proxyToCloud(req, res, apiPath) {
   const chunks = [];
   req.on('data', c => chunks.push(c));
