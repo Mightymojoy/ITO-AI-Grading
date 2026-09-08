@@ -51,6 +51,26 @@ async function listRecords(token){
   return r.data.items || [];
 }
 
+// v4.11.8：同 host+date 可能滞留多条（历史 bug），全部找出
+function matchAllRecords(records, host, date){
+  if(!host || !date) return [];
+  const target = String(date).slice(0,10);
+  const out = [];
+  for(const rec of records){
+    const f = rec.fields || {};
+    if(f['主播'] === host && String(f['日期']||'').slice(0,10) === target) out.push(rec);
+  }
+  return out;
+}
+
+async function deleteRecord(token, recordId){
+  return httpsJson({
+    hostname:'open.feishu.cn',
+    path:'/open-apis/bitable/v1/apps/'+BASE_TOKEN+'/tables/'+TABLE_ID+'/records/'+recordId,
+    method:'DELETE', headers:{'Authorization':'Bearer '+token}
+  }, null);
+}
+
 function matchRecord(records, host, date){
   if(!host || !date) return null;
   const target = String(date).slice(0,10);
@@ -104,7 +124,13 @@ module.exports = async function handler(req, res){
 
     const token = await getToken();
     const records = await listRecords(token);
-    const rec = matchRecord(records, host, date);
+    const matches = matchAllRecords(records, host, date);
+    // v4.11.8：同 host+date 滞留多条时只保留第 1 条 update，其余删除（防止历史 bug 累积重复）
+    let rec = matches.length ? matches[0] : null;
+    for(let mi = 1; mi < matches.length; mi++){
+      try{ await deleteRecord(token, matches[mi].record_id); }catch(e){}
+    }
+    const removedDup = matches.length > 1 ? matches.length - 1 : 0;
 
     // 提取 c1-c5
     const c = {};
@@ -158,7 +184,7 @@ module.exports = async function handler(req, res){
         return res.status(200).json({ok:false, reason:'飞书自动建记录失败: '+(cr.msg||'')+' code='+cr.code});
       }
       const newRec = cr.data && cr.data.record;
-      return res.status(200).json({ok:true, created:true, recordId: newRec ? newRec.record_id : '', host, date, total: r.total, fieldsWritten: Object.keys(createFields).length});
+      return res.status(200).json({ok:true, created:true, recordId: newRec ? newRec.record_id : '', host, date, total: r.total, fieldsWritten: Object.keys(createFields).length, removedDup});
     }
 
     const fields = Object.assign({}, baseFields);
@@ -168,7 +194,7 @@ module.exports = async function handler(req, res){
     if(up.code !== 0){
       return res.status(200).json({ok:false, reason:'飞书写入失败: '+(up.msg||'')+' code='+up.code, recordId: rec.record_id});
     }
-    return res.status(200).json({ok:true, recordId: rec.record_id, host, date, total: r.total, fieldsWritten: Object.keys(fields).length});
+    return res.status(200).json({ok:true, recordId: rec.record_id, host, date, total: r.total, fieldsWritten: Object.keys(fields).length, removedDup});
   }catch(e){
     return res.status(500).json({ok:false, error: e.message});
   }

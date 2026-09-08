@@ -117,8 +117,15 @@ function v4ReadLS(key, fallback){
 
 // ---------- 3. 工作台首页 ----------
 function v4RenderDashboard(){
-  // 统计（只读 localStorage，与核心同键）
-  var hist   = v4ReadLS('grading_history_v1', '[]');
+  // 统计（只读 localStorage，与核心同键）· v4.11.8 起先按 主播+日期 去重再统计/展示
+  var histRaw = v4ReadLS('grading_history_v1', '[]');
+  var seen0 = {};
+  var hist = [];
+  histRaw.slice().sort(function(a,b){ return (b.ts||0)-(a.ts||0); }).forEach(function(x){
+    var k = (x.host||'') + '|' + (x.date||'');
+    if(seen0[k]) return;
+    seen0[k] = 1; hist.push(x);
+  });
   var golden = v4ReadLS('grading_v2_golden_lib', '{"items":[]}');
   var probs  = v4ReadLS('grading_problem_lib_v1', '[]');
   var today  = v4TodayStr();
@@ -131,12 +138,12 @@ function v4RenderDashboard(){
   document.getElementById('dash-stat-history').textContent = hist.length;
   document.getElementById('dash-stat-golden').textContent  = (golden.items || []).length;
   document.getElementById('dash-stat-problem').textContent = probs.length;
-  // 最近评分（最近 8 条）
+  // 最近评分（最近 8 条 · 上面 hist 已按 主播+日期 去重）
   var box = document.getElementById('dash-recent');
   if(!hist.length){
     box.innerHTML = '暂无记录——去「每日评分」完成第一次评分（历史数据与 v3 共库，之前评过的直接可见）';
   } else {
-    var recent = hist.slice().sort(function(a,b){ return (b.ts||0)-(a.ts||0); }).slice(0, 8);
+    var recent = hist.slice(0, 8);
     var h = '<table><tr><th style="width:14%">主播</th><th style="width:12%">日期</th><th style="width:9%">总分</th><th style="width:11%">c1 产品理解</th><th>考核产品</th></tr>';
     for(var j=0;j<recent.length;j++){
       var r = recent[j];
@@ -304,7 +311,15 @@ function v4ArchData(type){
     return (lib.items || []).slice();
   }
   if(type === 'cases') return v4ReadLS('grading_cases_lib_v1', '[]');
-  return v4ReadLS('grading_history_v1', '[]');
+  // v4.11.8：历史评分按 主播+日期 去重（保留 ts 最新），与飞书历史表强一致口径对齐
+  var hs = v4ReadLS('grading_history_v1', '[]');
+  var seenH = {}, outH = [];
+  hs.slice().sort(function(a,b){ return (b.ts||0)-(a.ts||0); }).forEach(function(x){
+    var k = (x.host||'') + '|' + (x.date||'');
+    if(seenH[k]) return;
+    seenH[k] = 1; outH.push(x);
+  });
+  return outH;
 }
 // 日期归一化（全局，归档查看器与飞书表共用）：兼容 2026-8-13 / 2026-08-13 混合格式
 // 返回 {m:'YYYY-MM', d:'YYYY-MM-DD'}，解析不出时均为 ''

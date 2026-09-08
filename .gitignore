@@ -16,6 +16,9 @@ Thumbs.db
 # 本地化工作台私有 DeepSeek Key（本地私有，绝不进仓库）
 sem_key_local.txt
 
+# 团队离线分发包（235MB exe + 展开目录，仅本地保留，不进仓库）
+dist/
+
 # 注意：v4/data/ 是同步产出的静态数据，必须提交，
 # 否则 GitHub Pages 上的工作台读不到飞书表格。
 

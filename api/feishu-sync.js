@@ -112,6 +112,46 @@ async function findRecordByField(token, tableId, fieldName, fieldValue){
   return null;
 }
 
+async function deleteRecord(token, tableId, recordId){
+  return httpsJson({
+    hostname:'open.feishu.cn',
+    path:'/open-apis/bitable/v1/apps/'+BASE_TOKEN+'/tables/'+tableId+'/records/'+recordId,
+    method:'DELETE', headers:{'Authorization':'Bearer '+token}
+  }, null);
+}
+
+// v4.11.8：按 主播+日期 找出历史评分表全部同人同日记录（可能残留多条）
+async function findRecordsByHostDate(token, tableId, host, date){
+  const records = await listRecords(token, tableId);
+  const target = String(date).slice(0,10);
+  const out = [];
+  for(const rec of records){
+    const f = rec.fields || {};
+    if(f['主播'] === host && String(f['日期']||'').slice(0,10) === target) out.push(rec);
+  }
+  return out;
+}
+
+// v4.11.8：历史评分强一致写入 —— 先删同 主播+日期 旧记录，再新建 1 条。
+// 背景：旧逻辑每次评分 append，同一日同主播评多次会攒出多条重复记录（甘晋铭 08-25 实测 4 条），
+// 污染「最近评分」与历史查看。改为 upsert 语义后，任一 host+date 恒为 1 条最新。
+async function upsertHistory(token, tableId, h){
+  if(!tableId) return {ok:false, skipped:true, reason:'表未配置'};
+  const old = await findRecordsByHostDate(token, tableId, h.host, h.date);
+  let removed = 0;
+  for(const o of old){
+    try{ await deleteRecord(token, tableId, o.record_id); removed++; }catch(e){}
+  }
+  const fields = {
+    '主播': h.host||'', '日期': h.date||'', '直播间': h.studio||'',
+    '产品': h.product||'', '总分': h.total!=null?String(h.total):'', '等级': h.grade||'',
+    'c1产品理解': h.c1!=null?String(h.c1):''
+  };
+  const r = await createRecord(token, tableId, fields);
+  if(r.code !== 0) return {ok:false, reason:'写入失败: '+(r.msg||'')+' code='+r.code};
+  return {ok:true, recordId: r.data && r.data.record ? r.data.record.record_id : '', removed};
+}
+
 // 同步单条（去重 → 无则新建）
 async function syncRecord(token, tableId, dedupField, dedupValue, fields){
   if(!tableId) return {ok:false, skipped:true, reason:'表未配置'};
@@ -158,16 +198,11 @@ module.exports = async function handler(req, res){
       })});
     }
 
-    // 历史评分（每次评分直接追加，保留全部轨迹——不去重，避免同主播新评分被旧记录拦截）
+    // 历史评分（v4.11.8 强一致：同一 主播+日期 只保留 1 条最新 —— 先删旧再新建）
     for(const h of (data.history || [])){
       if(!h.host || !h.date) continue;
-      const hFields = {
-        '主播': h.host||'', '日期': h.date||'', '直播间': h.studio||'',
-        '产品': h.product||'', '总分': h.total!=null?String(h.total):'', '等级': h.grade||'',
-        'c1产品理解': h.c1!=null?String(h.c1):''
-      };
-      const hr = await createRecord(token, TBL.history, hFields);
-      results.push({type:'history', r: hr.code !== 0 ? {ok:false, reason:'写入失败: '+(hr.msg||'')+' code='+hr.code} : {ok:true, recordId: hr.data && hr.data.record ? hr.data.record.record_id : ''}});
+      const hr = await upsertHistory(token, TBL.history, h);
+      results.push({type:'history', r: hr});
     }
 
     // 优秀案例
