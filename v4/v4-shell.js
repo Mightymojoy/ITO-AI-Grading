@@ -1968,3 +1968,53 @@ document.addEventListener('DOMContentLoaded', function(){
     console.log('[v4.11.7] 主品自动识别接管已生效（段归属 + name/aliases 强信号 + 跨品共词去权）');
   }catch(e){ console.log('[v4.11.7] 主品判定接管跳过:', (e && e.message) || e); }
 })();
+
+// ---------- v4.11.9：线上 HTTPS 页面禁用「一键完整日报」/自动转写 ----------
+// 背景：2026-09-08 13:30 老大报「一键完整日报」点完报 Failed to fetch。
+// 根因（代码级事实）：
+//   · app-core.js:1532 VISION_URL = localStorage.vision_url || 'http://127.0.0.1:3713'
+//   · app-core.js:1863 ASR_URL    = localStorage.asr_url    || 'http://127.0.0.1:3712'
+//   · buildFullReport 直接把整段视频 body POST 到 ASR_URL/VISION_URL（V4Jobs.cachedRequest）
+//   · 线上 https://ito-ai-grading.vercel.app/v4/ 是 HTTPS 页面，浏览器 Mixed Content 规则：
+//     HTTPS 页面禁止 fetch HTTP 端点 → 请求根本不发出 → TypeError: Failed to fetch
+//   · v4.11.4 URL 接管块只接管 FEISHU_FILL_URL/SYNC_URL，没接管 ASR/VISION
+// 修复：纯壳层 monkey-patch window.V4Jobs.fullReport / window.V4Jobs.transcribe
+//   · 线上模式（isLocalHttp=false）：直接抛错引导，避免用户卡在 "Failed to fetch" 盲区
+//   · 本地模式（8791 http://）：原行为不变，下载视频走本地 3712/3713
+//   · 同步把首页「一键完整日报」按钮置灰 + 提示文字，避免无意义点击
+(function(){
+  try{
+    var isCloud = !(location.protocol === 'http:' && /^(127\.0\.0\.1|localhost)/i.test(location.hostname));
+    if(!isCloud) { console.log('[v4.11.9] 本地 8791 模式，一键完整日报正常可用'); return; }
+    var GUIDE = '线上模式不支持「一键完整日报」自动转写（Vercel HTTPS 页面无法 fetch 本地 HTTP 3712/3713，会触发 Mixed Content 拦截）。请改用以下任一方式：\\n\\nA. 切到本地 8791 模式：双击「ITO-v4一键启动.bat」拉起本地转写服务，打开 http://127.0.0.1:8791/v4/\\nB. 手动转写为 SRT：上传视频到飞书妙记/Edge 录屏转写等工具 → 导出 .srt → 在「每日评分」页粘贴逐字稿直接评分';
+    function cloudBlock(method, lane){
+      return function(){
+        try{ if(typeof toastErr === 'function') toastErr(GUIDE); }catch(e){}
+        try{ alert(GUIDE); }catch(e){}
+        return Promise.reject(new Error('cloud-blocked-' + method));
+      };
+    }
+    if(window.V4Jobs && typeof window.V4Jobs.fullReport === 'function'){
+      window.V4Jobs.fullReport = cloudBlock('fullReport');
+    }
+    if(window.V4Jobs && typeof window.V4Jobs.transcribe === 'function'){
+      window.V4Jobs.transcribe = cloudBlock('transcribe');
+    }
+    // 同步置灰按钮（延迟到 DOM ready）
+    function dimButtons(){
+      var ids = ['visionAutoBtn'];
+      ids.forEach(function(id){
+        var b = document.getElementById(id);
+        if(b && !b.disabled){
+          b.disabled = true;
+          b.title = '线上模式不可用，请用本地 8791 或上传 SRT';
+          b.style.opacity = '0.45';
+          b.style.cursor = 'not-allowed';
+        }
+      });
+    }
+    if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', dimButtons);
+    else dimButtons();
+    console.log('[v4.11.9] 线上模式已拦截一键完整日报/自动转写：', GUIDE.slice(0,80) + '...');
+  }catch(e){ console.log('[v4.11.9] 接管跳过:', (e && e.message) || e); }
+})();
