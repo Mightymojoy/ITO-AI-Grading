@@ -2018,3 +2018,290 @@ document.addEventListener('DOMContentLoaded', function(){
     console.log('[v4.11.9] 线上模式已拦截一键完整日报/自动转写：', GUIDE.slice(0,80) + '...');
   }catch(e){ console.log('[v4.11.9] 接管跳过:', (e && e.message) || e); }
 })();
+
+// ---------- v4.11.11：工作台读飞书实时数据（接上 api/feishu-read，看到全员评分） ----------
+// 背景：工作台写飞书是实时的（云端函数），但读数据全是本机的——localStorage（首页/历史归档）
+//       + data/*.js 静态快照（飞书数据表 tab，停在 2026-08-31）。api/feishu-read.js 早在 v4.4
+//       就写好了，注释原文「把飞书多维表格的数据读进 v4 工作台」，但全仓无任何调用方，线没接上。
+// 本块纯加法，不动 app-core.js：
+//   ① 接管 v4FsEnsure(key) → 优先走云端实时接口，失败自动回退原静态快照（行为不会比现在更差）
+//   ② _index 结构适配（接口 tables → {key,name,table_id,count}，供表选择器使用）
+//   ③ 修正 mergeDaily 优先级（原实现遇到飞书记录无 _updatedAt 时会倒挂成本地覆盖远端）
+//   ④ 首页统计合并飞书历史评分（全员口径），本机 5 分钟内新评的仍以本机为准
+(function(){
+  try{
+    if(typeof window === 'undefined' || typeof location === 'undefined') return;
+
+    var V4CLOUD = {
+      cache: {},          // key -> {data, ts}；data=null 表示上次失败
+      TTL: 60000,         // 成功缓存 60s（飞书接口限流约 100 次/分/应用）
+      FAIL_TTL: 30000,    // 失败缓存 30s，避免反复重试拖慢界面
+      grace: 300000,      // 本机 5 分钟内新评的记录优先于远端（飞书回写可能有延迟）
+      limit: 500          // 拉取上限（接口上限 1000；历史评分已 94 条且会持续增长）
+    };
+    window.V4CLOUD = V4CLOUD;
+
+    var ABS_READ = 'https://ito-ai-grading.vercel.app/api/feishu-read';
+
+    function isLocalHost(){
+      var h = '';
+      try{ h = location.hostname; }catch(e){}
+      return (location.protocol === 'file:' || h === '127.0.0.1' || h === 'localhost');
+    }
+    // 端点候选：localStorage.feishu_read_url 最优先；本地 8791 无该路由 → 直连线上；线上优先同源
+    function readUrls(){
+      var custom = null;
+      try{ custom = localStorage.getItem('feishu_read_url'); }catch(e){}
+      if(custom) return [String(custom).replace(/\/+$/, '')];
+      if(isLocalHost()) return [ABS_READ];
+      return ['/api/feishu-read', ABS_READ];
+    }
+
+    function postJson(url, body, timeoutMs){
+      return new Promise(function(resolve, reject){
+        var ctrl = ('AbortController' in window) ? new AbortController() : null;
+        var timer = ctrl ? setTimeout(function(){ ctrl.abort(); }, timeoutMs || 20000) : null;
+        fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: ctrl ? ctrl.signal : undefined
+        }).then(function(r){
+          if(timer) clearTimeout(timer);
+          if(!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        }).then(function(j){
+          if(!j) throw new Error('空响应');
+          if(j.skipped) throw new Error(j.reason || '服务端未配置飞书凭证');
+          if(!j.ok) throw new Error(j.error || j.reason || '接口 ok=false');
+          resolve(j);
+        })['catch'](function(e){
+          if(timer) clearTimeout(timer);
+          reject(e);
+        });
+      });
+    }
+    function fetchCloud(payload){
+      var urls = readUrls(), i = 0;
+      function next(){
+        if(i >= urls.length) return Promise.reject(new Error('全部云端端点不可用'));
+        return postJson(urls[i++], payload)['catch'](function(){ return next(); });
+      }
+      return next();
+    }
+
+    // ---- 表名 → 逻辑键（与 api/feishu-read.js 的 NAME_KEYS 同口径，先精确后模糊）----
+    // 顺序即优先级：「周总结-明星主播」必须先于「周总结」，「历史评分汇总」必须先于「历史评分」
+    var KEY_RULES = [
+      [/明星/,          'weekstar'],
+      [/周总结/,        'week'],
+      [/历史评分汇总/,  'historySum'],
+      [/历史评分/,      'history'],
+      [/主播日报/,      'daily'],
+      [/TOP1|多主播/i,  'top1'],
+      [/月总结/,        'month'],
+      [/激励/,          'reward'],
+      [/惩罚/,          'punish'],
+      [/黄金话术/,      'golden'],
+      [/问题话术/,      'problem'],
+      [/优秀案例/,      'case'],
+      [/主播名单/,      'roster'],
+      [/日评分汇总/,    'dailySum']
+    ];
+    function keyOfName(name){
+      var n = String(name || '');
+      for(var i = 0; i < KEY_RULES.length; i++){
+        if(KEY_RULES[i][0].test(n)) return KEY_RULES[i][1];
+      }
+      return '';
+    }
+    function stamp(){ return '飞书实时 · ' + new Date().toLocaleTimeString('zh-CN', { hour12: false }); }
+
+    // 表选择器下拉的条数：已加载过的表显示真实条数，未加载显示「—」（原 v4FsFillSel 用 t.count||0）
+    function cachedCount(key){
+      try{
+        var mem = window.V4FS && window.V4FS[key];
+        if(mem && mem.rows && mem.rows.length) return mem.rows.length;
+      }catch(e){}
+      return '—';
+    }
+
+    function buildIndex(){
+      return fetchCloud({ action: 'tables' }).then(function(j){
+        var used = {};
+        var tables = (j.tables || []).map(function(t){
+          var k = keyOfName(t.name);
+          if(!k || used[k]) k = 'tbl_' + t.table_id;
+          used[k] = 1;
+          return { key: k, name: t.name, table_id: t.table_id, count: cachedCount(k) };
+        });
+        var d = { ok: true, syncedAt: stamp(), tables: tables };
+        window.V4FS = window.V4FS || {};
+        window.V4FS['_index'] = d;
+        return d;
+      });
+    }
+
+    // ---- ① 主接管：v4FsEnsure(key) ----
+    var _origEnsure = window.v4FsEnsure;
+    if(typeof _origEnsure !== 'function'){
+      console.log('[v4.11.11] v4FsEnsure 未就绪，跳过云端接管（工作台仍按静态快照运行）');
+      return;
+    }
+
+    function cloudEnsure(key){
+      var now = Date.now();
+      var c = V4CLOUD.cache[key];
+      if(c && (now - c.ts) < (c.data ? V4CLOUD.TTL : V4CLOUD.FAIL_TTL)) return Promise.resolve(c.data);
+
+      var task;
+      if(key === '_index'){
+        task = buildIndex();
+      } else {
+        var payload = /^tbl_/.test(key)
+          ? { action: 'records', table_id: key.slice(4), limit: V4CLOUD.limit }
+          : { action: 'records', key: key, limit: V4CLOUD.limit };
+        task = fetchCloud(payload).then(function(j){
+          j.syncedAt = stamp();
+          window.V4FS = window.V4FS || {};
+          window.V4FS[key] = j;
+          return j;
+        });
+      }
+      return task.then(function(d){
+        V4CLOUD.cache[key] = { data: d, ts: Date.now() };
+        return d;
+      })['catch'](function(e){
+        V4CLOUD.cache[key] = { data: null, ts: Date.now() };
+        console.log('[v4.11.11] 云端读取失败 → 回退静态快照 | ' + key + ' | ' + ((e && e.message) || e));
+        return _origEnsure(key);
+      });
+    }
+
+    window.v4FsEnsure = function(key){
+      try{ return cloudEnsure(key); }
+      catch(e){
+        console.log('[v4.11.11] 接管异常 → 回退静态快照:', (e && e.message) || e);
+        return _origEnsure(key);
+      }
+    };
+
+    // 重新载入：一并清掉云端缓存，保证拿到最新
+    var _origReload = window.v4FsReload;
+    if(typeof _origReload === 'function'){
+      window.v4FsReload = function(){
+        V4CLOUD.cache = {};
+        console.log('[v4.11.11] 云端缓存已清空，强制重取');
+        return _origReload.apply(this, arguments);
+      };
+    }
+
+    // ---- ③ 合并修正：飞书（共享真相）优先；本机 5 分钟内新评的保留 ----
+    // 原实现：remoteTime = Date.parse(old._updatedAt)，飞书记录无该字段 → NaN → !remoteTime 为真
+    //         → 结果变成「本地无条件覆盖远端」，同主播同日期时本机旧分会盖掉飞书新分。
+    if(typeof window.mergeDaily === 'function'){
+      window.mergeDaily = function(local, synced){
+        var map = Object.create(null), order = [];
+        function keyOf(r){
+          var nd = v4NormDate(r['日期'] || r['标准日期'] || '');
+          return String(r['主播'] || r['主机'] || '') + '|' + (nd.d || String(r['日期'] || r['标准日期'] || ''));
+        }
+        (synced || []).forEach(function(r){ var k = keyOf(r); if(!map[k]) order.push(k); map[k] = r; });
+        (local || []).forEach(function(r){
+          var k = keyOf(r);
+          if(!map[k]){ order.push(k); map[k] = r; return; }
+          var rt = Date.parse(r._updatedAt || '');
+          if(!isNaN(rt) && (Date.now() - rt) < V4CLOUD.grace) map[k] = r;   // 刚评的 → 本机优先
+        });
+        return order.map(function(k){ return map[k]; }).sort(dateDesc);
+      };
+    }
+
+    // ---- ④ 首页统计：本机 + 飞书历史评分（全员口径） ----
+    function cloudHistRows(rows){
+      var out = [];
+      (rows || []).forEach(function(r){
+        var host = String(r['主播'] || '').trim();
+        if(!host) return;
+        var nd = v4NormDate(r['标准日期'] || r['日期'] || '');
+        out.push({
+          host: host,
+          date: nd.d || String(r['标准日期'] || r['日期'] || ''),
+          total: r['总分'] || r['历史总分(数值)'] || '—',
+          c1Score: r['c1产品理解'] || r['产品理解(数值)'] || '',
+          product: r['产品'] || '',
+          _src: 'cloud'
+        });
+      });
+      return out;
+    }
+    function dashMerge(cloudRows){
+      var histRaw = v4ReadLS('grading_history_v1', '[]');
+      var map = Object.create(null), order = [];
+      function keyOf(x){
+        var nd = v4NormDate(x.date || '');
+        return String(x.host || '') + '|' + (nd.d || String(x.date || ''));
+      }
+      cloudRows.forEach(function(x){ var k = keyOf(x); if(!map[k]) order.push(k); map[k] = x; });
+      histRaw.forEach(function(x){
+        var k = keyOf(x);
+        if(!map[k]){ order.push(k); map[k] = x; return; }
+        var rt = (typeof x.ts === 'number') ? x.ts : Date.parse(x._updatedAt || '');
+        if(!isNaN(rt) && rt && (Date.now() - rt) < V4CLOUD.grace) map[k] = x;   // 刚评的 → 本机优先
+      });
+      var merged = order.map(function(k){ return map[k]; });
+      merged.sort(function(a, b){
+        var da = String(a.date || ''), db = String(b.date || '');
+        if(da !== db) return da > db ? -1 : 1;
+        return ((b.ts || 0) - (a.ts || 0));
+      });
+      return merged;
+    }
+    function dashRenderMerged(hist){
+      var today = v4TodayStr(), todayN = 0;
+      for(var i = 0; i < hist.length; i++){ if(hist[i].date === today) todayN++; }
+      var el;
+      el = document.getElementById('dash-stat-today');   if(el) el.textContent = todayN;
+      el = document.getElementById('dash-stat-history'); if(el) el.textContent = hist.length;
+      var box = document.getElementById('dash-recent');
+      if(!box) return;
+      if(!hist.length){
+        box.innerHTML = '暂无记录——去「每日评分」完成第一次评分（历史数据与 v3 共库，之前评过的直接可见）';
+        return;
+      }
+      var h = '<table><tr><th style="width:14%">主播</th><th style="width:12%">日期</th><th style="width:9%">总分</th><th style="width:11%">c1 产品理解</th><th>考核产品</th></tr>';
+      var recent = hist.slice(0, 8);
+      for(var j = 0; j < recent.length; j++){
+        var r = recent[j];
+        var c1 = (r.c1Score !== null && r.c1Score !== undefined && r.c1Score !== '') ? r.c1Score : '—';
+        h += '<tr><td><b>' + esc(r.host) + '</b></td><td>' + esc(r.date || '—') + '</td>' +
+             '<td><b style="color:var(--gold)">' + esc(String(r.total === undefined || r.total === null ? '—' : r.total)) + '</b></td>' +
+             '<td>' + esc(String(c1)) + '</td>' +
+             '<td style="font-size:11.5px;color:var(--text2)">' + v4ExpandCell(r.product || '—', 44) + '</td></tr>';
+      }
+      var cloudN = 0;
+      for(var m = 0; m < hist.length; m++){ if(hist[m]._src === 'cloud') cloudN++; }
+      box.innerHTML = h + '</table>' +
+        '<div style="margin-top:6px"><a href="#/history" style="font-size:11.5px;color:var(--gold)">查看全部历史 →</a>' +
+        '<span style="font-size:11.5px;color:var(--text3);margin-left:10px">含飞书全员数据 ' + cloudN + ' 条（' + stamp() + '）</span></div>';
+    }
+
+    var _origDash = window.v4RenderDashboard;
+    if(typeof _origDash === 'function'){
+      window.v4RenderDashboard = function(){
+        var ret;
+        try{ ret = _origDash.apply(this, arguments); }catch(e){ console.log('[v4.11.11] 原首页渲染异常:', (e && e.message) || e); }
+        try{
+          window.v4FsEnsure('history').then(function(d){
+            if(!d || !d.rows || !d.rows.length) return;
+            dashRenderMerged(dashMerge(cloudHistRows(d.rows)));
+          })['catch'](function(e){ console.log('[v4.11.11] 首页飞书合并跳过:', (e && e.message) || e); });
+        }catch(e){}
+        return ret;
+      };
+    }
+
+    console.log('[v4.11.11] 工作台读飞书已接通 → 端点 ' + readUrls().join(' / ') +
+      ' ｜ 缓存 ' + (V4CLOUD.TTL / 1000) + 's ｜ 失败自动回退静态快照');
+  }catch(e){ console.log('[v4.11.11] 接管跳过:', (e && e.message) || e); }
+})();
