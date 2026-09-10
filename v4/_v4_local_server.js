@@ -142,14 +142,20 @@ const server = http.createServer((req, res) => {
   serveStatic(req, res, urlPath);
 });
 
-server.listen(PORT, '127.0.0.1', () => {
+// v4.11.10：绑定地址可配。默认 127.0.0.1（纯本机，最安全）；
+// 设 BIND_HOST=0.0.0.0 可让局域网内其他设备（手机 / 同事电脑）连入。
+const BIND = process.env.BIND_HOST || '127.0.0.1';
+const SHOW_HOST = (BIND === '0.0.0.0' || BIND === '::') ? 'localhost' : BIND;
+const BASE_URL = 'http://' + SHOW_HOST + ':' + PORT;
+
+server.listen(PORT, BIND, () => {
   const hasKey = !!process.env.DEEPSEEK_API_KEY;
   const lines = [];
   lines.push('');
   lines.push('  ITO v4.9.0 本地化工作台 · 语义评分（关键词命中 → 文字语义达标）');
   lines.push('  ─────────────────────────────────────────────────────');
-  lines.push('  工作台地址 : http://127.0.0.1:' + PORT + '/v4/index.html');
-  lines.push('  判定接口   : http://127.0.0.1:' + PORT + '/semantic-judge（与页面同源，免跨域）');
+  lines.push('  工作台地址 : ' + BASE_URL + '/v4/index.html');
+  lines.push('  判定接口   : ' + BASE_URL + '/semantic-judge（与页面同源，免跨域）');
   lines.push('  飞书写回   : /api/feishu-fill｜feishu-week-month｜feishu-sync → 云端代理（同源接管，无需 3712）');
   lines.push('  评分公式   : level × quality × 20（不动）；语义只覆写"判卷依据"');
   lines.push('  DeepSeek   : ' + (hasKey ? 'Key 已注入 ✓ 语义判定可用' : 'Key 未配置 ✗ 自动降级为关键词版'));
@@ -160,7 +166,12 @@ server.listen(PORT, '127.0.0.1', () => {
   lines.push('  关闭本窗口 = 停止工作台');
   lines.push('');
   console.log(lines.join('\n'));
-  if (OPEN && process.platform === 'win32') {
-    setTimeout(() => { try { exec('cmd /c start "" "http://127.0.0.1:' + PORT + '/v4/index.html"'); } catch (e) {} }, 600);
+  if (OPEN) {
+    // v4.11.10：跨平台打开浏览器（Windows: cmd start / macOS: open / Linux: xdg-open）
+    const url = BASE_URL + '/v4/index.html';
+    const openCmd = process.platform === 'win32' ? 'cmd /c start "" "' + url + '"'
+                  : process.platform === 'darwin' ? 'open "' + url + '"'
+                  : 'xdg-open "' + url + '"';
+    setTimeout(() => { try { exec(openCmd); } catch (e) {} }, 600);
   }
 });
