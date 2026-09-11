@@ -671,7 +671,11 @@ function runGrading(segs, productKey){
   };
 }
 
-// ================= 3.6 多品识别 + 10 分钟窗口卖点覆盖引擎 =================
+// ================= 3.6 多品识别 + 20 分钟窗口卖点覆盖引擎 =================
+// V3.8 讲品时长口径：10 分钟 → 20 分钟（2026-09-11 老大确认）
+// 原因：10 分钟主播无法把产品介绍完整，窗口截断导致卖点永远查不全 → 拉到 20 分钟可完整讲品。
+// 收敛为单一常量，杜绝 600/1200 魔数散落各处。
+var SELL_WINDOW_SEC = 1200;   // 讲品考核窗口 = 20 分钟
 // 3.6.1 单轮/窗口级八维计分（三级评分层级：单轮评分用；信息准确性 baseline 按整场不计入单轮）
 function gradeWindow(segs, productKey){
   var STD = GRADING_STANDARD;
@@ -820,7 +824,7 @@ function analyzeProducts(segs){
       }
       rounds.push({t0sec: h.sec, t0: h.ts, idx: h.idx});
     }
-    // 3) 每轮 10 分钟窗口卖点覆盖
+    // 3) 每轮 20 分钟窗口卖点覆盖
     var sell = SELLS[prod.sellKey];
     var sellList = sell ? sell.list : [];
     var unionCovered = {}, unionMissed = {};
@@ -831,7 +835,7 @@ function analyzeProducts(segs){
         if(rnd.t0sec === null){ winText += segs[i].text + ' '; winSegs.push(segs[i]); continue; }
         var sec2 = tsToSec(segs[i].ts);
         if(sec2 === null) continue;
-        if(sec2 >= rnd.t0sec && sec2 < rnd.t0sec + 600){ winText += segs[i].text + ' '; winSegs.push(segs[i]); }
+        if(sec2 >= rnd.t0sec && sec2 < rnd.t0sec + SELL_WINDOW_SEC){ winText += segs[i].text + ' '; winSegs.push(segs[i]); }
       }
       winText = winText.toLowerCase();
       // 顺带提及过滤：窗口内有效话术 < 80 字 → 视为顺带提及，不计入正式讲品考核
@@ -851,7 +855,7 @@ function analyzeProducts(segs){
       rnd.touchOnly = touchOnly;
       rnd.winChars = winChars;
       rnd.pct = touchOnly ? null : (sellList.length ? Math.round(covered.length / sellList.length * 100) : 0);
-      rnd.windowEnd = rnd.t0sec !== null ? fmtTs(rnd.t0sec + 600) : '';
+      rnd.windowEnd = rnd.t0sec !== null ? fmtTs(rnd.t0sec + SELL_WINDOW_SEC) : '';
       // 三级评分：单轮八维计分（窗口级，无 baseline 扣分）
       rnd.grade = gradeWindow(winSegs, prod.sellKey);
     }
@@ -900,7 +904,7 @@ function collectProblems(r){
     var product = r.product || '';
     var dedupKey = host + '|' + date + '|' + product;
 
-    // ① 10 分钟窗口未覆盖卖点（产品识别轮次缺失）
+    // ① 20 分钟窗口未覆盖卖点（产品识别轮次缺失）
     try{
       if(r.products && r.products.products){
         for(var i=0;i<r.products.products.length;i++){
@@ -915,7 +919,7 @@ function collectProblems(r){
             lib.push({
               key: key, ts: ts, host: host, studio: studio, date: date, product: product,
               type: 'sellpoint_miss', cat: '讲品覆盖',
-              text: '10分钟窗口未讲：' + missTxt,
+              text: '20分钟窗口未讲：' + missTxt,
               detail: p.name + ' · 第' + (j+1) + '轮 ' + (rd.t0||'') + '~' + (rd.windowEnd||'') + ' 覆盖' + (rd.pct!=null?rd.pct+'%':'') + '（' + (rd.covered?rd.covered.length:0) + '/' + p.sellTotal + '）',
               evidence: (rd.missed||[]).join('、'),
               priority: null
@@ -1344,14 +1348,14 @@ function renderResult(r){
   // 产品识别与讲品分析
   var ph = '';
   if(r.products && r.products.products && r.products.products.length){
-    ph += '<div style="font-size:12px;color:var(--text2);margin-bottom:8px">整场识别到 <b>' + r.products.products.length + '</b> 个产品、共 <b>' + r.products.totalRounds + '</b> 次讲品｜考核规则：<b>提到品名即计时，10 分钟窗口内须讲完全部规则卖点；窗口内未讲完的卖点单独整理（不因后续补讲免责）</b></div>';
+    ph += '<div style="font-size:12px;color:var(--text2);margin-bottom:8px">整场识别到 <b>' + r.products.products.length + '</b> 个产品、共 <b>' + r.products.totalRounds + '</b> 次讲品｜考核规则：<b>提到品名即计时，20 分钟窗口内须讲完全部规则卖点；窗口内未讲完的卖点单独整理（不因后续补讲免责）</b></div>';
     for(var i=0;i<r.products.products.length;i++){
       var p = r.products.products[i];
       var hasMiss = p.unionMissed.length > 0;
       ph += '<div style="border:1px solid ' + (hasMiss ? '#f5c6bd' : 'var(--border)') + ';border-radius:8px;background:var(--card);margin-bottom:10px;overflow:hidden">';
       ph += '<div style="padding:9px 14px;background:#faf8f3;display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-bottom:1px solid var(--border)"><b style="font-size:13px">' + p.name + '</b><span style="font-size:11px;color:var(--text2)">正式讲品 <b>' + p.totalRounds + '</b> 次' + (p.touchCount ? '（另有顺带提及 ' + p.touchCount + ' 次，不计考核）' : '') + '</span>' + (p.overallScore !== null ? '<span style="font-size:12px;font-weight:700;color:' + (p.overallScore>=75?'var(--ok)':(p.overallScore<45?'var(--danger)':'var(--warn)')) + '">单品整体 ' + p.overallScore + ' 分（' + p.overallGrade + '级）</span>' : '') + '<span style="margin-left:auto;font-size:12px;font-weight:600;color:' + (p.unionPct>=90?'var(--ok)':(p.unionPct<70?'var(--danger)':'var(--warn)')) + '">整体覆盖 ' + p.unionPct + '%</span></div>';
       ph += '<div style="padding:10px 14px">';
-      ph += '<table><tr><th style="width:13%">讲品轮次</th><th style="width:16%">起始</th><th style="width:11%">10分钟覆盖</th><th style="width:13%">单轮评分</th><th>10 分钟内未讲到的卖点（待改进）</th></tr>';
+      ph += '<table><tr><th style="width:13%">讲品轮次</th><th style="width:16%">起始</th><th style="width:11%">20分钟覆盖</th><th style="width:13%">单轮评分</th><th>20 分钟内未讲到的卖点（待改进）</th></tr>';
       for(var j=0;j<p.rounds.length;j++){
         var rd = p.rounds[j];
         if(rd.touchOnly){
@@ -1367,7 +1371,7 @@ function renderResult(r){
       }
       ph += '</table>';
       if(hasMiss){
-        ph += '<div style="margin-top:8px;font-size:11.5px;color:var(--danger);background:#fdecea;border-radius:6px;padding:6px 10px">⚠ 该品存在 10 分钟窗口内未讲完的卖点：' + esc(p.unionMissed.join('、')) + '——整理为讲品改进项，后续优化讲品顺序与完整性</div>';
+        ph += '<div style="margin-top:8px;font-size:11.5px;color:var(--danger);background:#fdecea;border-radius:6px;padding:6px 10px">⚠ 该品存在 20 分钟窗口内未讲完的卖点：' + esc(p.unionMissed.join('、')) + '——整理为讲品改进项，后续优化讲品顺序与完整性</div>';
       }
       ph += '</div></div>';
     }
@@ -1960,13 +1964,13 @@ function buildReportHTML(r){
   }
   // 产品识别
   if(r.products && r.products.products && r.products.products.length){
-    out += '<div style="font-weight:700;font-size:12.5px;margin:10px 0 6px">产品识别与讲品分析（10 分钟窗口卖点覆盖）</div>';
+    out += '<div style="font-weight:700;font-size:12.5px;margin:10px 0 6px">产品识别与讲品分析（20 分钟窗口卖点覆盖）</div>';
     for(var i=0;i<r.products.products.length;i++){
       var p = r.products.products[i];
       var hasMiss = p.unionMissed.length > 0;
       out += '<div style="border:1px solid ' + (hasMiss ? '#f5c6bd' : 'var(--border)') + ';border-radius:8px;padding:8px 10px;margin-bottom:8px">';
       out += '<div style="font-size:12px;font-weight:700">' + p.name + ' · 正式讲品 ' + p.totalRounds + ' 次（顺带提及 ' + (p.touchCount||0) + '）· 整体覆盖 ' + p.unionPct + '%</div>';
-      if(p.unionMissed.length) out += '<div style="font-size:11.5px;color:var(--danger)">10 分钟未讲完：' + esc(p.unionMissed.join('、')) + '</div>';
+      if(p.unionMissed.length) out += '<div style="font-size:11.5px;color:var(--danger)">20 分钟未讲完：' + esc(p.unionMissed.join('、')) + '</div>';
       out += '</div>';
     }
   }

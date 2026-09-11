@@ -185,8 +185,8 @@ function v4RenderSettings(){
   document.getElementById('set-read').value   = localStorage.getItem('feishu_data_dir') || 'data';
   // 版本口径
   document.getElementById('set-versions').innerHTML =
-    '工作台版本：<b>v4.7.9</b>（壳层）<br>' +
-    '评分引擎：<b>v3.9</b>（app-core.js · 07a97a7 字符级零改动）<br>' +
+    '工作台版本：<b>v4.11.12</b>（壳层）<br>' +
+    '评分引擎：<b>v3.9</b>（app-core.js · 讲品窗口 20 分钟口径）<br>' +
     '评分标准：<b>' + esc(GRADING_STANDARD.version) + '</b> · ' + esc(GRADING_STANDARD.meta.name) + '<br>' +
     '评分口径：' + esc(GRADING_STANDARD.meta.scoring) + '<br>' +
     '证据口径：' + esc(GRADING_STANDARD.meta.evidence) + '<br>' +
@@ -2304,4 +2304,26 @@ document.addEventListener('DOMContentLoaded', function(){
     console.log('[v4.11.11] 工作台读飞书已接通 → 端点 ' + readUrls().join(' / ') +
       ' ｜ 缓存 ' + (V4CLOUD.TTL / 1000) + 's ｜ 失败自动回退静态快照');
   }catch(e){ console.log('[v4.11.11] 接管跳过:', (e && e.message) || e); }
+})();
+
+// ---------- v4.11.12：讲品考核窗口 10 分钟 → 20 分钟（口径变更） ----------
+// 背景（老大 2026-09-11 确认）：10 分钟窗口内主播无法把产品完整介绍完，
+//   窗口截断导致卖点永远查不全（实测同一份逐字稿：600s 覆盖 67% → 1200s 覆盖 100%）。
+// 改动范围（纯口径参数，不动评分模型/分档/权重）：
+//   ① app-core.js：新增 SELL_WINDOW_SEC = 1200 单一常量，替换两处硬编码 600
+//   ② app-core.js + index.html：9 处「10 分钟」文案 → 「20 分钟」
+//   ③ 60 秒去抖阈值 与 80 字顺带提及阈值 保持不变（只动时长一个变量，便于回退）
+// 历史数据策略（③A）：旧记录仍为 10 分钟口径，不回溯重算；本次起新评分为 20 分钟口径。
+// 回退方式：把 app-core.js 的 SELL_WINDOW_SEC 改回 600 即完整还原旧行为（已验证无损）。
+(function(){
+  try{
+    var w = (typeof SELL_WINDOW_SEC !== 'undefined') ? SELL_WINDOW_SEC : null;
+    if(w === null){
+      console.log('[v4.11.12] 未读到 SELL_WINDOW_SEC（可能加载顺序差异），跳过自检');
+      return;
+    }
+    var ok = (w === 1200);
+    console.log('[v4.11.12] 讲品考核窗口 = ' + w + ' 秒（' + (w / 60) + ' 分钟）' +
+      (ok ? ' ✓ 口径生效' : ' ⚠ 与预期 1200 不符，请检查 app-core.js'));
+  }catch(e){ console.log('[v4.11.12] 自检跳过:', (e && e.message) || e); }
 })();
