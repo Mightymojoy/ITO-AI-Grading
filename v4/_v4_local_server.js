@@ -21,6 +21,17 @@ const { exec } = require('child_process');
 const CLOUD_HOST = 'ito-ai-grading.vercel.app';
 const PROXY_PATHS = ['/api/feishu-fill', '/api/feishu-week-month', '/api/feishu-sync'];
 
+// ---- v4.11.14：本地无 Key → 语义判定透传云端（同源代理，Key 留在服务端） ----
+// 背景：交付包刻意不含 sem_key_local.txt（防 Key 外泄），于是同事端本地判定必然返回
+//       "DEEPSEEK_API_KEY not configured on server" → 静默降级关键词版，
+//       与开发机（语义版）口径不一致：同一场直播两个人跑出两个分。
+// 处理：本地无 Key 时不直接报错，改把 /semantic-judge 原样转发云端（那边已有 Key）。
+// 回退：设 SEM_CLOUD_FALLBACK=0 即关闭，回到"无 Key 便降级关键词版"的旧行为。
+// 安全：仅当本地无 Key 才启用；有 Key 一律走本机直连，绝不外发。
+// 兜底：云端不可达/超时 → 仍返回 ok:false → 前端照旧降级关键词版，不会比现在更差。
+const SEM_CLOUD_PATH = '/api/semantic-judge';
+const SEM_CLOUD_FALLBACK = process.env.SEM_CLOUD_FALLBACK !== '0';
+
 const ROOT = path.join(__dirname, '..');
 const PORT = Number(process.argv[2]) || 8791;
 const OPEN = !(process.argv[3] === '--noopen');
@@ -100,8 +111,10 @@ function routeJudge(req, res) {
   });
 }
 
-// ---- 飞书写回云端代理：POST body 原样转发 ito-ai-grading.vercel.app，响应原样回写 ----
-function proxyToCloud(req, res, apiPath) {
+// ---- 云端代理：POST body 原样转发 ito-ai-grading.vercel.app，响应原样回写 ----
+// label：仅用于错误文案（飞书写写 / 语义判定），v4.11.14 起可传
+function proxyToCloud(req, res, apiPath, label) {
+  const tag = label || '云端代理';
   const chunks = [];
   req.on('data', c => chunks.push(c));
   req.on('error', e => sendText(res, 400, JSON.stringify({ ok:false, error:'请求读取失败: ' + e.message }), 'application/json; charset=utf-8'));
@@ -126,8 +139,8 @@ function proxyToCloud(req, res, apiPath) {
         res.end(buf);
       });
     });
-    pReq.on('error', e => sendText(res, 502, JSON.stringify({ ok:false, error:'云端代理不可达: ' + e.message }), 'application/json; charset=utf-8'));
-    pReq.setTimeout(30000, () => { try { pReq.destroy(new Error('云端代理超时(30s)')); } catch (e) {} });
+    pReq.on('error', e => sendText(res, 502, JSON.stringify({ ok:false, error: tag + '不可达: ' + e.message }), 'application/json; charset=utf-8'));
+    pReq.setTimeout(30000, () => { try { pReq.destroy(new Error(tag + '超时(30s)')); } catch (e) {} });
     pReq.end(body);
   });
 }
@@ -136,7 +149,11 @@ const server = http.createServer((req, res) => {
   let urlPath;
   try { urlPath = decodeURIComponent(String(req.url || '/').split('?')[0]); }
   catch (e) { return sendText(res, 400, 'bad url'); }
-  if (urlPath === '/semantic-judge') return routeJudge(req, res);
+  if (urlPath === '/semantic-judge') {
+    // v4.11.14：本地无 Key 且兜底开启 → 转发云端（Key 在服务端）；否则本机直连
+    if (!process.env.DEEPSEEK_API_KEY && SEM_CLOUD_FALLBACK) return proxyToCloud(req, res, SEM_CLOUD_PATH, '语义判定');
+    return routeJudge(req, res);
+  }
   if (req.method === 'POST' && PROXY_PATHS.indexOf(urlPath) !== -1) return proxyToCloud(req, res, urlPath);
   if (req.method === 'POST') return sendText(res, 404, 'not found');
   serveStatic(req, res, urlPath);
@@ -155,14 +172,24 @@ server.listen(PORT, BIND, () => {
   lines.push('  ITO v4.9.0 本地化工作台 · 语义评分（关键词命中 → 文字语义达标）');
   lines.push('  ─────────────────────────────────────────────────────');
   lines.push('  工作台地址 : ' + BASE_URL + '/v4/index.html');
-  lines.push('  判定接口   : ' + BASE_URL + '/semantic-judge（与页面同源，免跨域）');
+  lines.push('  判定接口   : ' + BASE_URL + '/semantic-judge（与页面同源，免跨域' +
+    (hasKey ? '・本机直连' : SEM_CLOUD_FALLBACK ? '・转发云端' : '') + '）');
   lines.push('  飞书写回   : /api/feishu-fill｜feishu-week-month｜feishu-sync → 云端代理（同源接管，无需 3712）');
   lines.push('  评分公式   : level × quality × 20（不动）；语义只覆写"判卷依据"');
-  lines.push('  DeepSeek   : ' + (hasKey ? 'Key 已注入 ✓ 语义判定可用' : 'Key 未配置 ✗ 自动降级为关键词版'));
+  lines.push('  DeepSeek   : ' + (hasKey ? 'Key 已注入 ✓ 语义判定可用（本机直连）'
+    : SEM_CLOUD_FALLBACK ? 'Key 未配置 → 语义判定走云端兜底 ✓（' + CLOUD_HOST + '）'
+    : 'Key 未配置 ✗ 自动降级为关键词版'));
   lines.push('');
-  lines.push('  首次配置 Key（一次性）：把 sk- 开头的 Key 存到文件');
+  if (hasKey) {
+    lines.push('  Key 来源：环境变量 DEEPSEEK_API_KEY 或 ↓ 这个文件；本机直连，文字不经第三方中转。');
+  } else if (SEM_CLOUD_FALLBACK) {
+    lines.push('  ※ 本机没放 Key：判定请求会经云端 ' + CLOUD_HOST + ' 转 DeepSeek（转写文字会上行），');
+    lines.push('    评分口径与开发机完全一致。想改纯本机直连 → 把 sk- 开头的 Key 存到 ↓ 后重启：');
+  } else {
+    lines.push('  首次配置 Key（一次性）：把 sk- 开头的 Key 存到文件');
+  }
   lines.push('    ' + KEYFILE);
-  lines.push('    （已被 .gitignore 排除，绝不进仓库），重启本脚本即可');
+  lines.push('    （已被 .gitignore 排除，绝不进仓库）');
   lines.push('  关闭本窗口 = 停止工作台');
   lines.push('');
   console.log(lines.join('\n'));

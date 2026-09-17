@@ -6,6 +6,24 @@
 //           grading_v2_golden_lib / grading_problem_lib_v1）
 // =====================================================
 
+// ---------- 版本口径（唯一真源） ----------
+// 铁律：界面上的版本号一律由本常量驱动，禁止再往 HTML 里写死一个字面量。
+// 历史坑（v4.11.14 修）：v4/index.html 的 #pageBadge 从 v4.11.11 起就没人再改过，
+//   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
+//   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
+// v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
+var V4_VERSION = 'v4.11.14';
+(function(){
+  function paint(){
+    ['pageBadge', 'brandVer', 'footVer'].forEach(function(id){
+      var el = document.getElementById(id);
+      if(el) el.textContent = V4_VERSION;
+    });
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', paint);
+  else paint();
+})();
+
 // ---------- 0. 全局 JS 错误捕获（红色错误条，常驻显示 + 可关闭） ----------
 (function(){
   var bar = document.getElementById('errbar');
@@ -185,7 +203,7 @@ function v4RenderSettings(){
   document.getElementById('set-read').value   = localStorage.getItem('feishu_data_dir') || 'data';
   // 版本口径
   document.getElementById('set-versions').innerHTML =
-    '工作台版本：<b>v4.11.13</b>（壳层）<br>' +
+    '工作台版本：<b>' + V4_VERSION + '</b>（壳层）<br>' +
     '评分引擎：<b>v3.9</b>（app-core.js · 讲品窗口 20 分钟口径）<br>' +
     '转写模式：<b>异步任务 + 进度轮询</b>（长视频不再受 600 秒总闸限制，需引擎包 v1.2+）<br>' +
     '评分标准：<b>' + esc(GRADING_STANDARD.version) + '</b> · ' + esc(GRADING_STANDARD.meta.name) + '<br>' +
