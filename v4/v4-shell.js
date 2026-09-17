@@ -185,8 +185,9 @@ function v4RenderSettings(){
   document.getElementById('set-read').value   = localStorage.getItem('feishu_data_dir') || 'data';
   // 版本口径
   document.getElementById('set-versions').innerHTML =
-    '工作台版本：<b>v4.11.12</b>（壳层）<br>' +
+    '工作台版本：<b>v4.11.13</b>（壳层）<br>' +
     '评分引擎：<b>v3.9</b>（app-core.js · 讲品窗口 20 分钟口径）<br>' +
+    '转写模式：<b>异步任务 + 进度轮询</b>（长视频不再受 600 秒总闸限制，需引擎包 v1.2+）<br>' +
     '评分标准：<b>' + esc(GRADING_STANDARD.version) + '</b> · ' + esc(GRADING_STANDARD.meta.name) + '<br>' +
     '评分口径：' + esc(GRADING_STANDARD.meta.scoring) + '<br>' +
     '证据口径：' + esc(GRADING_STANDARD.meta.evidence) + '<br>' +

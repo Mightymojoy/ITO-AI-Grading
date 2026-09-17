@@ -74,10 +74,10 @@
       if(job)job.controller.signal.removeEventListener('abort',abort);
     }
   }
-  async function cachedRequest(job,key,url,options){
+  async function cachedRequest(job,key,url,options,timeout){
     assertActive(job);
     if(job.cache[key])return job.cache[key];
-    var data=await request(url,options,job,600000);
+    var data=await request(url,options,job,timeout || 600000);
     job.cache[key]=data;return data;
   }
   function readFile(file,job){
@@ -142,14 +142,71 @@
     status.className='job-panel';status.textContent=label;status.style.display='block';
     finish(job,'done',label+' · '+r.total+' 分\n'+(r.__storageError || '报告已保存，同步状态见下方。'));
   }
+  // ===== v4.11.13 长视频异步转写 =====
+  // 背景：原「一个 HTTP 请求干到底 + 600 秒总闸」的写法，让 4 小时视频的成败取决于机器快慢
+  //（快机约 5 分钟，慢机 20 分钟以上，必然撞墙）。改为「提交任务 → 轮询进度」后，
+  // 超时不再由视频长度决定，且全程可见真实进度。
+  // 兼容策略：先探测服务端是否支持异步（/api/health 的 async 字段），不支持则回退原同步接口，
+  // 保证「旧引擎包 + 新前端」不会比现在更差。
+  function sleep(ms){return new Promise(function(r){setTimeout(r,ms);});}
+  async function pollJobProgress(job,jobId){
+    assertActive(job);
+    var ctrl=new AbortController();
+    var abort=function(){ctrl.abort();};
+    job.controller.signal.addEventListener('abort',abort,{once:true});
+    var timer=setTimeout(function(){ctrl.abort();},20000);
+    try{
+      var r=await fetch(ASR_URL+'/api/progress?jobId='+encodeURIComponent(jobId),{signal:ctrl.signal});
+      var d=null;try{d=await r.json();}catch(e){d=null;}
+      if(!d || d.ok!==true){
+        if(r.status===404)throw new Error('转写任务已丢失（本地服务可能重启过），请重新提交');
+        throw new Error((d && d.error) || ('进度查询失败 HTTP '+r.status));
+      }
+      return d;
+    }finally{
+      clearTimeout(timer);
+      job.controller.signal.removeEventListener('abort',abort);
+    }
+  }
+  async function transcribeVideo(job){
+    var file=job.file, useAsync=false;
+    try{
+      var h=await request(ASR_URL+'/api/health',{method:'GET'},job,8000);
+      useAsync=!!h.async;
+    }catch(e){useAsync=false;}
+    if(!useAsync){
+      var d=await cachedRequest(job,'transcription',ASR_URL+'/api/transcribe',{
+        method:'POST',headers:{'Content-Type':'application/octet-stream','X-File-Name':encodeURIComponent(file.name)},body:file});
+      return d.srt || '';
+    }
+    progress(job,'上传视频中…（上传完成后转入后台转写，等待期间可取消）');
+    var start=await request(ASR_URL+'/api/transcribe-async',{
+      method:'POST',headers:{'Content-Type':'application/octet-stream','X-File-Name':encodeURIComponent(file.name)},body:file},job,900000);
+    if(!start.jobId)throw new Error('转写服务未返回任务号，请重试或重启本地引擎');
+    var jobId=start.jobId, last='';
+    for(;;){
+      assertActive(job);
+      await sleep(1500);
+      assertActive(job);
+      var p=await pollJobProgress(job,jobId);
+      if(p.state==='done'){
+        var text=p.srt || '';
+        job.cache.transcription={srt:text,info:''};
+        progress(job,'转写完成：'+p.segs+' 段 / '+p.chars+' 字，用时 '+p.elapsed+' 秒');
+        return text;
+      }
+      if(p.state==='error')throw new Error(p.error || '转写失败');
+      if(p.state==='cancelled')throw new Error('转写任务已取消');
+      var msg=p.phase+(p.percent?(' '+p.percent+'%'):'')+(p.segs?(' · 已完成 '+p.segs+' 段'):'')+'（已用时 '+p.elapsed+' 秒）';
+      if(msg!==last){last=msg;progress(job,'后台转写中：'+msg+'，可取消');}
+    }
+  }
   async function processDaily(job,video){
     try{
       var text;
       if(video){
         progress(job,'上传并转写中…可取消，失败后支持重试');
-        var d=await cachedRequest(job,'transcription',ASR_URL+'/api/transcribe',{
-          method:'POST',headers:{'Content-Type':'application/octet-stream','X-File-Name':encodeURIComponent(job.file.name)},body:job.file});
-        text=d.srt || '';
+        text=await transcribeVideo(job);
       }else{progress(job,'正在读取逐字稿…');text=await readFile(job.file,job);}
       var r=await evaluate(text,job.file,job.meta,job);job.result=r;
       commit(r,job);showSingle(r,job);
