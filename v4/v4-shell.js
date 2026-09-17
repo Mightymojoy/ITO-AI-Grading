@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.18';
+var V4_VERSION = 'v4.11.19';
 (function(){
   function paint(){
     ['pageBadge', 'brandVer', 'footVer'].forEach(function(id){
@@ -1486,7 +1486,16 @@ document.addEventListener('DOMContentLoaded', function(){
     //   「行业第一」必须 4 字连写才判违规；只说"第一"、或只说"行业"，均不判。
     //   改动完全落在规则库 / 扫描器（两者 _v -> 1.0.2），**壳层判定逻辑未变**；
     //   此处记下两库版本号，便于线上出问题时一眼判断"规则库有没有读到"。
-    var rel = { _v:'4.11.18', enabled:true, sessionZero:false, moduleZero:false,
+    // v4.11.19（业务侧三次拍板「B：诱导互动类也加语境必配」）：改动仍全部落在规则库/扫描器
+    //   （两者 _v -> 1.0.3），**壳层判定逻辑一行未动**。三项变更：
+    //     ① S1 第5类另 3 个裸词条 `点关注`/`评论区评论`/`行李牌字母` 加语境必配；
+    //     ② 修正 `完全` 的语境白名单（移出口语搭配 `没问题|放心`）与 `公屏` 的过度提取；
+    //     ③ 补 `百分百`（同 `100%`）、`最好` 的 `卖最好|卖最多` 豁免。
+    //   ⚠️ 为什么非改不可 —— 用桌面 59 份真实逐字稿（8.13~9.15 / 105.7 万字，多主播多场次）实测：
+    //      初版口径下 53 份场次有 **30 份（56.6%）会整场归 0**；上述三项修正后降到 **13 份（24.5%）**，
+    //      且余下 13 份逐条核对**全部为真违规**（"全网最好的/吊打市面/完全不卡顿/完全不会爆开"）。
+    //      不加约束则红线功能会把整场评分统一压成 0，8 个能力维度彻底失去区分度。
+    var rel = { _v:'4.11.19', enabled:true, sessionZero:false, moduleZero:false,
                 rulesV: (window.V4ViolationRules && window.V4ViolationRules._v) || '',
                 scanV: (S && S._v) || '',
                 reasons:[], modules:[], scan:null, err:'', guardBlocked:0, strict:false };
