@@ -17,15 +17,17 @@
  *
  * 两层安全阀：
  *   1) EXEMPT（整场级、逐词）—— 词条落在"业务事实陈述"语境即整词豁免
- *   2) GUARD （窗口级、逐命中）—— 词根级条目须命中点 30 字内有宣传/诱导语境
- *      依据：真实 4h 逐字稿上 8 个词根条目 112 次命中、真阳性 0（详见规则库 v1.0.1 注释）
+ *   2) GUARD （紧邻窗口、逐命中，v1.0.2）—— 词根级条目须在命中点**紧邻** L/R 字内出现完整短语
+ *      依据：真实 4h 逐字稿上 8 个词根条目 112 次命中、真阳性 0（详见规则库注释）
+ *      口径：业务侧 2026-09-17 二次拍板「"行业第一"必须 4 字都说了才判违规；
+ *            只说"第一"、或只说"行业"，均不归纳到违规中」
  *
  * 一键回退：localStorage 置 `redline_strict='1'` → 忽略 GUARD，恢复纯字面口径。
  * ============================================================ */
 (function(root){
   'use strict';
 
-  var _v = '1.0.1';
+  var _v = '1.0.2';
 
   function getRules(){
     if(root && root.V4ViolationRules) return root.V4ViolationRules;
@@ -48,22 +50,27 @@
   function guardOf(term, R){
     if(Object.prototype.hasOwnProperty.call(_guardCache, term)) return _guardCache[term];
     var list = (R && R.GUARD) || [];
-    var re = null;
-    for(var i=0;i<list.length;i++){ if(list[i].term === term){ re = list[i].re; break; } }
-    _guardCache[term] = (re instanceof RegExp) ? re : null;
+    var g = null;
+    for(var i=0;i<list.length;i++){ if(list[i].term === term){ g = list[i]; break; } }
+    _guardCache[term] = (g && g.re instanceof RegExp) ? g : null;
     return _guardCache[term];
   }
 
-  /* 语境判定：命中点前后各 30 字窗口内是否出现宣传/诱导语境
+  /* 语境判定（v1.0.2：紧邻窗口）
+     在命中点**紧邻**的 L/R 字切片上 test 宣传/诱导语境正则。
+       · L/R 默认取 R.GUARD_L / R.GUARD_R（各 6 字），逐条可用 GUARD[i].L / .R 覆盖
+       · "行业第一" ⇒ 命中「第一」时左 4 字内须紧邻"行业"等名词 ⇒ 4 字连写才判
+       · "第一个/第一点" ⇒ 左邻不是宣传名词 ⇒ 窗口里凑不出"XX第一" ⇒ 不判
      返回 true = 该命中有效（计入违规）；false = 被语境约束挡掉 */
   function guardOk(term, hay, idx, len, R, stat){
-    var re = guardOf(term, R);
-    if(!re) return true;
-    var rad = (R && R.GUARD_RADIUS) || 30;
-    var s = Math.max(0, idx - rad), e = Math.min(hay.length, idx + len + rad);
+    var g = guardOf(term, R);
+    if(!g) return true;
+    var L  = (g.L  == null) ? ((R && R.GUARD_L) || 6) : g.L;
+    var Rt = (g.R  == null) ? ((R && R.GUARD_R) || 6) : g.R;
+    var s = Math.max(0, idx - L), e = Math.min(hay.length, idx + len + Rt);
     var win = hay.slice(s, e);
     var ok;
-    try{ re.lastIndex = 0; ok = re.test(win); }
+    try{ g.re.lastIndex = 0; ok = g.re.test(win); }
     catch(err){ ok = false; }        // 正则异常 → 按"不确定"处理，宁漏扣不错扣
     if(!ok && stat){
       stat.guardBlocked++;

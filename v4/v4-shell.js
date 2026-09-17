@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.17';
+var V4_VERSION = 'v4.11.18';
 (function(){
   function paint(){
     ['pageBadge', 'brandVer', 'footVer'].forEach(function(id){
@@ -1482,7 +1482,13 @@ document.addEventListener('DOMContentLoaded', function(){
     if(!r || r.noProduct || !r.modules) return r;
     if(!redlineEnabled()) return r;
     var S = window.V4ViolationScan;
-    var rel = { _v:'4.11.17', enabled:true, sessionZero:false, moduleZero:false,
+    // v4.11.18（业务侧口径二次收紧）：字面通道的 GUARD 由"命中点 ±30 字窗口"改为**紧邻窗口** ——
+    //   「行业第一」必须 4 字连写才判违规；只说"第一"、或只说"行业"，均不判。
+    //   改动完全落在规则库 / 扫描器（两者 _v -> 1.0.2），**壳层判定逻辑未变**；
+    //   此处记下两库版本号，便于线上出问题时一眼判断"规则库有没有读到"。
+    var rel = { _v:'4.11.18', enabled:true, sessionZero:false, moduleZero:false,
+                rulesV: (window.V4ViolationRules && window.V4ViolationRules._v) || '',
+                scanV: (S && S._v) || '',
                 reasons:[], modules:[], scan:null, err:'', guardBlocked:0, strict:false };
 
     // ---- 1) 字面通道（确定性）----
