@@ -7,6 +7,8 @@
 //   ② v4SemLevel()：子点状态集合 → 档位 level(0/0.5/1)
 //   ③ v4SemApply()：云端证据包 → 覆写 runGrading 结果 r 的 level/quality/score，
 //      并重算模块分/总分/等级/概览（公式与 app-core runGrading 3.1-3.3 完全同构）
+//   ④ 负向判据（v4.10.0 新增）：子点级 NEG_POINTS 的 neg 字段 + 全局违规扣分项 NEG_POINTS/NEG_JUDGE
+//      （业务侧《开心果二代举例V3》原文），命中走现行既有的 baseline 红旗通道，不改公式
 // 铁律：app-core.js 一字不动；本文件 + v4-shell.js + api/semantic-judge.js 纯加法
 // =====================================================
 (function(root, factory){
@@ -36,17 +38,21 @@
     '1.1': { name: '产品知识掌握', points: [
       { id: 'a', name: '硬参数',   q: '是否讲出具体数值（容量/自重/尺寸/升数）？' },
       { id: 'b', name: '材质用料', q: '是否讲清材质（PC/抗菌/工艺）及为什么好（含同源类比）？' },
-      { id: 'c', name: '结构部件', q: '轮/拉杆/锁/收纳分区等部件是否讲到（含功能等价说法）？' },
-      { id: 'd', name: '售后权益', q: '售后两条权益（360天换新 / 5年免费维修）是否都讲到（可分散两处）？' }
+      { id: 'c', name: '结构部件', q: '轮/拉杆/锁/收纳分区等部件是否讲到（含功能等价说法）？',
+        neg: '部件品牌或型号说错：行李箱闭合拉链说成 SAB（本品为 YKK 防爆拉链）；内里隔层拉链说成 YKK（本品为 SAB）；拉杆说成 6 系铝合金（本品 5 系，壁厚 1mm）；提手说成 PC/复合 PC（本品为尼农复合软胶）；密码锁说成外置拉链头式（本品为翻盖式）' },
+      { id: 'd', name: '售后权益', q: '售后两条权益（360天换新 / 5年免费维修）是否都讲到（可分散两处）？',
+        neg: '把售后年限讲错：说成"终身质保"（业务侧明确实际没有终身质保）；或把本品 360天换新＋五年维修 说成 GINKGO 4 才有的 720天换新＋十年维修' }
     ]},
     '1.2': { name: '产品定位理解', points: [
       { id: 'a', name: '人群定位',   q: '是否说清产品给谁用（点名人群或画像式表达）？' },
       { id: 'b', name: '场景角色',   q: '是否绑定使用场景/出行方式（尺寸↔场景）？' },
-      { id: 'c', name: '价值一句话', q: '是否给出一句话价值主张（收束式价值句）？' }
+      { id: 'c', name: '价值一句话', q: '是否给出一句话价值主张（收束式价值句）？',
+        neg: '价值句只说"好看/有质感"却漏掉"好用"，或只说"好用"漏掉"好看"——业务侧明确产品定位关键词为「好看、好用」两者必须同时讲到，只讲到其一的判错' }
     ]},
     '1.3': { name: '产品差异化表达', points: [
       { id: 'a', name: '对比对象',   q: '是否有明确对比对象（代际/尺寸/系列）？' },
-      { id: 'b', name: '差异维度',   q: '差异是否落到具体维度（布局/重量/价格/功能）？' },
+      { id: 'b', name: '差异维度',   q: '差异是否落到具体维度（布局/重量/价格/功能）？',
+        neg: '把一代二代的差别说成"尺寸不同"或"容量不同"（实际二代与一代"五五开"容量逐档相同：20/24/28 寸均为 37/62/99L，业务侧明确核心差别是颜色与内里）' },
       { id: 'c', name: '落到选择',   q: '差异后是否给"什么情况选什么"的建议？' }
     ]},
     '1.4': { name: '卖点提炼能力', points: [
@@ -130,6 +136,32 @@
     { id: 'c', name: '停顿呼吸', q: '段落间是否有自然停顿/话题切换的完整句边界？' }
   ]};
 
+  // ============ ②b 全局违规扣分项（v4.10.0 新增，来自业务侧原版定义） ============
+  // 来源：《开心果二代举例V3.xlsx》Sheet1 第 29–34 行「扣分项」原文逐条转译，不发挥。
+  // 业务侧口径：出现即扣分，没出现不得分不扣分 ⇒ 命中只写 baseline 红旗，走现行既有的
+  //   "信息准确性红旗 −4/处、封顶 −12" 通道（recompute 内已实现），不新增任何计分公式。
+  // ⚠️ n2 豁免：业务侧自身正面话术即含「卖得最好 / 明星自用最多」（产品信息汇总表 C4/D4），
+  //   若凡"最"字即扣会误伤业务认可话术 ⇒ 只判"无依据的最优断言"。该豁免口径待业务确认。
+  var NEG_POINTS = [
+    { id: 'n1', name: '绝对化用语',     q: '是否出现对产品效果的绝对化承诺（"绝对/肯定/一定"＋不坏/不会/没问题），如"绝对摔不坏""肯定不会超重"？' },
+    { id: 'n2', name: '最高级用语',     q: '是否出现下列【无依据的绝对优势断言】："第一品牌／行业第一""最好的箱子／全网最好""全网最低价""没人比我们更好"？⚠ 只描述本品某一具体维度（销量／明星使用／辨识度／颜值）的"最"——如"卖得最好""明星自用最多""辨识度最高"——属业务侧认可的事实陈述，明确不算违规。',
+      exempt: '只描述本品具体维度的"最"：销量最（卖得最好／卖得最多的明星款）、明星使用最多、辨识度最高、颜值最吸睛。严禁仅因字面含"最"字判违规' },
+    { id: 'n3', name: '拉踩竞争品牌',   q: '是否点名或暗指竞品并贬损（日默瓦/新秀丽/90分/途加/爱可乐，或"别家就是不好"）？' },
+    { id: 'n4', name: '拉踩公司内部产品', q: '是否贬损 ITO 自家其它产品线（"XX款不好用""扁箱不好用"）？' },
+    { id: 'n5', name: '保价承诺',       q: '是否承诺保价（"保价""买贵退差价"）？' },
+    { id: 'n6', name: '诱导互动话术',   q: '是否以利益诱导点赞/关注/评论（"点关注送""下好订单扣哪个字母"）？' }
+  ];
+  // 作为一张"非计分判定卡"下发（id = neg0）：apply 单独处理，不参与任何模块分/档位
+  var NEG_JUDGE = { mod: '信息准确性（违规项）', id: 'neg0', name: '违规扣分项', points: NEG_POINTS };
+
+  // ⚠️ n2「最高级用语」的代码侧安全阀（v4.10.0）
+  // 理由：业务侧自身正面话术就含「卖得最好 / 明星自用最多」（产品信息汇总表 C4/D4/E2），
+  //   而实测模型对该豁免的执行**不稳定**（同一文本两次运行，一次判违规一次不判）⇒
+  //   代码侧兜底：引用文本落在"纯豁免表述"且不含无依据断言时，直接撤销该条扣分。
+  // 原则：宁可漏扣一条，不可错扣业务侧认可的话术（防"比改动前更差"）。
+  var N2_EXEMPT_RE = /卖得最好|卖得最多|明星自用最多|明星同款最多|辨识度最高|颜值最吸睛/;
+  var N2_STRICT_RE = /第一品牌|行业第一|全网最低|全网最好|最好的箱|没人比我们|没有比我们|市面上最好/;
+
   // 归一化：给每个子点表注入所在子标准 id（levelFromEvs / apply 的比对用 def.id + '-' + p.id）
   for(var _k in POINTS){ POINTS[_k].id = _k; }
   POINTS_22.id = '2.2';
@@ -151,6 +183,8 @@
         // 其它（如 legacy/重复 id）不参与语义判定，保持关键词引擎
       }
     }
+    // v4.10.0：违规扣分项作为独立判定卡追加下发（不计模块分，apply 单独归入 baseline 红旗）
+    out.push(NEG_JUDGE);
     return out;
   }
 
@@ -220,6 +254,28 @@
       var stdId = String(e.subId).split('-')[0]; // '1.1-a' → '1.1'（subId 格式恒为 子标准id-子点id）
       if(!byStd[stdId]) byStd[stdId] = [];
       byStd[stdId].push(e);
+    }
+    // ---- v4.10.0 全局违规扣分项（neg0）：不参与模块分/档位，命中即记红旗 ----
+    // 业务侧口径为"出现即扣分"⇒ 判定员对 neg0-* 输出 NEGATE（表示出现了违规）。
+    // 为鲁棒起见 HIT/EQUIV 也一并按"命中违规"处理（三态等价，见 api/semantic-judge.js 铁律 9），
+    // 避免模型把"关键词出现"误标成 HIT 时漏扣。MISS/UNCLEAR 视为未出现，不记。
+    var negEvs = byStd['neg0'] || [];
+    for(var ni=0; ni<negEvs.length; ni++){
+      var nev = negEvs[ni];
+      var nst = String(nev && nev.state || '');
+      if(nst !== 'NEGATE' && nst !== 'HIT' && nst !== 'EQUIV') continue;
+      var npId = String(nev.subId || '').split('-')[1];
+      var npDef = null;
+      for(var nk=0; nk<NEG_POINTS.length; nk++){ if(NEG_POINTS[nk].id === npId){ npDef = NEG_POINTS[nk]; break; } }
+      if(!npDef) continue;
+      // n2 安全阀：纯豁免表述（且无无依据断言）→ 撤销扣分
+      if(npDef.id === 'n2'){
+        var n2t = String(nev.quote || '') + ' ' + String(nev.reason || '');
+        if(!N2_STRICT_RE.test(n2t) && N2_EXEMPT_RE.test(n2t)) continue;
+      }
+      var nField = 'neg:' + npDef.name;
+      if(semFlags.some(function(x){ return x.field === nField; })) continue;   // 同类违规多处只扣一次
+      semFlags.push({ field: nField, point: npDef.name, quote: nev.quote || '', reason: nev.reason || '' });
     }
     for(var mi=0; mi<r.modules.length; mi++){
       var m = r.modules[mi];
@@ -398,12 +454,14 @@
     CFG: CFG,
     POINTS: POINTS,
     POINTS_22: POINTS_22,
+    NEG_POINTS: NEG_POINTS,
+    NEG_JUDGE: NEG_JUDGE,
     buildJudges: buildJudges,
     truncate: truncate,
     levelFromEvs: levelFromEvs,
     quality22: quality22,
     apply: apply,
     recompute: recompute,
-    _v: '4.9.2'
+    _v: '4.10.0'
   };
 });

@@ -3,6 +3,8 @@
 // 职责：读主播转写 + 判定清单 → 调 DeepSeek → 返回结构化证据包（LLM 只当裁判，不打分）
 // 计分权仍锁死在浏览器端规则引擎（v4/semantic-core.js + v4-shell.js），本函数不含任何评分公式
 // 规则蓝本：《主播评分_语义判定Prompt稿v1.md》§1-§4（铁律/四态/特殊规则，忠实转译）
+// v4.10.0 新增负向判据：子点级「⚠错法」（semantic-core POINTS.neg）＋ 全局违规扣分项（neg0-*），
+//   来源《开心果二代举例V3.xlsx》Sheet1 29-34 行「扣分项」与原始备份「错误话术示范」，业务侧原版定义
 // Key 管理：只从 Vercel 环境变量 DEEPSEEK_API_KEY 读取；仓库内不落任何真实 Key
 // 部署：vercel.json 已配置本函数 maxDuration=60（Hobby 上限），大文本判定需要长超时
 // =====================================================
@@ -10,7 +12,7 @@ const https = require('https');
 
 const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY || '';
 const MODEL = 'deepseek-chat';
-const MAX_TOKENS = 6000;          // 46 子点证据包 JSON 安全余量
+const MAX_TOKENS = 7000;          // v4.10.0：46 考核子点 + 6 违规扣分项；截断会致 JSON 解析失败→整场降级，故留足余量
 const TEMPERATURE = 0;            // 判定确定性（老大拍板 09-03：0.2→0，消除同 SRT 两次判分抖动）
 
 // ---- 系统指令（= Prompt 稿 §1 铁律 + §3 四态 + §4 特殊规则 + §2 输出契约）----
@@ -25,6 +27,8 @@ const SYSTEM = [
   '5. 同一子标准的证据可跨时间戳合并。主播常把一项权益拆两处讲——判定该子点需通读全程聚合，不得因分散而漏判。',
   '6. 涉及"动作/演示"的子点（4.1-b），口播不足以证明动作真实发生 → 判 UNCLEAR，reason 注明"需视觉通道证实"，不得靠文本臆断为 HIT。',
   '7. 输出只能是 JSON，不输出分数、不输出 Markdown、不输出任何解释性段落。',
+  '8. 负向优先（v4.10.0）。清单中带「⚠错法」的子点，若主播的说法与错法描述一致 → 该子点判 NEGATE，reason 必须以 flag_error 开头并写明"应 X，实说 Y"。命中错法时不得因主播态度热情、表达流畅、上下文完整而改判 HIT/EQUIV。',
+  '9. 违规扣分项（neg0-n1 ~ neg0-n6）语义与考核子点相反（v4.10.0）。判定按此顺序：① 先查「✔豁免」——若表述落在豁免范围内，直接不输出该 subId（视为合规）。典型豁免：只描述本品具体维度的"最"，如"卖得最好""卖得最多的明星款""明星自用最多""辨识度最高"——这是业务侧认可的事实陈述，一律合规，严禁因字面含"最"就判违规；② 确有无依据的绝对优势断言（"第一品牌""全网最低价""没人比我们更好"）→ 判 NEGATE，reason 以 flag_error 开头；③ 两者都没有 → 不输出该 subId（不要给 MISS）。这些项不参与能力打分，不得因出现违规而改动任何考核子点的判定。',
   '',
   '四态判定（决策树）：① 该子点主播提没提？没提→MISS；提了但不确定是否相关→UNCLEAR。② 提了怎么提的？否定/回避/贬损/错误表述→NEGATE（若属错误表述，reason 必须以 flag_error 开头）；直接讲到位→HIT；换说法讲到位→EQUIV。',
   '',
@@ -74,6 +78,7 @@ function deepseekChat(messages){
 }
 
 // 构造判定清单文本（user 消息前半段）
+// v4.10.0：子点带 neg 字段时补一行「⚠错法」，把业务侧的"什么算讲错"下发给判定员
 function buildJudgeText(judges){
   const lines = ['【考核标准判定清单】对下面每个子点输出一条 evidence（subId 严格照抄）。'];
   let curMod = '';
@@ -84,6 +89,8 @@ function buildJudgeText(judges){
     for (let k = 0; k < jd.points.length; k++) {
       const p = jd.points[k];
       lines.push('  - ' + jd.id + '-' + p.id + ' ' + p.name + '：' + p.q);
+      if (p.neg) lines.push('    ⚠错法：' + p.neg + '　（与上述错法一致即判 NEGATE，reason 以 flag_error 开头）');
+      if (p.exempt) lines.push('    ✔豁免（出现也算合规，不得判违规）：' + p.exempt);
     }
   }
   return lines.join('\n');

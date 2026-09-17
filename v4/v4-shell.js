@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.14';
+var V4_VERSION = 'v4.11.15';
 (function(){
   function paint(){
     ['pageBadge', 'brandVer', 'footVer'].forEach(function(id){
