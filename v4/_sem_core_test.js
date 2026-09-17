@@ -21,14 +21,14 @@ ok(!!STD && !!STD.modules, 'standard.js 加载');
 
 // ---- 1. 加载 semantic-core ----
 const V4S = require(path.join(__dirname, 'semantic-core.js'));
-ok(!!V4S && V4S._v === '4.10.0', 'semantic-core 加载 v' + (V4S && V4S._v));
+ok(!!V4S && V4S._v === '4.10.1', 'semantic-core 加载 v' + (V4S && V4S._v));
 
 // ---- 2. buildJudges：从真实 standard 生成判定清单 ----
 const judges = V4S.buildJudges();
 const judgePointTotal = judges.reduce(function(a,j){ return a + j.points.length; }, 0);
-console.log('[buildJudges] 判定卡 ' + judges.length + ' 张 / 判定子点 ' + judgePointTotal + ' 个（46 考核 + 6 违规）');
+console.log('[buildJudges] 判定卡 ' + judges.length + ' 张 / 判定子点 ' + judgePointTotal + ' 个（46 考核 + 8 违规）');
 ok(judges.length >= 19 && judges.length <= 21, '判定卡 19~21 张（18 唯一 id + 1.4 重复 + neg0 违规卡）', judges.length);
-ok(judgePointTotal === 58, '判定子点 58 个（46 唯一 + 1.4 重复 3 + 2.2 负证 3 + 违规 6）', judgePointTotal);
+ok(judgePointTotal === 60, '判定子点 60 个（46 唯一 + 1.4 重复 3 + 2.2 负证 3 + 违规 8）', judgePointTotal);
 const ids = {};
 judges.forEach(function(j){ ids[j.id] = (ids[j.id]||0)+1; });
 ok(!judges.some(function(j){ return !j.points || !j.points.length; }), '每条判定卡都有子点');
@@ -36,8 +36,8 @@ const d14 = ids['1.4'] || 0;
 console.log('  [已知待拍板] 1.4 在 standard.js 中重复定义 → 判定清单出现 ' + d14 + ' 次');
 const expectIds = ['1.1','1.2','1.3','1.4','2.1','2.2','3.1','3.2','4.1','5.1','5.2','6.1','6.2','6.3','6.4','7.1','8.1','8.2'];
 ok(expectIds.every(function(x){ return ids[x] >= 1; }), '18 个唯一子标准 id 全部覆盖');
-// v4.10.0 负向判据下发完整性
-ok(!!V4S.NEG_POINTS && V4S.NEG_POINTS.length === 6, 'NEG_POINTS 6 类违规扣分项（业务侧原版）', V4S.NEG_POINTS && V4S.NEG_POINTS.length);
+// v4.10.0 负向判据下发完整性（v4.10.1 起：业务侧原版 6 类 + 平台敏感话题 n7 / 侮辱用户 n8 = 8）
+ok(!!V4S.NEG_POINTS && V4S.NEG_POINTS.length === 8, 'NEG_POINTS 8 类违规扣分项（原版 6 + n7/n8）', V4S.NEG_POINTS && V4S.NEG_POINTS.length);
 ok(ids['neg0'] === 1, 'neg0 违规卡只出现 1 次', ids['neg0']);
 const neg6 = V4S.NEG_POINTS.every(function(p){ return p.id && p.name && p.q; });
 ok(neg6, '违规项字段齐备（id/name/q）');
@@ -277,13 +277,13 @@ V4S.apply(r, { evidences: [
 ok(r.baseline.errors === 1, 'neg0 HIT 也按命中处理、MISS 不记', r.baseline.errors);
 ok(r.total === 56, 'neg0 HIT 1 处 → 56（模型误标 HIT 不漏扣）', r.total);
 
-// 6 类全中 → 仍受封顶 −12 约束
+// 8 类全中 → 仍受封顶 −12 约束
 r = buildR(); r.total = 60;
 V4S.apply(r, { evidences: V4S.NEG_POINTS.map(function(p){
   return { subId:'neg0-'+p.id, state:'NEGATE', confidence:0.9, quoteTs:'', quote:'x', reason:'flag_error:y' };
 })});
-ok(r.baseline.errors === 6, 'neg0 全 6 类命中 → errors = 6', r.baseline.errors);
-ok(r.total === 48, 'neg0 6 处 → 封顶 −12 → 48', r.total);
+ok(r.baseline.errors === 8, 'neg0 全 8 类命中 → errors = 8', r.baseline.errors);
+ok(r.total === 48, 'neg0 8 处 → 封顶 −12 → 48', r.total);
 
 // 回归：无 neg0 证据时行为与改动前完全一致
 r = buildR(); r.total = 60;
