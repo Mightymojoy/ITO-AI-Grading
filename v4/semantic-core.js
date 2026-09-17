@@ -22,7 +22,7 @@
   //    非最终业务口径——08-20 基准录屏影子回归后按数据定死。
   var CFG = {
     enabled: true,                 // 语义评分总开关（设置页可关）
-    apiUrl:  'https://cloud-five-pi.vercel.app/api/semantic-judge',
+    apiUrl:  'https://ito-ai-grading.vercel.app/api/semantic-judge',
     timeoutMs: 25000,              // 云端判定超时（超时 → 自动降级关键词引擎）
     maxChars: 30000,               // 送模型文本上限（超长截断，保留前段——主播前半程通常已覆盖核心卖点）
     fullRatio: 1.0,

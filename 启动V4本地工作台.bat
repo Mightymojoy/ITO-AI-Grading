@@ -11,8 +11,21 @@ chcp 65001 >nul
 title ITO v4.9.0 Semantic Workbench (Local)
 cd /d "%~dp0"
 
-set "NODE_EXE=C:\Users\QwQ\.workbuddy\binaries\node\versions\22.22.2-2\node.exe"
-if not exist "%NODE_EXE%" set "NODE_EXE=node"
+rem Node runtime probe: the old hardcoded path "%NODEBASE%\22.22.2-2\node.exe"
+rem no longer exists after the platform upgraded node, so double-click always hit :bad.
+set "NODEBASE=C:\Users\QwQ\.workbuddy\binaries\node\versions"
+set "NODE="
+set "NODEVER="
+if exist "%NODEBASE%\current" for /f "usebackq delims=" %%V in ("%NODEBASE%\current") do if not defined NODEVER set "NODEVER=%%V"
+if defined NODEVER if exist "%NODEBASE%\%NODEVER%\node.exe" set "NODE=%NODEBASE%\%NODEVER%\node.exe"
+if not defined NODE for /f "delims=" %%D in ('dir /b /ad /o-n "%NODEBASE%" 2^>nul') do (
+    if not defined NODE if exist "%NODEBASE%\%%D\node.exe" set "NODE=%NODEBASE%\%%D\node.exe"
+)
+if not defined NODE for /f "delims=" %%P in ('where node 2^>nul') do (
+    if not defined NODE set "NODE=%%P"
+)
+if not defined NODE set "NODE=node"
+set "NODE_EXE=%NODE%"
 
 set "KEYFILE=%~dp0sem_key_local.txt"
 if "%DEEPSEEK_API_KEY%"=="" if exist "%KEYFILE%" set /p DEEPSEEK_API_KEY=<"%KEYFILE%"

@@ -1991,38 +1991,41 @@ document.addEventListener('DOMContentLoaded', function(){
 // ---------- v4.11.9：线上 HTTPS 页面禁用「一键完整日报」/自动转写 ----------
 // 背景：2026-09-08 13:30 老大报「一键完整日报」点完报 Failed to fetch。
 // 根因（代码级事实）：
-//   · app-core.js:1532 VISION_URL = localStorage.vision_url || 'http://127.0.0.1:3713'
-//   · app-core.js:1863 ASR_URL    = localStorage.asr_url    || 'http://127.0.0.1:3712'
+//   · app-core.js VISION_URL = localStorage.vision_url || 'http://127.0.0.1:3713'
+//   · app-core.js ASR_URL    = localStorage.asr_url    || 'http://127.0.0.1:3712'
 //   · buildFullReport 直接把整段视频 body POST 到 ASR_URL/VISION_URL（V4Jobs.cachedRequest）
-//   · 线上 https://ito-ai-grading.vercel.app/v4/ 是 HTTPS 页面，浏览器 Mixed Content 规则：
-//     HTTPS 页面禁止 fetch HTTP 端点 → 请求根本不发出 → TypeError: Failed to fetch
+//   · 线上 https://ito-ai-grading.vercel.app/v4/ 是 HTTPS 页面，访问本机 loopback 被浏览器拦下
+//     → 请求根本不发出 → TypeError: Failed to fetch
+//   · ⚠️ 2026-09-17 实测更正：真实原因不是 Mixed Content。实机抓到的报错原文为
+//     "Permission was denied for this request to access the loopback address space"
+//     —— 即 Chrome Local Network Access(LNA) 对公网页面访问 127.0.0.1 的权限拦截
+//     （Mixed Content 在别的场景也会拦，但本条由 LNA 触发；文案已按实测改。）
 //   · v4.11.4 URL 接管块只接管 FEISHU_FILL_URL/SYNC_URL，没接管 ASR/VISION
 // 修复：纯壳层 monkey-patch window.V4Jobs.fullReport / window.V4Jobs.transcribe
-//   · 线上模式（isLocalHttp=false）：直接抛错引导，避免用户卡在 "Failed to fetch" 盲区
+//   · 线上模式（isLocalCloud=false）：直接抛错引导，避免用户卡在 "Failed to fetch" 盲区
 //   · 本地模式（8791 http://）：原行为不变，下载视频走本地 3712/3713
-//   · 同步把首页「一键完整日报」按钮置灰 + 提示文字，避免无意义点击
+//   · 同步把「一键完整日报」按钮置灰 + 提示文字，避免无意义点击
+// ⚠️ 2026-09-17 修复本块死代码：原先这段在 IIFE 里**立即**读 window.V4Jobs，但 V4Jobs 定义在
+//    随后才加载的 workflow.js（index.html 脚本顺序 app-core → semantic-core → v4-shell → workflow）
+//    ⇒ 执行时恒为 undefined，两个 if 全部不成立，线上拦截从未生效，却照样打印"已拦截"（假日志；
+//      线上实测 transcribeBlocked=false 可证）。现改为「等 V4Jobs 就绪再接管」：
+//      同步 script 在本文件之后立即执行，故通常首个 tick（<100ms）即接管；
+//      仍留 5 秒重试 + window load 兜底，防止将来 workflow.js 被改成 defer/async 又静默失效。
 (function(){
   try{
     var isCloud = !(location.protocol === 'http:' && /^(127\.0\.0\.1|localhost)/i.test(location.hostname));
     if(!isCloud) { console.log('[v4.11.9] 本地 8791 模式，一键完整日报正常可用'); return; }
-    var GUIDE = '线上模式不支持「一键完整日报」自动转写（Vercel HTTPS 页面无法 fetch 本地 HTTP 3712/3713，会触发 Mixed Content 拦截）。请改用以下任一方式：\\n\\nA. 切到本地 8791 模式：双击「ITO-v4一键启动.bat」拉起本地转写服务，打开 http://127.0.0.1:8791/v4/\\nB. 手动转写为 SRT：上传视频到飞书妙记/Edge 录屏转写等工具 → 导出 .srt → 在「每日评分」页粘贴逐字稿直接评分';
-    function cloudBlock(method, lane){
+    // 注：下方 \n 是换行转义（原实现误写成 \n\n，alert 会显示字面反斜杠 n）
+    var GUIDE = '线上模式不支持「一键完整日报」自动转写（公网 HTTPS 页面访问本机 127.0.0.1:3712/3713 会被浏览器的本地网络访问权限拦下）。请改用以下任一方式：\n\nA. 用离线引擎包：Windows 双击包内「一键启动.bat」、Mac 双击「启动.command」拉起本地服务，再打开 http://127.0.0.1:8791/v4/\nB. 手动转写为 SRT：上传视频到飞书妙记等工具 → 导出 .srt → 在「每日评分」页粘贴逐字稿直接评分';
+    function cloudBlock(method){
       return function(){
         try{ if(typeof toastErr === 'function') toastErr(GUIDE); }catch(e){}
         try{ alert(GUIDE); }catch(e){}
         return Promise.reject(new Error('cloud-blocked-' + method));
       };
     }
-    if(window.V4Jobs && typeof window.V4Jobs.fullReport === 'function'){
-      window.V4Jobs.fullReport = cloudBlock('fullReport');
-    }
-    if(window.V4Jobs && typeof window.V4Jobs.transcribe === 'function'){
-      window.V4Jobs.transcribe = cloudBlock('transcribe');
-    }
-    // 同步置灰按钮（延迟到 DOM ready）
     function dimButtons(){
-      var ids = ['visionAutoBtn'];
-      ids.forEach(function(id){
+      ['visionAutoBtn'].forEach(function(id){
         var b = document.getElementById(id);
         if(b && !b.disabled){
           b.disabled = true;
@@ -2032,9 +2035,27 @@ document.addEventListener('DOMContentLoaded', function(){
         }
       });
     }
+    var applied = false;
+    function apply(){
+      if(applied) return true;
+      var j = window.V4Jobs;
+      if(!j || typeof j.fullReport !== 'function' || typeof j.transcribe !== 'function') return false;
+      j.fullReport = cloudBlock('fullReport');
+      j.transcribe = cloudBlock('transcribe');
+      applied = true;
+      try{ console.log('[v4.11.9] 线上模式已拦截「一键完整日报」/自动转写（V4Jobs 就绪后接管）'); }catch(e){}
+      return true;
+    }
     if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', dimButtons);
     else dimButtons();
-    console.log('[v4.11.9] 线上模式已拦截一键完整日报/自动转写：', GUIDE.slice(0,80) + '...');
+    if(!apply()){
+      var tries = 0;
+      var t = setInterval(function(){
+        tries++;
+        if(apply() || tries >= 50) clearInterval(t);
+      }, 100);
+    }
+    window.addEventListener('load', function(){ try{ apply(); }catch(e){} });
   }catch(e){ console.log('[v4.11.9] 接管跳过:', (e && e.message) || e); }
 })();
 
