@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.16';
+var V4_VERSION = 'v4.11.17';
 (function(){
   function paint(){
     ['pageBadge', 'brandVer', 'footVer'].forEach(function(id){
@@ -1444,7 +1444,7 @@ document.addEventListener('DOMContentLoaded', function(){
     return r;
   };
   // ============================================================
-  // v4.11.16 平台红线（依据《抖音直播客观违规规则》，业务侧 2026-09-17 拍板口径）
+  // v4.11.17 平台红线（依据《抖音直播客观违规规则》，业务侧 2026-09-17 拍板口径）
   //   架构：与语义判定并列的**第二通道**，纯加法，app-core.js 一字不动。
   //     · 字面通道 v4/violation-rules.js + v4/violation-scan.js
   //       —— 确定性、零 token、可离线；"提到就判0分"本就是字面命中，不需要语义推理，
@@ -1482,14 +1482,17 @@ document.addEventListener('DOMContentLoaded', function(){
     if(!r || r.noProduct || !r.modules) return r;
     if(!redlineEnabled()) return r;
     var S = window.V4ViolationScan;
-    var rel = { _v:'4.11.16', enabled:true, sessionZero:false, moduleZero:false,
-                reasons:[], modules:[], scan:null, err:'' };
+    var rel = { _v:'4.11.17', enabled:true, sessionZero:false, moduleZero:false,
+                reasons:[], modules:[], scan:null, err:'', guardBlocked:0, strict:false };
 
     // ---- 1) 字面通道（确定性）----
     if(S && S.scan){
       try{
         var sc = S.scan(segs || []);
         rel.scan = (sc && sc.stat) ? sc.stat : null;
+        // v4.11.17：语境约束的可观测性 —— 有多少处字面命中被"宣传语境必配"挡掉（业务可复核约束是否过宽）
+        rel.guardBlocked = (sc && sc.stat && sc.stat.guardBlocked) || 0;
+        rel.strict = !!(sc && sc.strict);
         if(sc && sc.ok){
           if(sc.sessionZero){
             rel.sessionZero = true;
@@ -1506,7 +1509,7 @@ document.addEventListener('DOMContentLoaded', function(){
             });
           }
         }else if(sc && sc.reason){ rel.err = String(sc.reason); }
-      }catch(e){ rel.err = 'scan:' + (e && e.message); try{ console.warn('[v4.11.16] 红线字面扫描异常', e); }catch(_e){} }
+      }catch(e){ rel.err = 'scan:' + (e && e.message); try{ console.warn('[v4.11.17] 红线字面扫描异常', e); }catch(_e){} }
     }else{ rel.err = 'violation-scan 未加载'; }
 
     // ---- 2) 语义通道：neg0（n1–n8）命中 → 均属 SESSION_ZERO 类别 ----
@@ -1528,7 +1531,7 @@ document.addEventListener('DOMContentLoaded', function(){
       var zeroed = 0;
       for(var k=0;k<rel.modules.length;k++) zeroed += redlineZeroModule(r, rel.modules[k]);
       rel.zeroedStandards = zeroed;
-      try{ V4S.recompute(r); }catch(e){ try{ console.warn('[v4.11.16] recompute 异常', e); }catch(_e){} }
+      try{ V4S.recompute(r); }catch(e){ try{ console.warn('[v4.11.17] recompute 异常', e); }catch(_e){} }
     }
     if(rel.sessionZero){
       // ⚠️ 必须在 recompute 之后执行，否则会被重算覆盖
@@ -1538,7 +1541,7 @@ document.addEventListener('DOMContentLoaded', function(){
     }
     r.__redline = rel;
     try{
-      console.log('[v4.11.16] 平台红线 sessionZero=' + rel.sessionZero + ' moduleZero=' + rel.moduleZero
+      console.log('[v4.11.17] 平台红线 sessionZero=' + rel.sessionZero + ' moduleZero=' + rel.moduleZero
         + ' 命中' + rel.reasons.length + '组' + (rel.err ? ' err=' + rel.err : ''));
     }catch(e){}
     return r;
@@ -1605,14 +1608,14 @@ document.addEventListener('DOMContentLoaded', function(){
     try{ root.insertBefore(box, root.firstChild); }catch(e){ return 0; }
     return 1;
   }
-  // v4.11.16：一并导出，供端到端诊断/回归（此前只有 redlineBanner 导出，批量为闭包内部函数不可外部验证）
+  // v4.11.17：一并导出，供端到端诊断/回归（此前只有 redlineBanner 导出，批量为闭包内部函数不可外部验证）
   window.v4RedlineBannerBatch = redlineBannerBatch;
 
   window.v4Evaluate = async function(segs, productKey, job){
     var r=window.runGrading(segs,productKey);
     if(r.noProduct) return r;
     if(r.__semCtx) await semUpgrade(r,job);
-    redlineApply(r, segs);   // v4.11.16：红线在语义之后执行（语义可能补上 neg0 命中）
+    redlineApply(r, segs);   // v4.11.17：红线在语义之后执行（语义可能补上 neg0 命中）
     return r;
   };
   window.v4AttachSemanticEvidence=attachSemEvidence;
@@ -1799,13 +1802,13 @@ document.addEventListener('DOMContentLoaded', function(){
     if(!rOrResults) return;
     if(Array.isArray(rOrResults) && rOrResults.length > 1){
       try{ semEvBatchAttach(rOrResults); }catch(e){ console.error('[v4.9.4] batch attachSemEvidence:', e); }
-      try{ redlineBannerBatch(rOrResults); }catch(e){ console.error('[v4.11.16] batch redline banner:', e); }
+      try{ redlineBannerBatch(rOrResults); }catch(e){ console.error('[v4.11.17] batch redline banner:', e); }
       return;
     }
     var r = Array.isArray(rOrResults) ? rOrResults[0] : rOrResults;
     if(!r || !r.modules) return;
-    // v4.11.16：红线横幅最先挂（即使无语义证据也要显示，故放在 semEvFlat 早退之前）
-    try{ redlineBanner(r); }catch(e){ console.error('[v4.11.16] redline banner:', e); }
+    // v4.11.17：红线横幅最先挂（即使无语义证据也要显示，故放在 semEvFlat 早退之前）
+    try{ redlineBanner(r); }catch(e){ console.error('[v4.11.17] redline banner:', e); }
     var list = semEvFlat(r);
     if(!list.length) return;
     // 单条（每日评分 / 一键日报子结果）：全文档 .std 卡按 .std-id 精确匹配注入
