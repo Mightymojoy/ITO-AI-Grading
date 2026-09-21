@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.20';
+var V4_VERSION = 'v4.11.21';
 (function(){
   function paint(){
     ['pageBadge', 'brandVer', 'footVer'].forEach(function(id){
@@ -1495,7 +1495,7 @@ document.addEventListener('DOMContentLoaded', function(){
     //      初版口径下 53 份场次有 **30 份（56.6%）会整场归 0**；上述三项修正后降到 **13 份（24.5%）**，
     //      且余下 13 份逐条核对**全部为真违规**（"全网最好的/吊打市面/完全不卡顿/完全不会爆开"）。
     //      不加约束则红线功能会把整场评分统一压成 0，8 个能力维度彻底失去区分度。
-    var rel = { _v:'4.11.20', enabled:true, sessionZero:false, moduleZero:false,
+    var rel = { _v:'4.11.21', enabled:true, sessionZero:false, moduleZero:false,
                 rulesV: (window.V4ViolationRules && window.V4ViolationRules._v) || '',
                 scanV: (S && S._v) || '',
                 reasons:[], modules:[], scan:null, err:'', guardBlocked:0, strict:false };
@@ -3148,7 +3148,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
     /* ================= 对外接口（调试 / 自检 / 回退） ================= */
     window.V4Srt = {
-      version: '4.11.20',
+      version: '4.11.21',
       parse: parseSrt,
       archive: loadArchive,
       clearArchive: clearArchive,
@@ -3189,5 +3189,171 @@ document.addEventListener('DOMContentLoaded', function(){
     window.V4SrtOn = window.V4Srt.on;
   }catch(e){
     try{ console.log('[v4.11.20] 逐字稿模块跳过:', (e && e.message) || e); }catch(x){}
+  }
+})();
+
+// ---------- v4.11.21：长视频「一键完整日报」转写超时修复（纯加法，不动 app-core.js / workflow.js） ----------
+// 背景（2026-09-21 排查结论，非推测）：
+//   v4.11.13 把「单主播评分 · 视频」通道改成了「提交任务 → 轮询进度」，超时不再由视频长度决定；
+//   但「一键完整日报」走的是 app-core.js 的 buildFullReport()，它用
+//       V4Jobs.cachedRequest(job,'transcription', ASR_URL + '/api/transcribe', upload)
+//   而 cachedRequest 的默认总闸是 600 秒（workflow.js:80 → request(...,timeout||600000)）。
+//   ⇒ 4 小时视频若走「一键完整日报」，必撞 600 秒墙，报「请求超时，请重试」。
+// 修法（遵守「绝不修改 app-core.js，只在壳层加」的铁律）：
+//   V4Jobs 是 workflow.js 用 global.V4Jobs = {...} 挂出来的**对象**，cachedRequest 是它的属性，
+//   因此壳层可以直接接管这个属性：当调用方请求的是「转写」、且本地引擎支持异步时，
+//   改走 /api/transcribe-async + /api/progress 轮询；其余请求（抽帧、逐帧视觉等）原样透传。
+//   零侵入：不新增全局副作用、不改 app-core/workflow、不影响任何评分口径。
+// 兼容性：返回结构与同步通道一致（{ok:true, srt, info}），同时写入 job.cache[key]，
+//   因此 v4.11.20 的逐字稿模块（读 job.cache.transcription.srt）无需改动即可拿到全文。
+// 一键回退：V4Async.off()（等价 localStorage.v4_async_full='0'）→ 回到原同步行为。
+// 自检：window.V4Async.debug() 看接管计数；详细断言见工作目录 _async_full_* 自检脚本。
+(function(){
+  try{
+    var LS_OFF = 'v4_async_full';
+    var LOG = function(m){ try{ console.log('[v4.11.21] ' + m); }catch(e){} };
+    var STATS = { hits: 0, async: 0, fallback: 0, lastJobId: '', lastElapsed: 0, lastSegs: 0 };
+    function isOff(){ try{ return localStorage.getItem(LS_OFF) === '0'; }catch(e){ return false; } }
+
+    /* ---------- 工具：可取消 + 可超时的 JSON 请求（不依赖 workflow 内部函数） ---------- */
+    function fetchJson(url, init, job, timeout){
+      var ctrl = new AbortController(), expired = false;
+      var sig = job && job.controller && job.controller.signal;
+      var onAbort = function(){ ctrl.abort(); };
+      if(sig) sig.addEventListener('abort', onAbort, {once:true});
+      var t = setTimeout(function(){ expired = true; ctrl.abort(); }, timeout || 60000);
+      function done(){ clearTimeout(t); if(sig) sig.removeEventListener('abort', onAbort); }
+      return fetch(url, Object.assign({}, init, {signal: ctrl.signal}))
+        .then(function(res){
+          if(!res.ok){
+            var e = new Error('服务返回 HTTP ' + res.status);
+            e.httpStatus = res.status;
+            throw e;
+          }
+          return res.json();
+        })
+        .then(function(d){
+          if(!d || d.ok !== true) throw new Error((d && (d.error || d.reason)) || '服务返回无效结果');
+          return d;
+        })
+        .catch(function(e){
+          if(job && job.state === 'cancelled') throw new Error('任务已取消');
+          if(expired) throw new Error('请求超时，请重试');
+          throw e;
+        })
+        .then(function(v){ done(); return v; }, function(e){ done(); throw e; });
+    }
+
+    /* ---------- 引擎能力探测：health.async（30 秒缓存，避免每次转写多打一次） ----------
+       ⚠️ 缓存必须**按引擎地址分键**：ASR 地址可在运行时切换（localStorage.asr_url），
+          共用一份缓存会把 A 引擎的能力误判给 B 引擎 —— 2026-09-21 自检 D 组实测抓到的真实缺陷
+          （切到「旧引擎」后仍走异步接口，回退分支形同虚设）。 */
+    var HEALTH_CACHE = {};
+    function probe(base, job){
+      var now = Date.now(), hit = HEALTH_CACHE[base];
+      if(hit && (now - hit.at) < 30000) return Promise.resolve(hit.h);
+      return fetchJson(base + '/api/health', {method:'GET'}, job, 8000)
+        .then(function(h){ HEALTH_CACHE[base] = { h: h, at: Date.now() }; return h; })
+        .catch(function(){ delete HEALTH_CACHE[base]; return null; });
+    }
+
+    /* ---------- 异步转写主流程（对应 v4.11.13 在 transcribeVideo 里的同一套协议） ---------- */
+    function transcribeAsync(orig, job, key, url, options){
+      var J = window.V4Jobs;
+      var base = url.replace(/\/api\/transcribe$/, '');
+      var t0 = Date.now();
+      var fname = (options && options.body && options.body.name) || '视频';
+      return probe(base, job).then(function(h){
+        if(!h || !h.async){
+          STATS.fallback++;
+          LOG('引擎不支持异步转写（health.async 缺失）→ 回退同步通道，仍受 600 秒总闸限制');
+          return orig.call(J, job, key, url, options);
+        }
+        LOG('走异步通道提交转写任务：' + fname);
+        J.progress(job, '上传视频中…（长视频请勿关闭页面；上传完成后转入后台转写，可取消）');
+        return fetchJson(base + '/api/transcribe-async', options, job, 1800000).catch(function(e){
+          // 只在「接口不存在」这类确定性失败上回退；其它错误（含网络中断）如实抛出
+          if(e && (e.httpStatus === 404 || e.httpStatus === 405 || e.httpStatus === 501)){
+            STATS.fallback++;
+            LOG('引擎无 /api/transcribe-async（' + e.message + '）→ 回退同步通道');
+            return orig.call(J, job, key, url, options);
+          }
+          throw e;
+        }).then(function(start){
+          if(start && start.srt !== undefined) return start;   // 已被上面的回退分支接管
+          if(!start || !start.jobId) throw new Error('转写服务未返回任务号，请重试或重启本地引擎');
+          STATS.lastJobId = start.jobId;
+          LOG('任务号 ' + start.jobId + '，开始轮询进度');
+          var last = '';
+          return (function poll(){
+            J.assertActive(job);
+            return new Promise(function(r){ setTimeout(r, 1500); }).then(function(){
+              J.assertActive(job);
+              return fetchJson(base + '/api/progress?jobId=' + encodeURIComponent(start.jobId), {method:'GET'}, job, 20000);
+            }).then(function(p){
+              if(p.state === 'done'){
+                var text = p.srt || '';
+                var rec = { ok:true, srt:text, info:'', async:true, jobId:start.jobId,
+                            segs:p.segs, chars:p.chars, elapsed:Math.round((Date.now()-t0)/1000) };
+                if(job && job.cache) job.cache[key] = rec;     // 与同步 cachedRequest 的缓存语义保持一致
+                STATS.async++; STATS.lastElapsed = rec.elapsed; STATS.lastSegs = p.segs || 0;
+                LOG('异步转写完成：' + (p.segs || '?') + ' 段 / ' + (p.chars || '?') + ' 字，用时 ' + rec.elapsed + ' 秒');
+                J.progress(job, '转写完成：' + (p.segs || 0) + ' 段，用时 ' + rec.elapsed + ' 秒');
+                return rec;
+              }
+              if(p.state === 'error') throw new Error(p.error || '转写失败');
+              if(p.state === 'cancelled') throw new Error('转写任务已取消');
+              var secs = p.elapsed || Math.round((Date.now()-t0)/1000);
+              var msg = (p.phase || '转写中') + (p.percent ? (' ' + p.percent + '%') : '')
+                      + (p.segs ? (' · 已完成 ' + p.segs + ' 段') : '') + '（已用时 ' + secs + ' 秒）';
+              if(msg !== last){ last = msg; J.progress(job, '后台转写中：' + msg + '，可取消'); }
+              return poll();
+            });
+          })();
+        });
+      });
+    }
+
+    /* ---------- 接管 ---------- */
+    var applied = false;
+    function apply(){
+      if(applied) return true;
+      var J = window.V4Jobs;
+      if(!J || typeof J.cachedRequest !== 'function' || typeof J.progress !== 'function') return false;
+      var orig = J.cachedRequest;
+      J.cachedRequest = function(job, key, url, options, timeout){
+        try{
+          if(!isOff() && key === 'transcription' && typeof url === 'string' &&
+             /\/api\/transcribe$/.test(url) && !(job && job.cache && job.cache[key])){
+            STATS.hits++;
+            return transcribeAsync(orig, job, key, url, options);
+          }
+        }catch(e){ LOG('接管判断异常，回退原实现：' + ((e && e.message) || e)); }
+        return orig.apply(this, arguments);
+      };
+      applied = true;
+      LOG('已接管 V4Jobs.cachedRequest —— 「一键完整日报」的转写不再受 600 秒总闸限制');
+      return true;
+    }
+
+    // 调试 / 一键回退入口
+    window.V4Async = {
+      swap: apply,
+      on: function(){ try{ localStorage.removeItem(LS_OFF); }catch(e){} return 'on'; },
+      off: function(){ try{ localStorage.setItem(LS_OFF, '0'); }catch(e){} return 'off'; },
+      offQ: isOff,
+      debug: function(){ return JSON.parse(JSON.stringify(STATS)); }
+    };
+
+    if(!apply()){
+      var tries = 0;
+      var t = setInterval(function(){
+        tries++;
+        if(apply() || tries >= 60) clearInterval(t);
+      }, 250);
+      window.addEventListener('load', function(){ try{ apply(); }catch(e){} });
+    }
+  }catch(e){
+    try{ console.log('[v4.11.21] 异步转写接管跳过:', (e && e.message) || e); }catch(x){}
   }
 })();
