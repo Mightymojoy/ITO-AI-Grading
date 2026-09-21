@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.19';
+var V4_VERSION = 'v4.11.20';
 (function(){
   function paint(){
     ['pageBadge', 'brandVer', 'footVer'].forEach(function(id){
@@ -1495,7 +1495,7 @@ document.addEventListener('DOMContentLoaded', function(){
     //      初版口径下 53 份场次有 **30 份（56.6%）会整场归 0**；上述三项修正后降到 **13 份（24.5%）**，
     //      且余下 13 份逐条核对**全部为真违规**（"全网最好的/吊打市面/完全不卡顿/完全不会爆开"）。
     //      不加约束则红线功能会把整场评分统一压成 0，8 个能力维度彻底失去区分度。
-    var rel = { _v:'4.11.19', enabled:true, sessionZero:false, moduleZero:false,
+    var rel = { _v:'4.11.20', enabled:true, sessionZero:false, moduleZero:false,
                 rulesV: (window.V4ViolationRules && window.V4ViolationRules._v) || '',
                 scanV: (S && S._v) || '',
                 reasons:[], modules:[], scan:null, err:'', guardBlocked:0, strict:false };
@@ -2553,4 +2553,641 @@ document.addEventListener('DOMContentLoaded', function(){
     console.log('[v4.11.12] 讲品考核窗口 = ' + w + ' 秒（' + (w / 60) + ' 分钟）' +
       (ok ? ' ✓ 口径生效' : ' ⚠ 与预期 1200 不符，请检查 app-core.js'));
   }catch(e){ console.log('[v4.11.12] 自检跳过:', (e && e.message) || e); }
+})();
+
+// ---------- v4.11.20：逐字稿（SRT）界面可查看 + 手动导出（纯加法，不动 app-core.js） ----------
+// 背景（老大 2026-09-21 确认「C：界面可查看 + 手动导出」）：
+//   长视频（4 小时级）转写后，SRT 全文只在下面三处之一留痕，且界面没有任何查看/导出入口，
+//   拿不到素材做实际案例分析：
+//     ① 引擎 tmp/out_<jobId>.srt —— 落盘但不自动清理（在跑转写的那台机器上）
+//     ② localStorage.last_srt —— 仅「单主播评分·视频」通道写；完整日报 / txt / 批量都不写
+//     ③ job.cache.transcription.srt —— 只在内存，会话结束即丢
+// 本块做三件事（全部只读既有数据，不改变评分链路）：
+//   ① 界面可查看：结果页出现「逐字稿（SRT）」卡片 → 右侧抽屉内按时间戳逐段浏览 + 关键词检索
+//   ② 手动导出：一键下载 .srt（默认文件名沿用桌面既有规范「日期-直播间-主播-产品.srt」）
+//   ③ 跨会话留存：自动归档最近 3 场到 localStorage（新键 v4_srt_archive_v1，与 v3 的 last_srt 不冲突），
+//      并在「每日评分」页常驻「历史逐字稿」条 —— 刷新后仍可查看/导出（否则刷新即失，等于没留）
+// 数据来源优先级：job.cache.transcription.srt（本次会话，最准，含完整时间轴）
+//                → localStorage v4_srt_archive_v1（历次归档）
+//                → localStorage last_srt（老键兜底，可能不含时间轴）
+// 归档上限（按字符数计；localStorage 内部按 UTF-16 存储 ⇒ 1 字符 ≈ 2 字节）：
+//   单份 ≤ 90 万字符（≈1.8MB）、总量 ≤ 180 万字符（≈3.6MB）；超额淘汰最旧。
+//   实测参考：4 小时逐字稿 SRT 约 20 万字符 ⇒ 可存满 3 场且留有大量余量。
+// z-index 层级（本块新增，按「全站层级集中定义」铁律登记）：
+//   既有：面板(默认) < 表格 sticky(1–3) < … < 本块抽屉遮罩(989) < 本块抽屉(990) < JS 错误条(999)
+//   说明：错误条 999 必须永远可见，故抽屉压在它之下；抽屉全屏但顶部留 0，错误条出现在最上层。
+// 回退/降级：任何异常都不阻断评分（全块 try 包裹）；localStorage 写失败只提示不抛错。
+// 关闭方式：V4SrtOff() 关整块（遮罩固定层不再创建）；V4SrtOn() 恢复。
+(function(){
+  try{
+    var LS_KEY = 'v4_srt_archive_v1';
+    var OFF_KEY = 'v4_srt_off';
+    var MAX_ONE = 900000, MAX_ALL = 1800000, MAX_ITEMS = 3;
+    var STEP = 300, MAX_HITS = 500;                 // 抽屉分段渲染步长 / 检索最多渲染条数
+    var Z_MASK = 989, Z_DRAWER = 990;
+
+    var CURRENT = null, DRAWER_OPEN = false;
+    var VIEW = [], SHOWN = 0, HITS = 0, KW = '', ONLY_HIT = false;
+
+    /* ================= 小工具 ================= */
+    function $(id){ return document.getElementById(id); }
+    function esc(s){
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+    function hhmmss(sec){
+      sec = Math.max(0, Math.floor(sec || 0));
+      var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+      return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+    }
+    function durText(sec){
+      sec = Math.max(0, Math.floor(sec || 0));
+      var h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60);
+      if(h) return h + ' 小时' + (m < 10 ? '0' : '') + m + ' 分';
+      if(sec >= 60) return m + ' 分';
+      return sec + ' 秒';
+    }
+    function charsText(n){
+      n = n || 0;
+      return n >= 10000 ? (n / 10000).toFixed(1) + ' 万字' : n + ' 字';
+    }
+    function tip(msg){
+      var e = $('v4SrtTip');
+      if(e){ e.textContent = msg || ''; if(msg) setTimeout(function(){ if(e.textContent === msg) e.textContent = ''; }, 4000); }
+      else if(msg && typeof toastErr === 'function'){ try{ toastErr(msg); }catch(x){} }
+    }
+
+    /* ================= SRT 解析（自实现，不依赖 app-core.js 的 parseTranscript） ================= */
+    // 支持标准 SRT（HH:MM:SS,mmm --> HH:MM:SS,mmm）以及用「.» 作小数点的变体（部分工具产出）。
+    // 无时间轴时降级为「按行」列表（仍可查看/导出，只是没有跳转锚点）。
+    // ⚠️ 块边界（2026-09-21 实测踩坑）：SRT 的序号行紧跟在「上一块正文之后、本块时间轴之前」，
+    //   若只按「时间戳行结束前块」判断，「2」这个序号会被拼进第 1 段正文（实测第 1 段多 1 个字符）。
+    //   故三条边界都要认：① 空行 ② 时间戳行 ③ 序号行（其后紧跟时间戳行）。
+    function parseSrt(text){
+      var raw = String(text == null ? '' : text).replace(/\r\n?/g, '\n');
+      var lines = raw.split('\n');
+      var re = /(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})/;
+      var out = [], cur = null, durSec = 0, chars = 0;
+      function push(){ if(cur && cur.text) out.push(cur); cur = null; }
+      function nextNonEmptyIsTs(from){
+        for(var n = from; n < lines.length; n++){
+          var s = lines[n].trim();
+          if(!s) continue;
+          return re.test(s);
+        }
+        return false;
+      }
+      for(var i = 0; i < lines.length; i++){
+        var ln = lines[i], m = ln.match(re);
+        if(m){
+          push();
+          cur = {
+            from: (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]),
+            to: (+m[5]) * 3600 + (+m[6]) * 60 + (+m[7]),
+            text: ''
+          };
+          if(cur.to > durSec) durSec = cur.to;
+        }else if(cur){
+          var t = ln.trim();
+          if(!t){ push(); continue; }                                    // ① 空行 = 块结束
+          if(/^\d+$/.test(t) && nextNonEmptyIsTs(i + 1)){ push(); continue; }  // ③ 序号行 = 块结束
+          cur.text += (cur.text ? ' ' : '') + t;
+        }
+      }
+      push();
+      if(!out.length){
+        for(var j = 0; j < lines.length; j++){
+          var s = lines[j].trim();
+          if(s && !/^\d+$/.test(s)) out.push({ from: null, to: null, text: s });
+        }
+      }
+      for(var k = 0; k < out.length; k++){
+        out[k].i = k + 1;
+        out[k].clean = out[k].text.replace(/\s/g, '');
+        chars += out[k].clean.length;
+      }
+      return { segs: out.length, chars: chars, durSec: durSec, blocks: out, hasTs: !!(out.length && out[0].from != null) };
+    }
+
+    /* ================= 归档（跨会话留存） ================= */
+    function loadArchive(){
+      try{
+        var raw = localStorage.getItem(LS_KEY);
+        if(!raw) return [];
+        var d = JSON.parse(raw);
+        var items = (d && d.items) || [];
+        return items.filter(function(x){ return x && x.srt; });
+      }catch(e){ return []; }
+    }
+    function saveArchive(items){
+      try{
+        localStorage.setItem(LS_KEY, JSON.stringify({ v: 1, savedAt: new Date().toISOString(), items: items }));
+        return true;
+      }catch(e){
+        tip('本机存储写入失败（可能已满），本次逐字稿仅当前会话可查看/导出');
+        return false;
+      }
+    }
+    function clearArchive(){
+      try{ localStorage.removeItem(LS_KEY); }catch(e){}
+      renderArchiveBar();
+    }
+    function archivePut(rec){
+      if(!rec || !rec.srt) return false;
+      if(rec.srt.length > MAX_ONE){
+        tip('逐字稿超过单份上限（' + charsText(MAX_ONE) + '），仅当前会话可查看/导出，未写入本机归档');
+        return false;
+      }
+      var items = loadArchive().filter(function(x){ return x.id !== rec.id; });
+      items.unshift({ id: rec.id, host: rec.host, date: rec.date, studio: rec.studio, product: rec.product,
+        fileName: rec.fileName, segs: rec.segs, chars: rec.chars, durSec: rec.durSec,
+        savedAt: new Date().toISOString(), srt: rec.srt });
+      if(items.length > MAX_ITEMS) items = items.slice(0, MAX_ITEMS);
+      var total = items.reduce(function(a, x){ return a + (x.srt ? x.srt.length : 0); }, 0);
+      while(items.length > 1 && total > MAX_ALL){
+        var drop = items.pop();
+        total -= (drop.srt ? drop.srt.length : 0);
+      }
+      return saveArchive(items);
+    }
+    function archiveById(id){
+      var items = loadArchive();
+      for(var i = 0; i < items.length; i++){ if(items[i].id === id) return items[i]; }
+      return null;
+    }
+
+    /* ================= 从当前任务抓 SRT ================= */
+    // job.cache.transcription 的两种形态都要兼容：
+    //   异步通道（v4.11.13）：{ srt: text, info: '' }
+    //   同步通道（cachedRequest，完整日报用）：服务端返回的整个 data 对象（含 srt）
+    function grabFromJob(lane){
+      var J = window.V4Jobs;
+      if(!J || typeof J.getJob !== 'function') return null;
+      var job = J.getJob(lane);
+      if(!job || !job.cache) return null;
+      var t = job.cache.transcription;
+      var srt = t && (t.srt || t.text);
+      if(!srt || !String(srt).trim()) return null;
+      var m = job.meta || {};
+      return {
+        srt: String(srt),
+        host: m.host || '', date: m.date || '', studio: m.studio || '', product: '',
+        fileName: (job.file && job.file.name) || '', _src: 'job'
+      };
+    }
+    function grabFromLegacy(){
+      try{
+        var s = localStorage.getItem('last_srt');
+        if(!s || !String(s).trim()) return null;
+        return { srt: String(s), host: '', date: '', studio: '', product: '', fileName: '', _src: 'last_srt' };
+      }catch(e){ return null; }
+    }
+
+    /* ================= 记录规整 ================= */
+    function normalize(rec, r){
+      if(!rec || !rec.srt) return null;
+      var p = parseSrt(rec.srt);
+      var out = {
+        srt: rec.srt,
+        host: rec.host || (r && r.host) || '',
+        date: rec.date || (r && r.date) || '',
+        studio: rec.studio || (r && r.studio) || '',
+        product: rec.product || (r && (r.product || (r.sellpoints && r.sellpoints.product))) || '',
+        fileName: rec.fileName || '',
+        segs: p.segs, chars: p.chars, durSec: p.durSec, hasTs: p.hasTs,
+        _src: rec._src || 'arch'
+      };
+      out.id = [out.host, out.date, out.fileName].join('|');
+      return out;
+    }
+    function metaLine(rec){
+      var parts = [];
+      if(rec.host) parts.push(rec.host);
+      if(rec.date) parts.push(rec.date);
+      if(rec.studio) parts.push(rec.studio);
+      if(rec.product) parts.push(rec.product);
+      var bits = [];
+      if(rec.segs) bits.push(rec.segs + ' 段');
+      if(rec.chars) bits.push(charsText(rec.chars));
+      if(rec.durSec) bits.push(hhmmss(rec.durSec));
+      return (parts.length ? parts.join(' · ') : '未标注场次') + (bits.length ? ' · ' + bits.join(' / ') : '');
+    }
+
+    /* ================= 文件名与导出 ================= */
+    function safeName(s){
+      return String(s == null ? '' : s).replace(/[\\/:*?"<>|\r\n\t]/g, '').replace(/\s+/g, '').trim();
+    }
+    function srtName(rec){
+      var parts = [rec.date, rec.studio, rec.host, rec.product].map(safeName).filter(Boolean);
+      return (parts.length ? parts.join('-') : '逐字稿') + '.srt';
+    }
+    // 不加 BOM：保持与引擎产出字节一致（可直接再喂回「每日评分」的 txt 通道，readAsText(utf-8) 正常）
+    function downloadText(name, text, mime){
+      var blob = new Blob([text], { type: mime || 'text/plain;charset=utf-8' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function(){ try{ URL.revokeObjectURL(url); }catch(e){} }, 3000);
+    }
+    function exportCurrent(){
+      if(!CURRENT){ tip('当前没有可导出的逐字稿'); return; }
+      downloadText(srtName(CURRENT), CURRENT.srt);
+      tip('已导出 ' + srtName(CURRENT));
+    }
+    function copyAll(){
+      if(!CURRENT){ tip('当前没有可复制的逐字稿'); return; }
+      var text = CURRENT.srt;
+      function done(ok){ tip(ok ? '全文已复制到剪贴板' : '复制失败，请改用「导出 SRT」'); }
+      try{
+        if(navigator.clipboard && navigator.clipboard.writeText){
+          navigator.clipboard.writeText(text).then(function(){ done(true); })['catch'](function(){ done(fallbackCopy(text)); });
+          return;
+        }
+      }catch(e){}
+      done(fallbackCopy(text));
+    }
+    function fallbackCopy(text){
+      try{
+        var ta = document.createElement('textarea');
+        ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        var ok = document.execCommand('copy');
+        ta.remove(); return ok;
+      }catch(e){ return false; }
+    }
+
+    /* ================= 结果页卡片 ================= */
+    function cardHost(lane){
+      if(lane === 'vision'){
+        var v = $('visionReportBlock');
+        return v ? v.parentNode : null;
+      }
+      return $('result') || null;
+    }
+    function renderCard(){
+      var host = CARD_HOST;
+      if(!host) return;
+      var box = $('v4SrtCard');
+      if(!CURRENT){ if(box) box.style.display = 'none'; return; }
+      if(!box){
+        box = document.createElement('div');
+        box.id = 'v4SrtCard';
+        box.className = 'panel';
+        box.style.cssText = 'border:1px solid var(--line);margin:0 0 14px';
+        if(host.firstChild) host.insertBefore(box, host.firstChild); else host.appendChild(box);
+      }else if(box.parentNode !== host){
+        if(host.firstChild) host.insertBefore(box, host.firstChild); else host.appendChild(box);
+      }
+      box.style.display = 'block';
+      var rec = CURRENT;
+      var srcNote = rec._src === 'last_srt' ? '（来源：旧缓存 last_srt，可能不含完整时间轴）' : '（转写原文，可直接用于案例分析）';
+      box.innerHTML =
+        '<h3 style="color:var(--gold)">逐字稿 · 转写原文（SRT）</h3>' +
+        '<div style="font-size:12px;color:var(--text3);margin:-4px 0 10px">' +
+          esc(metaLine(rec)) + ' <span style="color:var(--text3)">' + esc(srcNote) + '</span></div>' +
+        '<div class="row" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+          '<button class="btn btn-ghost" id="v4SrtView">查看全文（可检索）</button>' +
+          '<button class="btn btn-ghost" id="v4SrtExp">导出 SRT</button>' +
+          '<button class="btn btn-ghost" id="v4SrtCopy">复制全文</button>' +
+          '<span id="v4SrtTip" style="font-size:11.5px;color:var(--gold)"></span>' +
+        '</div>';
+      var bView = $('v4SrtView'), bExp = $('v4SrtExp'), bCopy = $('v4SrtCopy');
+      if(bView) bView.onclick = openDrawer;
+      if(bExp) bExp.onclick = exportCurrent;
+      if(bCopy) bCopy.onclick = copyAll;
+    }
+
+    /* ================= 历史归档条（刷新后仍能取到上次的 SRT） ================= */
+    function renderArchiveBar(){
+      var page = $('page-daily');
+      if(!page) return;
+      var bar = $('v4SrtArchiveBar');
+      var items = loadArchive();
+      if(!items.length){ if(bar) bar.style.display = 'none'; return; }
+      if(!bar){
+        bar = document.createElement('div');
+        bar.id = 'v4SrtArchiveBar';
+        bar.className = 'panel';
+        bar.style.cssText = 'border:1px solid var(--line);margin-top:14px';
+        var anchor = $('result');
+        if(anchor && anchor.parentNode === page) page.insertBefore(bar, anchor.nextSibling);
+        else page.appendChild(bar);
+      }
+      bar.style.display = 'block';
+      bar.innerHTML =
+        '<h3 style="color:var(--gold)">历史逐字稿（本机归档 · 最近 ' + items.length + ' 场）</h3>' +
+        '<div style="font-size:12px;color:var(--text3);margin:-4px 0 10px">' +
+          '每次视频转写后自动留存一份，刷新/重开页面仍可查看与导出。仅存本机，不上传、不进仓库。</div>' +
+        '<div id="v4SrtArchList"></div>';
+      var list = $('v4SrtArchList');
+      items.forEach(function(it){
+        var row = document.createElement('div');
+        row.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:6px 0;border-top:1px solid var(--line)';
+        var label = document.createElement('span');
+        label.style.cssText = 'font-size:12px;color:var(--text2)';
+        label.textContent = metaLine(it);
+        row.appendChild(label);
+        var b1 = document.createElement('button');
+        b1.className = 'btn btn-ghost'; b1.textContent = '查看';
+        b1.onclick = function(){ if(adopt(it)) openDrawer(); };
+        var b2 = document.createElement('button');
+        b2.className = 'btn btn-ghost'; b2.textContent = '导出 SRT';
+        b2.onclick = function(){ downloadText(srtName(it), it.srt); };
+        row.appendChild(b1); row.appendChild(b2);
+        list.appendChild(row);
+      });
+    }
+    function adopt(item){
+      var rec = normalize({ srt: item.srt, host: item.host, date: item.date, studio: item.studio,
+        product: item.product, fileName: item.fileName, _src: 'arch' }, null);
+      if(!rec){ tip('该条归档无法解析'); return false; }
+      CURRENT = rec;
+      renderCard();
+      return true;
+    }
+
+    /* ================= 抽屉（界面查看全文 + 检索） ================= */
+    function ensureDrawer(){
+      if($('v4SrtDrawer')) return;
+      var mask = document.createElement('div');
+      mask.id = 'v4SrtMask';
+      mask.style.cssText = 'position:fixed;inset:0;background:rgba(30,26,18,.42);z-index:' + Z_MASK + ';display:none';
+      mask.onclick = closeDrawer;
+      var dw = document.createElement('div');
+      dw.id = 'v4SrtDrawer';
+      dw.style.cssText = 'position:fixed;top:0;right:0;bottom:0;width:min(880px,95vw);background:var(--card,#fff);' +
+        'z-index:' + Z_DRAWER + ';display:none;flex-direction:column;box-shadow:-8px 0 32px rgba(0,0,0,.16)';
+      dw.innerHTML =
+        '<div style="padding:14px 18px 10px;border-bottom:1px solid var(--line)">' +
+          '<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">' +
+            '<div style="font-size:14px;font-weight:600;color:var(--gold)">逐字稿全文（SRT）</div>' +
+            '<div id="v4SrtDTitle" style="font-size:11.5px;color:var(--text3)"></div>' +
+            '<div style="margin-left:auto;display:flex;gap:8px">' +
+              '<button class="btn btn-ghost" id="v4SrtDExp">导出 SRT</button>' +
+              '<button class="btn btn-ghost" id="v4SrtDCopy">复制全文</button>' +
+              '<button class="btn btn-ghost" id="v4SrtDClose">关闭</button>' +
+            '</div>' +
+          '</div>' +
+          '<div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap">' +
+            '<input id="v4SrtDInput" type="search" placeholder="检索关键词（如 最好、第一、赠送）—— 定位到具体时间点" ' +
+              'style="flex:1;min-width:220px;font-size:13px">' +
+            '<label style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:4px">' +
+              '<input type="checkbox" id="v4SrtDOnly"> 仅看命中</label>' +
+            '<span id="v4SrtDCount" style="font-size:12px;color:var(--text3)"></span>' +
+          '</div>' +
+        '</div>' +
+        '<div id="v4SrtDList" style="flex:1;overflow:auto;padding:10px 18px 24px"></div>' +
+        '<div style="padding:8px 18px;border-top:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
+          '<span style="font-size:11.5px;color:var(--text3)">时间戳可点击复制，便于回看视频对应位置</span>' +
+          '<a href="javascript:void(0)" id="v4SrtDClear" style="margin-left:auto;font-size:11.5px;color:var(--text3)">清空本机归档</a>' +
+        '</div>';
+      document.body.appendChild(mask);
+      document.body.appendChild(dw);
+      $('v4SrtDClose').onclick = closeDrawer;
+      $('v4SrtDExp').onclick = exportCurrent;
+      $('v4SrtDCopy').onclick = copyAll;
+      $('v4SrtDInput').oninput = function(){
+        KW = this.value.trim();
+        clearTimeout(DRAWER_T);
+        DRAWER_T = setTimeout(function(){ renderList(true); }, 200);
+      };
+      $('v4SrtDOnly').onchange = function(){ ONLY_HIT = this.checked; renderList(true); };
+      $('v4SrtDClear').onclick = function(){
+        if(confirm('清空本机归档的全部逐字稿？此操作只删本机缓存，不影响已导出的文件。')){
+          clearArchive(); tip('本机归档已清空');
+        }
+      };
+      $('v4SrtDList').onscroll = function(){
+        var el = this;
+        if(el.scrollTop + el.clientHeight >= el.scrollHeight - 240){
+          if(SHOWN < VIEW.length){ SHOWN = Math.min(VIEW.length, SHOWN + STEP); appendRows(); }
+        }
+      };
+      document.addEventListener('keydown', function(e){
+        if(e.key === 'Escape' && DRAWER_OPEN) closeDrawer();
+      });
+    }
+    var CARD_HOST = null, DRAWER_T = null;
+
+    function hl(text, kw){
+      var safe = esc(text);
+      if(!kw) return safe;
+      var out = '', low = safe.toLowerCase();
+      var keys = kw.split(/\s+/).filter(Boolean).map(function(k){ return k.toLowerCase(); });
+      if(!keys.length) return safe;
+      var i = 0;
+      while(i < safe.length){
+        var hitLen = 0;
+        for(var k = 0; k < keys.length; k++){
+          if(low.substr(i, keys[k].length) === keys[k]){ hitLen = keys[k].length; break; }
+        }
+        if(hitLen){
+          out += '<mark style="background:#f7ecc9;color:#7a5f1c;padding:0 1px;border-radius:2px">' +
+            safe.substr(i, hitLen) + '</mark>';
+          i += hitLen;
+        }else{ out += safe.charAt(i); i++; }
+      }
+      return out;
+    }
+    function match(text, kw){
+      if(!kw) return true;
+      var low = String(text).toLowerCase();
+      return kw.split(/\s+/).filter(Boolean).every(function(k){ return low.indexOf(k.toLowerCase()) >= 0; });
+    }
+    function rowHtml(seg, kw){
+      var ts = seg.from != null
+        ? '<span class="v4srt-ts" data-ts="' + hhmmss(seg.from) + '" style="flex:0 0 64px;font-size:11.5px;color:var(--gold);cursor:pointer" title="点击复制时间戳">' + hhmmss(seg.from) + '</span>'
+        : '<span style="flex:0 0 64px;font-size:11.5px;color:var(--text3)">#' + seg.i + '</span>';
+      return '<div style="display:flex;gap:10px;padding:5px 0;border-bottom:1px solid #f1efe9;line-height:1.65">' +
+        ts + '<span style="flex:1;font-size:13px;color:var(--text)">' + hl(seg.text, kw) + '</span></div>';
+    }
+    function renderList(reset){
+      if(!CURRENT) return;
+      var all = parseSrt(CURRENT.srt).blocks;
+      if(reset){
+        VIEW = (KW || ONLY_HIT) ? all.filter(function(s){ return match(s.text, KW); }) : all;
+        HITS = KW ? VIEW.length : 0;
+        // 检索态一次渲染到 MAX_HITS（用户要看全命中）；浏览态只渲染 STEP（避免 7000 段一次性进 DOM）
+        SHOWN = KW ? Math.min(VIEW.length, MAX_HITS) : Math.min(VIEW.length, STEP);
+      }
+      var box = $('v4SrtDList');
+      if(!box) return;
+      box.innerHTML = '';
+      if(!VIEW.length){
+        box.innerHTML = '<div style="padding:24px 0;font-size:13px;color:var(--text3);text-align:center">' +
+          (KW ? '没有段落命中「' + esc(KW) + '」' : '本次逐字稿没有可显示的段落') + '</div>';
+      }else{
+        appendRows();
+      }
+      var cnt = $('v4SrtDCount');
+      if(cnt){
+        cnt.textContent = KW
+          ? ('命中 ' + HITS + ' / ' + all.length + ' 段' + (HITS > MAX_HITS ? '（仅显示前 ' + MAX_HITS + ' 条）' : ''))
+          : (all.length + ' 段 · 已显示 ' + SHOWN);
+      }
+      var t = $('v4SrtDTitle');
+      if(t) t.textContent = metaLine(CURRENT) + (CURRENT.hasTs ? '' : ' · 无时间轴');
+    }
+    function appendRows(){
+      var box = $('v4SrtDList');
+      if(!box) return;
+      var end = Math.min(VIEW.length, KW ? Math.min(SHOWN, MAX_HITS) : SHOWN);
+      var start = box.querySelectorAll('[data-v4srt-row]').length;
+      var html = '';
+      for(var i = start; i < end; i++){
+        html += '<div data-v4srt-row="1">' + rowHtml(VIEW[i], KW) + '</div>';
+      }
+      if(html) box.insertAdjacentHTML('beforeend', html);
+      var more = VIEW.length > end
+        ? '<div style="padding:12px 0;text-align:center;font-size:12px;color:var(--text3)">' +
+          (KW && end >= MAX_HITS ? '命中过多，仅显示前 ' + MAX_HITS + ' 条 —— 请细化关键词' : '还有 ' + (VIEW.length - end) + ' 段，向下滚动自动加载') + '</div>'
+        : '';
+      var old = box.querySelector('[data-v4srt-more]');
+      if(old) old.remove();
+      if(more) box.insertAdjacentHTML('beforeend', '<div data-v4srt-more="1">' + more + '</div>');
+      var cnt = $('v4SrtDCount');
+      if(cnt && !KW) cnt.textContent = VIEW.length + ' 段 · 已显示 ' + end;
+      bindTs();
+    }
+    // 时间戳点击 → 复制（方便回到视频对应位置）；用事件委托避免逐行绑定
+    function bindTs(){
+      var box = $('v4SrtDList');
+      if(!box || box.__tsBound) return;
+      box.__tsBound = true;
+      box.addEventListener('click', function(e){
+        var t = e.target;
+        if(t && t.className === 'v4srt-ts'){
+          var v = t.getAttribute('data-ts');
+          try{
+            if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(v);
+            else fallbackCopy(v);
+            tip('时间戳 ' + v + ' 已复制');
+          }catch(x){ tip('时间戳：' + v); }
+        }
+      });
+    }
+    function openDrawer(){
+      if(!CURRENT){ tip('当前没有可查看的逐字稿'); return; }
+      ensureDrawer();
+      $('v4SrtMask').style.display = 'block';
+      $('v4SrtDrawer').style.display = 'flex';
+      document.body.style.overflow = 'hidden';
+      DRAWER_OPEN = true;
+      renderList(true);
+    }
+    function closeDrawer(){
+      var m = $('v4SrtMask'), d = $('v4SrtDrawer');
+      if(m) m.style.display = 'none';
+      if(d) d.style.display = 'none';
+      if(document.body) document.body.style.overflow = '';
+      DRAWER_OPEN = false;
+    }
+
+    /* ================= 挂钩：结果渲染完成后采集 ================= */
+    function onResult(lane, r){
+      if(isOff()) return;
+      var rec = normalize(grabFromJob(lane), r);
+      if(!rec){
+        // 非视频通道（粘贴逐字稿 / 批量）本就没有 SRT：不动 CURRENT，避免误删上一份
+        return;
+      }
+      CURRENT = rec;
+      CARD_HOST = cardHost(lane);
+      // ⚠️ 顺序：先 renderCard（会重建 #v4SrtTip），再 archivePut
+      //   —— 反过来的话 archivePut 的「超单份上限/写入失败」提示会落到即将被丢弃的旧元素上，
+      //   用户什么也看不到（2026-09-21 自检 J/G4 实测抓到的真实缺陷）。
+      renderCard();
+      archivePut(rec);
+      renderArchiveBar();
+      if(DRAWER_OPEN) renderList(true);
+      try{ console.log('[v4.11.20] 逐字稿已就绪：' + metaLine(rec) + '（来源 ' + rec._src + '）'); }catch(e){}
+    }
+    function isOff(){ try{ return localStorage.getItem(OFF_KEY) === '1'; }catch(e){ return false; } }
+
+    var patched = false;
+    function patch(){
+      if(patched) return true;
+      var need = ['renderResult', 'renderGptDaily'];
+      for(var i = 0; i < need.length; i++){ if(typeof window[need[i]] !== 'function') return false; }
+      var _rr = window.renderResult;
+      window.renderResult = function(r){
+        var ret = _rr.apply(this, arguments);
+        try{ onResult('daily', r); }catch(e){ console.log('[v4.11.20] 采集跳过:', (e && e.message) || e); }
+        return ret;
+      };
+      var _gd = window.renderGptDaily;
+      window.renderGptDaily = function(rd){
+        var ret = _gd.apply(this, arguments);
+        try{ onResult('vision', rd); }catch(e){ console.log('[v4.11.20] 采集跳过:', (e && e.message) || e); }
+        return ret;
+      };
+      patched = true;
+      return true;
+    }
+    // 刷新后：恢复本机归档的最后一场（让「历史逐字稿」条立刻可用）
+    function restoreArchive(){
+      var items = loadArchive();
+      if(!items.length) return;
+      if(!CURRENT && items[0]) adopt(items[0]);
+      renderArchiveBar();
+    }
+    function boot(){
+      if(isOff()){ console.log('[v4.11.20] 逐字稿模块已关闭（V4SrtOff）'); return; }
+      patch();
+      restoreArchive();
+      var tries = 0;
+      var t = setInterval(function(){
+        tries++;
+        if(patch() && tries >= 2) clearInterval(t);
+        if(tries >= 50) clearInterval(t);
+      }, 100);
+      window.addEventListener('load', function(){ try{ patch(); }catch(e){} });
+    }
+    if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
+
+    /* ================= 对外接口（调试 / 自检 / 回退） ================= */
+    window.V4Srt = {
+      version: '4.11.20',
+      parse: parseSrt,
+      archive: loadArchive,
+      clearArchive: clearArchive,
+      adopt: adopt,
+      current: function(){ return CURRENT; },
+      exportText: function(){ return CURRENT ? CURRENT.srt : ''; },
+      fileName: function(){ return CURRENT ? srtName(CURRENT) : ''; },
+      meta: function(){ return CURRENT ? metaLine(CURRENT) : ''; },
+      open: openDrawer,
+      close: closeDrawer,
+      export: exportCurrent,
+      state: function(){ return { open: DRAWER_OPEN, kw: KW, onlyHit: ONLY_HIT, hits: HITS, shown: SHOWN, total: VIEW.length, off: isOff() }; },
+      search: function(kw){ KW = String(kw || '').trim(); var i = $('v4SrtDInput'); if(i) i.value = KW; renderList(true); return HITS; },
+      // 自检用：直接注入一份 SRT 走完整渲染链路（不依赖本地引擎）
+      inject: function(srt, meta){
+        var rec = normalize({ srt: srt, host: (meta && meta.host) || '自检主播', date: (meta && meta.date) || '',
+          studio: (meta && meta.studio) || '', product: (meta && meta.product) || '',
+          fileName: (meta && meta.fileName) || 'selftest.srt', _src: 'selftest' }, meta || null);
+        if(!rec) return false;
+        CURRENT = rec; CARD_HOST = cardHost('daily');
+        renderCard(); archivePut(rec); renderArchiveBar();
+        return true;
+      },
+      list: function(){ return VIEW.map(function(s){ return { from: s.from, to: s.to, text: s.text }; }); },
+      off: function(){
+        try{ localStorage.setItem(OFF_KEY, '1'); }catch(e){}
+        try{ console.log('[v4.11.20] 逐字稿模块已关闭，刷新页面后生效（V4SrtOn() 可恢复）'); }catch(e){}
+        return 'off';
+      },
+      on: function(){
+        try{ localStorage.removeItem(OFF_KEY); }catch(e){}
+        try{ console.log('[v4.11.20] 逐字稿模块已恢复，刷新页面后生效'); }catch(e){}
+        return 'on';
+      }
+    };
+    // 兼容注释里承诺过的写法：window.V4SrtOff() / window.V4SrtOn()
+    window.V4SrtOff = window.V4Srt.off;
+    window.V4SrtOn = window.V4Srt.on;
+  }catch(e){
+    try{ console.log('[v4.11.20] 逐字稿模块跳过:', (e && e.message) || e); }catch(x){}
+  }
 })();
