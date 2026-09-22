@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.21';
+var V4_VERSION = 'v4.11.22';
 (function(){
   function paint(){
     ['pageBadge', 'brandVer', 'footVer'].forEach(function(id){
@@ -1495,7 +1495,7 @@ document.addEventListener('DOMContentLoaded', function(){
     //      初版口径下 53 份场次有 **30 份（56.6%）会整场归 0**；上述三项修正后降到 **13 份（24.5%）**，
     //      且余下 13 份逐条核对**全部为真违规**（"全网最好的/吊打市面/完全不卡顿/完全不会爆开"）。
     //      不加约束则红线功能会把整场评分统一压成 0，8 个能力维度彻底失去区分度。
-    var rel = { _v:'4.11.21', enabled:true, sessionZero:false, moduleZero:false,
+    var rel = { _v:'4.11.22', enabled:true, sessionZero:false, moduleZero:false,
                 rulesV: (window.V4ViolationRules && window.V4ViolationRules._v) || '',
                 scanV: (S && S._v) || '',
                 reasons:[], modules:[], scan:null, err:'', guardBlocked:0, strict:false };
@@ -3148,7 +3148,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
     /* ================= 对外接口（调试 / 自检 / 回退） ================= */
     window.V4Srt = {
-      version: '4.11.21',
+      version: '4.11.22',
       parse: parseSrt,
       archive: loadArchive,
       clearArchive: clearArchive,
@@ -3356,4 +3356,363 @@ document.addEventListener('DOMContentLoaded', function(){
   }catch(e){
     try{ console.log('[v4.11.21] 异步转写接管跳过:', (e && e.message) || e); }catch(x){}
   }
+})();
+
+// ---------- v4.11.22：历史评分补全「当场报告 6 块」明细（纯加法，app-core.js / workflow.js 一字不动） ----------
+// 背景（2026-09-22 排查，全部为实测证据而非推测）：
+//   当场报告（单主播评分页 #singleReport，index.html L320-343）有 6 个折叠块：
+//     ① 7 大核心卖点覆盖表   ② 信息准确性 · 基准库对照（1.6）  ③ 优秀案例 TOP3 / 不足案例 TOP3
+//     ④ 产品识别与讲品分析（多品 · 20 分钟窗口卖点覆盖）  ⑤ 今日金句话术提炼  ⑥ 改进建议（按低分能力）
+//   而历史评分存档 grading_detail_v1 只存了 mods（模块分卡 + 逐子点证据）与派生概要，
+//   这 6 块的数据从未进过历史链 ⇒ 事后回看某场评分时，这 6 块整体缺失。
+//   实测（Chrome Local Storage leveldb，origin http://127.0.0.1:8791，王菲 2026-09-22 那条）：
+//     det 字段只有 [bestKey,bestStdId,c1Score,date,fullDaily,grade,host,mods,problem,product,
+//                   scoreType,semUsed,strength,studio,tagline,total,ts,worstKey,worstStdId]
+//     → sellpoints / baseline / cases / products / golden / training 一个都没有。
+// 修法（v4DetailSnapshot 增补 extra + v4DetailHTML 追加 6 块，均为壳层包装）：
+//   压缩要点（实测得出）：products.rounds[].grade 是 gradeWindow() 的完整产物，单轮就有 7344 字符，
+//   而历史渲染只用到 grade.total / grade.grade ⇒ 压成 {gt,gg}；sellpoints.keywords 只用到长度 ⇒ 压成计数。
+//   实测该场 6 块原始 JSON 合计 20013 字符 → 压缩后约 5~6K，单条 detail 由 ~11.5K 升到 ~17K 字符。
+// 容量（**不删任何记录**，可逆、非破坏）：
+//   localStorage 是单一额度，300 条 × 17K ≈ 5.1M 字符已贴近上限 ⇒ 采用「剥离」而非「删除」：
+//   只保留最近 HOLD 条带 6 块明细，更老的记录仅剥离 extra 字段（模块分卡与逐子点证据全部原样保留）。
+// 回退：window.V4Extra.off() / .on()；localStorage 键 v4_his_extra_off='1' 即关闭整块。
+(function(){
+  var LS_OFF = 'v4_his_extra_off';
+  var HOLD = 120;            // 保留完整 6 块明细的最近条数
+  var BUDGET = 2500000;      // detail 库总字符预算（≈5MB UTF-16），超出即继续剥离最旧的 extra
+  var LOG = function(m){ try{ console.log('[v4.11.22] ' + m); }catch(e){} };
+  var STATS = { snap: 0, extraBytes: 0, html: 0, trimmed: 0, legacy: 0, empty: 0, lastErr: '' };
+
+  function isOff(){ try{ return localStorage.getItem(LS_OFF) === '1'; }catch(e){ return false; } }
+  function esc(s){ return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function cut(s, n){ s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n) + '…' : s; }
+  function dash(v){ return (v == null || v === '') ? '—' : v; }
+  function mapsStr(a, n){ var o = [], i; for(i=0;i<(a||[]).length && i<n;i++) o.push(cut(a[i], 40)); return o; }
+
+  /* ---------- ① 抽取 6 块（紧凑化 + 截断，字段名刻意取短以省体积） ---------- */
+  function v4ExtraPick(r){
+    var ex = { v: '4.11.22' };
+    var i, j, arr;
+    if(!r) return ex;
+    try{
+      var sp = r.sellpoints;
+      // ⚠️ v4.11.22 自检修正：一律「字段存在即产出」——
+      //    当场报告即使该块为空也有表头/空态文案，历史若整块消失就与当场报告不一致
+      //    （2026-09-22 C 组实测抓到：本场 cases 全空时历史里连块都没了，而当场报告显示"未发现…"）
+      if(sp && sp.items){
+        var spi = [];
+        for(i=0;i<sp.items.length;i++){
+          var it = sp.items[i] || {}, ev2 = [];
+          arr = it.ev || [];
+          for(j=0;j<arr.length && j<2;j++) ev2.push({ ts: String((arr[j]||{}).ts||''), ctx: cut((arr[j]||{}).ctx, 120) });
+          spi.push({ n: String(it.name||''), c: it.covered?1:0, q: (it.quality == null ? null : it.quality),
+                     h: (it.kwHits||0), k: ((it.keywords||[]).length), e: ev2 });
+        }
+        ex.sp = { p: String(sp.product||''), cov: (sp.covered||0), tot: (sp.total||0), it: spi };
+      }
+    }catch(e1){ STATS.lastErr = 'sp:' + ((e1 && e1.message) || e1); }
+    try{
+      var bl = r.baseline;
+      if(bl && bl.items){
+        var bli = [];
+        for(i=0;i<bl.items.length;i++){
+          var b = bl.items[i] || {}, bev = b.ev || null;
+          bli.push({ f: String(b.field||''), s: String(b.standard||''), w: mapsStr(b.wrong, 4),
+                     err: b.error?1:0, num: b.numErr?1:0,
+                     ts: String((bev && bev.ts)||''), ctx: cut(bev && bev.ctx, 140) });
+        }
+        // ⚠️ 实测确认：r.baseline 产物本身只有 {errors, items}，没有 raw 字段 —— 不需要额外排除
+        ex.bl = { errs: (bl.errors||0), it: bli };
+      }
+    }catch(e2){ STATS.lastErr = 'bl:' + ((e2 && e2.message) || e2); }
+    try{
+      var cs = r.cases;
+      if(cs){
+        var cg = [], cb = [];
+        arr = cs.good || [];
+        for(i=0;i<arr.length;i++) cg.push({ m: String(arr[i].mod||''), s: String(arr[i].std||''), ts: String(arr[i].ts||''), ev: cut(arr[i].ev, 300) });
+        arr = cs.bad || [];
+        for(i=0;i<arr.length;i++) cb.push({ m: String(arr[i].mod||''), s: String(arr[i].std||''), ts: String(arr[i].ts||''), ev: cut(arr[i].ev, 300), miss: cut(arr[i].miss, 80) });
+        ex.cs = { g: cg, b: cb };
+      }
+    }catch(e3){ STATS.lastErr = 'cs:' + ((e3 && e3.message) || e3); }
+    try{
+      var pd = r.products;
+      if(pd && pd.products){
+        var pds = [];
+        for(i=0;i<pd.products.length;i++){
+          var p = pd.products[i] || {}, rds = [];
+          arr = p.rounds || [];
+          for(j=0;j<arr.length;j++){
+            var rd = arr[j] || {}, gr = rd.grade || null;
+            rds.push({ t0: String(rd.t0||''), we: String(rd.windowEnd||''),
+                       pct: (rd.pct == null ? null : rd.pct), cn: ((rd.covered||[]).length),
+                       ms: mapsStr(rd.missed, 12), to: rd.touchOnly?1:0, wc: (rd.winChars||0),
+                       gt: (gr && gr.total != null ? gr.total : null), gg: String((gr && gr.grade) || '') });
+          }
+          pds.push({ n: String(p.name||''), tr: (p.totalRounds||0), tc: (p.touchCount||0),
+                     os: (p.overallScore == null ? null : p.overallScore), og: String(p.overallGrade||''),
+                     st: (p.sellTotal||0), up: (p.unionPct == null ? 0 : p.unionPct),
+                     uc: ((p.unionCovered||[]).length), um: mapsStr(p.unionMissed, 12), rd: rds });
+        }
+        ex.pd = { tr: (pd.totalRounds||0), ps: pds };
+      }
+    }catch(e4){ STATS.lastErr = 'pd:' + ((e4 && e4.message) || e4); }
+    try{
+      var gd = r.golden;
+      if(gd && gd.items){
+        var gdi = [];
+        for(i=0;i<gd.items.length && i<20;i++){
+          var g = gd.items[i] || {};
+          gdi.push({ t: String(g.type||''), s: (g.star||0), ts: String(g.ts||''), x: cut(g.text, 200), g: (g.tags||[]) });
+        }
+        ex.gd = { tot: (gd.total||0), s5: (gd.star5||0), it: gdi };
+      }
+    }catch(e5){ STATS.lastErr = 'gd:' + ((e5 && e5.message) || e5); }
+    try{
+      arr = r.training || [];
+      {
+        var tri = [];
+        for(i=0;i<arr.length;i++){
+          var t2 = arr[i] || {};
+          tri.push({ m: String(t2.mod||''), s: (t2.score == null ? null : t2.score),
+                     gap: cut(t2.gap, 160), a: cut(t2.action, 220), v: cut(t2.verify, 60) });
+        }
+        ex.tr = tri;
+      }
+    }catch(e6){ STATS.lastErr = 'tr:' + ((e6 && e6.message) || e6); }
+    return ex;
+  }
+  function hasExtra(ex){
+    return !!(ex && (ex.sp || ex.bl || ex.cs || ex.pd || ex.gd || (ex.tr && ex.tr.length)));
+  }
+
+  /* ---------- ② 渲染 6 块（与当场报告同款表格 / 同款 class） ---------- */
+  function fold(title, body){
+    return '<details style="margin-top:8px;border:1px solid #efe6d2;border-radius:6px;background:#fff">'
+      + '<summary style="cursor:pointer;font-size:12px;font-weight:700;color:#5a4632;padding:6px 10px">' + esc(title) + '</summary>'
+      + '<div style="padding:8px 10px;border-top:1px dashed #efe6d2">' + body + '</div></details>';
+  }
+  function v4ExtraHTML(det){
+    var ex = (det && det.extra) || {};
+    var h = '', i, j;
+    // ① 7 大核心卖点覆盖表
+    if(ex.sp){
+      var sp = ex.sp, b1 = '';
+      // ⚠️ 此处刻意不加「考核产品」行：当场报告的 #sellpointTable 只有表格本身，
+      //    且 v4DetailHTML 顶部已显示「考核产品：xxx」，重复会与当场报告不一致（自检 C 组实测抓到）
+      b1 += '<table><tr><th style="width:26%">核心卖点</th><th style="width:11%">覆盖</th><th style="width:9%">质量</th><th style="width:9%">命中</th><th>证据</th></tr>';
+      for(i=0;i<(sp.it||[]).length;i++){
+        var it = sp.it[i], evTxt = '';
+        for(j=0;j<(it.e||[]).length;j++) evTxt += (j ? '；' : '') + (it.e[j].ts ? it.e[j].ts + ' ' : '') + it.e[j].ctx;
+        var qCl = it.q >= 4 ? 'color:var(--ok);font-weight:700' : (it.q === 3 ? 'color:var(--warn);font-weight:700' : 'color:var(--text3)');
+        b1 += '<tr><td>' + esc(it.n) + '</td>'
+            + '<td>' + (it.c ? '<span class="sp-y">✅ 覆盖</span>' : '<span class="sp-n">❌ 缺失</span>') + '</td>'
+            + '<td style="' + qCl + '">' + dash(it.q) + '/5</td><td>' + it.h + '/' + it.k + '</td>'
+            + '<td>' + esc(evTxt) + '</td></tr>';
+      }
+      b1 += '<tr style="background:#faf8f3"><td><b>覆盖合计</b></td><td><b>' + sp.cov + '/' + sp.tot + '</b></td><td colspan="3">'
+          + (sp.cov === sp.tot ? '全部覆盖，无漏讲问题' : '存在漏讲卖点，需补讲') + '</td></tr></table>';
+      h += fold('7 大核心卖点覆盖表', b1);
+    }
+    // ② 信息准确性 · 基准库对照（1.6）
+    if(ex.bl){
+      var bl = ex.bl, b2 = '<table><tr><th>基准项</th><th>标准口径</th><th style="width:18%">判定</th><th>主播表述证据</th></tr>';
+      for(i=0;i<(bl.it||[]).length;i++){
+        var bi = bl.it[i];
+        b2 += '<tr><td>' + esc(bi.f) + '</td><td>' + esc(bi.s) + '</td>'
+            + '<td>' + (bi.err ? '<span class="b-bad">❌ 错误</span>' : '<span class="b-ok">✅ 无误</span>') + '</td>'
+            + '<td>' + (bi.ctx ? esc(bi.ctx) : '<span style="color:var(--text3)">未出现错误表述</span>') + '</td></tr>';
+      }
+      b2 += '<tr style="background:#faf8f3"><td colspan="2"><b>信息准确性结论</b></td><td colspan="2"><b class="'
+          + (bl.errs === 0 ? 'b-ok' : 'b-bad') + '">' + (bl.errs === 0 ? '基准库 0 错误' : '发现 ' + bl.errs + ' 处错误口径')
+          + '</b></td></tr></table>';
+      h += fold('信息准确性 · 基准库对照（1.6）', b2);
+    }
+    // ③ 优秀案例 TOP3 / 不足案例 TOP3
+    if(ex.cs){
+      var cs = ex.cs, b3 = '<div class="case"><div class="ct">优秀案例 TOP' + (cs.g||[]).length + '</div>';
+      if(!(cs.g||[]).length) b3 += '<p>未发现 ≥90 分的高质量证据段落</p>';
+      for(i=0;i<(cs.g||[]).length;i++){
+        var g1 = cs.g[i];
+        b3 += '<p>【' + esc(g1.m) + ' · ' + esc(g1.s) + '】' + (g1.ts ? '<span class="evt">' + esc(g1.ts) + '</span>' : '') + esc(g1.ev) + '</p>';
+      }
+      b3 += '</div><div class="case"><div class="ct">不足案例 TOP' + (cs.b||[]).length + '</div>';
+      if(!(cs.b||[]).length) b3 += '<p>未发现 ≤20 分的明显不足</p>';
+      for(i=0;i<(cs.b||[]).length;i++){
+        var bd = cs.b[i];
+        b3 += '<p>【' + esc(bd.m) + ' · ' + esc(bd.s) + '】' + (bd.ts ? '<span class="evt">' + esc(bd.ts) + '</span>' : '') + esc(bd.ev || ('缺失：' + bd.miss)) + '</p>';
+      }
+      b3 += '</div>';
+      h += fold('优秀案例 TOP3 / 不足案例 TOP3', b3);
+    }
+    // ④ 产品识别与讲品分析（多品 · 20 分钟窗口）
+    if(ex.pd){
+      var pd = ex.pd, b4 = '';
+      if(!(pd.ps||[]).length){
+        b4 = '<div class="evctx" style="color:var(--text3)">未识别到产品讲解片段（逐字稿需含产品名/别名）</div>';
+      } else {
+      b4 += '<div style="font-size:11.5px;color:var(--text2);margin-bottom:8px">整场识别到 <b>' + (pd.ps||[]).length
+          + '</b> 个产品、共 <b>' + (pd.tr||0) + '</b> 次讲品｜考核规则：<b>提到品名即计时，20 分钟窗口内须讲完全部规则卖点；'
+          + '窗口内未讲完的卖点单独整理（不因后续补讲免责）</b></div>';
+      for(i=0;i<(pd.ps||[]).length;i++){
+        var p = pd.ps[i], hasMiss = (p.um||[]).length > 0;
+        b4 += '<div style="border:1px solid ' + (hasMiss ? '#f5c6bd' : 'var(--border)') + ';border-radius:8px;background:var(--card);margin-bottom:10px;overflow:hidden">';
+        b4 += '<div style="padding:8px 12px;background:#faf8f3;display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-bottom:1px solid var(--border)">'
+            + '<b style="font-size:12.5px">' + esc(p.n) + '</b>'
+            + '<span style="font-size:11px;color:var(--text2)">正式讲品 <b>' + p.tr + '</b> 次'
+            + (p.tc ? '（另有顺带提及 ' + p.tc + ' 次，不计考核）' : '') + '</span>'
+            + (p.os !== null ? '<span style="font-size:11.5px;font-weight:700;color:' + (p.os >= 75 ? 'var(--ok)' : (p.os < 45 ? 'var(--danger)' : 'var(--warn)')) + '">单品整体 ' + p.os + ' 分（' + esc(p.og) + '级）</span>' : '')
+            + '<span style="margin-left:auto;font-size:11.5px;font-weight:600;color:' + (p.up >= 90 ? 'var(--ok)' : (p.up < 70 ? 'var(--danger)' : 'var(--warn)')) + '">整体覆盖 ' + p.up + '%</span></div>';
+        b4 += '<div style="padding:8px 12px">';
+        b4 += '<table><tr><th style="width:13%">讲品轮次</th><th style="width:17%">起始</th><th style="width:12%">20分钟覆盖</th><th style="width:13%">单轮评分</th><th>20 分钟内未讲到的卖点（待改进）</th></tr>';
+        for(j=0;j<(p.rd||[]).length;j++){
+          var rd = p.rd[j];
+          if(rd.to){
+            b4 += '<tr style="opacity:.55"><td>顺带提及</td><td>' + (rd.t0 || '—') + '</td><td colspan="3" style="font-size:11px;color:var(--text3)">窗口内话术仅 ' + rd.wc + ' 字（&lt;80 字阈值），不计入考核</td></tr>';
+            continue;
+          }
+          var rc = rd.pct >= 90 ? 'var(--ok)' : (rd.pct < 70 ? 'var(--danger)' : 'var(--warn)');
+          var rgTxt = (rd.gt != null) ? '<b style="color:' + (rd.gt >= 75 ? 'var(--ok)' : (rd.gt < 45 ? 'var(--danger)' : 'var(--warn)')) + '">' + rd.gt + '分</b><span style="font-size:10px;color:var(--text3)">(' + esc(rd.gg) + '级)</span>' : '—';
+          b4 += '<tr><td>第 ' + (j+1) + ' 轮</td><td>' + (rd.t0 || '—') + (rd.we ? ' ~ ' + rd.we : '') + '</td>'
+              + '<td><b style="color:' + rc + '">' + rd.pct + '%</b>（' + rd.cn + '/' + p.st + '）</td>'
+              + '<td>' + rgTxt + '</td>'
+              + '<td>' + ((rd.ms||[]).length ? '<span class="miss">' + esc(rd.ms.join('、')) + '</span>' : '<span class="b-ok">全部覆盖 ✓</span>') + '</td></tr>';
+        }
+        if(p.tr > 1){
+          b4 += '<tr style="background:#faf8f3"><td><b>合并汇总</b></td><td>所有轮次</td><td><b>' + p.up + '%</b>（' + p.uc + '/' + p.st + '）</td>'
+              + '<td>' + ((p.um||[]).length ? '<span class="miss">' + esc(p.um.join('、')) + '</span>' : '<span class="b-ok">全部覆盖 ✓</span>') + '</td></tr>';
+        }
+        b4 += '</table>';
+        if(hasMiss){
+          b4 += '<div style="margin-top:8px;font-size:11.5px;color:var(--danger);background:#fdecea;border-radius:6px;padding:6px 10px">⚠ 该品存在 20 分钟窗口内未讲完的卖点：'
+              + esc(p.um.join('、')) + '——整理为讲品改进项，后续优化讲品顺序与完整性</div>';
+        }
+        b4 += '</div></div>';
+      }
+      }
+      h += fold('产品识别与讲品分析（多品 · 20 分钟窗口卖点覆盖）', b4);
+    }
+    // ⑤ 今日金句
+    if(ex.gd){
+      var gd = ex.gd, b5 = '';
+      if(!(gd.it||[]).length){
+        b5 = '<div class="evctx" style="color:var(--text3)">本场未发现 3 星及以上金句话术（话术均为普通表达）</div>';
+      } else {
+      b5 += '<div style="font-size:11.5px;color:var(--text2);margin-bottom:8px">今日提炼 <b>' + gd.tot + '</b> 句（3 星以上 <b>'
+          + (gd.it||[]).length + '</b> 句展示，5 星 <b>' + gd.s5 + '</b> 句）——已自动入库话术库</div>';
+      b5 += '<table><tr><th style="width:16%">话术分类</th><th style="width:9%">评分</th><th>金句（时间戳）</th><th style="width:18%">标签</th></tr>';
+      for(i=0;i<(gd.it||[]).length;i++){
+        var g2 = gd.it[i], star = '';
+        for(j=0;j<g2.s;j++) star += '★';
+        var sCl = g2.s >= 5 ? 'color:var(--danger);font-weight:700' : 'color:var(--gold);font-weight:700';
+        b5 += '<tr><td>' + esc(g2.t) + '</td><td><span style="' + sCl + '">' + star + '</span></td>'
+            + '<td>' + (g2.ts ? '<span class="evt">' + esc(g2.ts) + '</span>' : '') + esc(g2.x) + '</td>'
+            + '<td>' + esc((g2.g||[]).join('·')) + '</td></tr>';
+      }
+      b5 += '</table>';
+      }
+      h += fold('今日金句话术提炼（黄金话术库）', b5);
+    }
+    // ⑥ 改进建议（按低分能力）
+    if(ex.tr && ex.tr.length){
+      var b6 = '<table><tr><th style="width:16%">低分能力</th><th style="width:9%">能力分</th><th style="width:28%">能力缺口（问题证据）</th><th>训练动作（可执行）</th><th style="width:15%">下周验证</th></tr>';
+      for(i=0;i<ex.tr.length;i++){
+        var t3 = ex.tr[i];
+        b6 += '<tr><td><b>' + esc(t3.m) + '</b></td><td><b class="' + (t3.s < 45 ? 'lo' : 'mid') + '">' + dash(t3.s) + '</b></td>'
+            + '<td style="font-size:11.5px;color:var(--warn)">' + esc(t3.gap) + '</td>'
+            + '<td style="font-size:11.5px">' + esc(t3.a) + '</td>'
+            + '<td style="font-size:11.5px;color:var(--ok)">' + esc(t3.v) + '</td></tr>';
+      }
+      b6 += '</table>';
+      h += fold('改进建议（按低分能力）', b6);
+    }
+    return h;
+  }
+
+  /* ---------- ③ 容量护栏：只「剥离」不「删除」（可逆、非破坏） ---------- */
+  function v4ExtraTrim(){
+    try{
+      var ds = v4ReadLS('grading_detail_v1', '[]');
+      if(!ds || !ds.length) return;
+      var changed = false, i;
+      for(i=0;i<ds.length;i++){
+        if(ds[i] && ds[i].extra && (ds.length - i) > HOLD){ delete ds[i].extra; ds[i].extraTrimmed = 1; changed = true; STATS.trimmed++; }
+      }
+      var total = JSON.stringify(ds).length, guard = 0;
+      for(i=0;i<ds.length && total > BUDGET && guard < 400;i++, guard++){
+        if(ds[i] && ds[i].extra){ total -= JSON.stringify(ds[i].extra).length; delete ds[i].extra; ds[i].extraTrimmed = 1; changed = true; STATS.trimmed++; }
+      }
+      if(changed) localStorage.setItem('grading_detail_v1', JSON.stringify(ds));
+    }catch(e){ LOG('容量护栏异常：' + ((e && e.message) || e)); }
+  }
+
+  /* ---------- ④ 接管（包装三个顶层函数，均为运行时查找，patch 生效） ---------- */
+  function apply(){
+    var ok = 0;
+    if(typeof v4DetailSnapshot === 'function'){
+      var _snap = v4DetailSnapshot;
+      v4DetailSnapshot = function(r, ts){
+        var det = _snap.apply(this, arguments);
+        try{
+          if(!isOff() && det && r){
+            var ex = v4ExtraPick(r);
+            if(hasExtra(ex)){
+              det.extra = ex; det.extraV = '4.11.22';
+              STATS.snap++; STATS.extraBytes = JSON.stringify(ex).length;
+            }
+          }
+        }catch(e1){ STATS.lastErr = 'snap:' + ((e1 && e1.message) || e1); LOG('extra 抽取异常：' + STATS.lastErr); }
+        return det;
+      };
+      ok++;
+    }
+    if(typeof v4DetailHTML === 'function'){
+      var _html = v4DetailHTML;
+      v4DetailHTML = function(det){
+        var h = _html.apply(this, arguments);
+        try{
+          if(!isOff() && det){
+            if(det.extra && hasExtra(det.extra)){ h += v4ExtraHTML(det); STATS.html++; }
+            else if(det.extraTrimmed){
+              h += '<div class="v4his-none" style="margin-top:8px">该记录已超出 6 块明细保留窗口（最近 ' + HOLD + ' 条保留完整明细），模块分卡与逐子点判定证据仍在下方完整保留</div>';
+            }
+            else if(!det.extraV){
+              STATS.legacy++;
+              h += '<div class="v4his-none" style="margin-top:8px">该记录产生于 v4.11.22 之前，未沉淀「7 大核心卖点覆盖表 / 基准库对照 / TOP3 案例 / 产品识别与讲品分析 / 今日金句 / 改进建议」这 6 块明细；重新评分后即会完整沉淀</div>';
+            } else { STATS.empty++; }
+          }
+        }catch(e2){ LOG('extra 渲染异常：' + ((e2 && e2.message) || e2)); }
+        return h;
+      };
+      ok++;
+    }
+    if(typeof v4DetailSave === 'function'){
+      var _save = v4DetailSave;
+      v4DetailSave = function(r){
+        var out = _save.apply(this, arguments);
+        try{ if(!isOff()) v4ExtraTrim(); }catch(e3){ LOG('护栏调用异常：' + ((e3 && e3.message) || e3)); }
+        return out;
+      };
+      ok++;
+    }
+    return ok;
+  }
+
+  window.V4Extra = {
+    swap: apply,
+    on: function(){ try{ localStorage.removeItem(LS_OFF); }catch(e){} return 'on'; },
+    off: function(){ try{ localStorage.setItem(LS_OFF, '1'); }catch(e){} return 'off'; },
+    offQ: isOff,
+    hold: function(){ return HOLD; },
+    budget: function(){ return BUDGET; },
+    pick: v4ExtraPick,
+    render: v4ExtraHTML,
+    trim: v4ExtraTrim,
+    debug: function(){ return JSON.parse(JSON.stringify(STATS)); }
+  };
+
+  var n = apply();
+  LOG('历史评分 6 块明细补全已装载：接管 ' + n + '/3 个函数（HOLD=' + HOLD + ' 条，预算 ' + BUDGET + ' 字符）');
 })();
