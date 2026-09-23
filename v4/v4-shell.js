@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.25';
+var V4_VERSION = 'v4.11.26';
 (function(){
   function paint(){
     ['pageBadge', 'brandVer', 'footVer'].forEach(function(id){
@@ -2176,75 +2176,160 @@ document.addEventListener('DOMContentLoaded', function(){
   }catch(e){ console.log('[v4.11.7] 主品判定接管跳过:', (e && e.message) || e); }
 })();
 
-// ---------- v4.11.9：线上 HTTPS 页面禁用「一键完整日报」/自动转写 ----------
-// 背景：2026-09-08 13:30 老大报「一键完整日报」点完报 Failed to fetch。
-// 根因（代码级事实）：
-//   · app-core.js VISION_URL = localStorage.vision_url || 'http://127.0.0.1:3713'
-//   · app-core.js ASR_URL    = localStorage.asr_url    || 'http://127.0.0.1:3712'
-//   · buildFullReport 直接把整段视频 body POST 到 ASR_URL/VISION_URL（V4Jobs.cachedRequest）
-//   · 线上 https://ito-ai-grading.vercel.app/v4/ 是 HTTPS 页面，访问本机 loopback 被浏览器拦下
-//     → 请求根本不发出 → TypeError: Failed to fetch
-//   · ⚠️ 2026-09-17 实测更正：真实原因不是 Mixed Content。实机抓到的报错原文为
-//     "Permission was denied for this request to access the loopback address space"
-//     —— 即 Chrome Local Network Access(LNA) 对公网页面访问 127.0.0.1 的权限拦截
-//     （Mixed Content 在别的场景也会拦，但本条由 LNA 触发；文案已按实测改。）
-//   · v4.11.4 URL 接管块只接管 FEISHU_FILL_URL/SYNC_URL，没接管 ASR/VISION
-// 修复：纯壳层 monkey-patch window.V4Jobs.fullReport / window.V4Jobs.transcribe
-//   · 线上模式（isLocalCloud=false）：直接抛错引导，避免用户卡在 "Failed to fetch" 盲区
-//   · 本地模式（8791 http://）：原行为不变，下载视频走本地 3712/3713
-//   · 同步把「一键完整日报」按钮置灰 + 提示文字，避免无意义点击
-// ⚠️ 2026-09-17 修复本块死代码：原先这段在 IIFE 里**立即**读 window.V4Jobs，但 V4Jobs 定义在
-//    随后才加载的 workflow.js（index.html 脚本顺序 app-core → semantic-core → v4-shell → workflow）
-//    ⇒ 执行时恒为 undefined，两个 if 全部不成立，线上拦截从未生效，却照样打印"已拦截"（假日志；
-//      线上实测 transcribeBlocked=false 可证）。现改为「等 V4Jobs 就绪再接管」：
-//      同步 script 在本文件之后立即执行，故通常首个 tick（<100ms）即接管；
-//      仍留 5 秒重试 + window load 兜底，防止将来 workflow.js 被改成 defer/async 又静默失效。
+// ---------- v4.11.26：线上模式由「无条件拦截」改为「先真试，通了就放行；真不通才引导」 ----------
+// 为什么改（每条都有 commit / 实测证据）：
+//   · 2026-09-08 13:43 提交 8259772（v4.11.9）本意是治「一键完整日报点完报 Failed to fetch」，
+//     但写成了死代码 —— IIFE 里立刻读 window.V4Jobs，而 V4Jobs 定义在随后才加载的 workflow.js，
+//     执行时恒为 undefined ⇒ 这段拦截在 09-08~09-17 **从未生效**，线上其实一直是放行的。
+//   · 2026-09-17 13:46 提交 480b0d6（"v4.11.14 补丁：清理死代码"）把它改成「等 V4Jobs 就绪再接管」
+//     ⇒ 拦截**第一次真正生效**，而且是无条件拦：浏览器允许了也没用。
+//     老大 2026-09-23 报的「#/daily 之前能视频转写、现在不行」就是这一笔造成的。
+//   · 2026-09-23 实测 Chrome profile 的 content_settings.exceptions.loopback_network：
+//       https://mightymojoy.github.io:443,*      setting=1(允许)  last_modified=2026-08-27 10:09:33
+//       https://ito-ai-grading.vercel.app:443,*  setting=1(允许)  last_modified=2026-09-07 09:01:25
+//     ⇒ 浏览器侧本来就授权了本地网络访问。对照实测：关掉 LNA 检查后公网页面直连 3712 立刻 HTTP 200，
+//       CORS / 混合内容都不是问题 —— LNA 是唯一门槛，而这门槛用户能在弹窗里点"允许"过掉。
+// 新策略：点击时先探一次 /api/health（2.5s 超时）
+//   · 通   → 原函数原样执行（线上页面同样能真转写）
+//   · 不通 → 弹引导：点名哪个服务连不上，并可一键跳转到本地工作台
+//            （顶层导航不受 LNA 限制：2026-09-23 实测线上页面 location.href 跳 8791 成功落地）
+// 另外：不再在加载时置灰按钮 —— 那是"宁可错杀"，会把已授权的用户也一起挡在门外。
+// 回退：localStorage.v4_cloud_probe = 'off'  → 恢复 v4.11.9 的无条件拦截（策略开关）
+//       localStorage.v4_cloud_sim   = '1'    → 强制按线上处理（自检开关，与策略解耦；
+//                                              v4_cloud_probe='force' 保留为同义别名）
+// 自检：控制台 V4CloudGuard.status() 看判定 / V4CloudGuard.probe() 看两个服务的可达性
 (function(){
   try{
+    if(typeof window === 'undefined' || typeof location === 'undefined') return;
+
+    var MODE = 'auto';        // 策略：auto(默认) / off(恢复 v4.11.9 无条件拦截)
+    var SIM  = false;         // 开关：强制按"线上"处理（本机自检用，与策略解耦）
+    try{ MODE = localStorage.getItem('v4_cloud_probe') || 'auto'; }catch(e){}
+    try{ SIM  = (localStorage.getItem('v4_cloud_sim') === '1'); }catch(e){}
+    var HARD = (MODE === 'off');
+
     var isCloud = !(location.protocol === 'http:' && /^(127\.0\.0\.1|localhost)/i.test(location.hostname));
-    if(!isCloud) { console.log('[v4.11.9] 本地 8791 模式，一键完整日报正常可用'); return; }
-    // 注：下方 \n 是换行转义（原实现误写成 \n\n，alert 会显示字面反斜杠 n）
-    var GUIDE = '线上模式不支持「一键完整日报」自动转写（公网 HTTPS 页面访问本机 127.0.0.1:3712/3713 会被浏览器的本地网络访问权限拦下）。请改用以下任一方式：\n\nA. 用离线引擎包：Windows 双击包内「一键启动.bat」、Mac 双击「启动.command」拉起本地服务，再打开 http://127.0.0.1:8791/v4/\nB. 手动转写为 SRT：上传视频到飞书妙记等工具 → 导出 .srt → 在「每日评分」页粘贴逐字稿直接评分';
-    function cloudBlock(method){
-      return function(){
-        try{ if(typeof toastErr === 'function') toastErr(GUIDE); }catch(e){}
-        try{ alert(GUIDE); }catch(e){}
-        return Promise.reject(new Error('cloud-blocked-' + method));
-      };
+    if(location.protocol === 'file:') isCloud = true;   // 本地文件打开没有同源后端，按线上处理
+    if(MODE === 'force' || SIM) isCloud = true;
+    if(!isCloud){
+      console.log('[v4.11.26] 本地模式（' + location.hostname + '）：转写/完整日报直连本地引擎，不做任何拦截');
+      return;
     }
-    function dimButtons(){
-      ['visionAutoBtn'].forEach(function(id){
-        var b = document.getElementById(id);
-        if(b && !b.disabled){
-          b.disabled = true;
-          b.title = '线上模式不可用，请用本地 8791 或上传 SRT';
-          b.style.opacity = '0.45';
-          b.style.cursor = 'not-allowed';
-        }
+
+    function ls(k, d){ try{ return localStorage.getItem(k) || d; }catch(e){ return d; } }
+    function strip(u){ return String(u || '').replace(/\/+$/, ''); }
+    var ASR = strip(ls('asr_url',    'http://127.0.0.1:3712'));
+    var VIS = strip(ls('vision_url', 'http://127.0.0.1:3713'));
+
+    // needOk=false 时"只要有响应"即算服务在（视觉服务的健康路由不保证存在，404 也说明端口活着）
+    function ping(u, ms, needOk){
+      return new Promise(function(res){
+        var ctrl = ('AbortController' in window) ? new AbortController() : null;
+        var done = false;
+        var timer = setTimeout(function(){
+          if(done) return; done = true;
+          try{ if(ctrl) ctrl.abort(); }catch(e){}
+          res(false);
+        }, ms || 2500);
+        fetch(u + '/api/health', { method:'GET', cache:'no-store', signal: ctrl ? ctrl.signal : undefined })
+          .then(function(r){ if(done) return; done = true; clearTimeout(timer); res(needOk === false ? true : !!(r && r.ok)); })
+          .catch(function(){ if(done) return; done = true; clearTimeout(timer); res(false); });
       });
     }
+
+    function jumpLocal(page){
+      var h = (location.hash && location.hash.length > 1) ? location.hash : ('#/' + (page || 'daily'));
+      try{ location.href = 'http://127.0.0.1:8791/v4/' + h; }
+      catch(e){ try{ window.open('http://127.0.0.1:8791/v4/' + h, '_blank'); }catch(e2){} }
+    }
+
+    function guideText(which, asrOk, visOk){
+      var L = [];
+      L.push(which === 'full' ? '「一键完整日报」需要本机两个服务，现在没连上：' : '视频自动转写需要本机转写引擎，现在没连上：');
+      L.push('');
+      L.push((asrOk ? '✔' : '✘') + ' 转写引擎 3712　' + ASR);
+      if(which === 'full') L.push((visOk ? '✔' : '✘') + ' 画面识别 3713　' + VIS);
+      L.push('');
+      L.push('处理方式（任选一种）：');
+      L.push('① 点"确定"直接跳到本机工作台 http://127.0.0.1:8791/v4/ —— 同款功能在本地不受此限制；');
+      L.push('② 若本机服务没起：先双击离线引擎包里的「一键启动.bat」(Windows) /「启动.command」(Mac)，再回来点这个按钮；');
+      if(which === 'full') L.push('③ 只要文字评分：改用「每日评分」页的"上传视频·自动转写评分"（只依赖 3712，不需要画面识别）；');
+      else                 L.push('③ 或上传飞书妙记等工具导出的 .srt，到「每日评分」页粘贴逐字稿直接评分。');
+      return L.join('\n');
+    }
+
+    function guard(orig, which){
+      var needVis = (which === 'full');
+      return function(){
+        var self = this, args = arguments;
+        if(HARD){
+          var t0 = '线上模式不支持自动转写（已按 v4_cloud_probe=off 强制拦截）。\n\n点"确定"跳转到本地工作台，同款功能在那里可用。';
+          try{ if(typeof toastErr === 'function') toastErr(t0); }catch(e){}
+          var g0 = false;
+          try{ g0 = confirm(t0); }catch(e){}
+          if(g0) jumpLocal(which === 'full' ? 'vision' : 'daily');
+          return Promise.reject(new Error('cloud-blocked-' + which));
+        }
+        return Promise.all([
+          ping(ASR, 2500, true),
+          needVis ? ping(VIS, 1500, false) : Promise.resolve(true)
+        ]).then(function(rs){
+          var asrOk = rs[0], visOk = rs[1];
+          if(asrOk && (!needVis || visOk)) return orig.apply(self, args);
+          var miss = [];
+          if(!asrOk) miss.push('3712');
+          if(needVis && !visOk) miss.push('3713');
+          try{ if(typeof toastErr === 'function') toastErr('本机服务未连接：' + miss.join(' / ') + '（不影响其他功能）'); }catch(e){}
+          var go = false;
+          try{ go = confirm(guideText(which, asrOk, visOk) + '\n\n点"确定"立即跳转到本机工作台，点"取消"留在本页。'); }catch(e){}
+          if(go) jumpLocal(which === 'full' ? 'vision' : 'daily');
+          return Promise.reject(new Error('engine-unreachable-' + which));
+        });
+      };
+    }
+
     var applied = false;
     function apply(){
       if(applied) return true;
       var j = window.V4Jobs;
       if(!j || typeof j.fullReport !== 'function' || typeof j.transcribe !== 'function') return false;
-      j.fullReport = cloudBlock('fullReport');
-      j.transcribe = cloudBlock('transcribe');
+      if(!j.__v41126){
+        j.transcribe = guard(j.transcribe, 'daily');
+        j.fullReport = guard(j.fullReport, 'full');
+        j.__v41126 = true;
+      }
       applied = true;
-      try{ console.log('[v4.11.9] 线上模式已拦截「一键完整日报」/自动转写（V4Jobs 就绪后接管）'); }catch(e){}
+      try{
+        console.log('[v4.11.26] 线上模式已启用「先真试、通了放行」ASR=' + ASR + ' VISION=' + VIS +
+                    (HARD ? '（v4_cloud_probe=off → 强制拦截）' : ''));
+      }catch(e){}
       return true;
     }
-    if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', dimButtons);
-    else dimButtons();
     if(!apply()){
       var tries = 0;
-      var t = setInterval(function(){
-        tries++;
-        if(apply() || tries >= 50) clearInterval(t);
-      }, 100);
+      var iv = setInterval(function(){ tries++; if(apply() || tries >= 50) clearInterval(iv); }, 100);
     }
     window.addEventListener('load', function(){ try{ apply(); }catch(e){} });
-  }catch(e){ console.log('[v4.11.9] 接管跳过:', (e && e.message) || e); }
+
+    // 自检 / 排障入口（控制台）：V4CloudGuard.status() / V4CloudGuard.probe()
+    window.V4CloudGuard = {
+      isCloud: isCloud, mode: MODE, asr: ASR, vision: VIS,
+      probe: function(){
+        return Promise.all([ping(ASR, 2500, true), ping(VIS, 1500, false)])
+          .then(function(r){ return { asr3712: r[0], vision3713: r[1] }; });
+      },
+      status: function(){
+        try{
+          return {
+            version: (window.V4_VERSION || ''), isCloud: isCloud, mode: MODE,
+            asr: ASR, vision: VIS,
+            wrapped: !!(window.V4Jobs && window.V4Jobs.__v41126),
+            href: String(location.href)
+          };
+        }catch(e){ return { err: String(e) }; }
+      }
+    };
+  }catch(e){ console.log('[v4.11.26] 接管跳过:', (e && e.message) || e); }
 })();
 
 // ---------- v4.11.11：工作台读飞书实时数据（接上 api/feishu-read，看到全员评分） ----------
