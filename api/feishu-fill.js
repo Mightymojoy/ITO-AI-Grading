@@ -171,10 +171,21 @@ module.exports = async function handler(req, res){
     if(golden) baseFields['黄金话术'] = golden;
     if(bad) baseFields['违规话术'] = bad;
     if(advice) baseFields['改善建议'] = advice;
-    // v4.11.24：完整主播报告（多行文本，官方单格上限 100,000 → 留余量截 95,000）
+    // v4.11.24：完整主播报告（多行文本，官方单格上限 100,000）
     // 前端 v4.11.24 块将 v4DetailSnapshot() 压缩快照挂到 result.v4Report 传出。
     // ⚠️ 仅在非空时写入：PUT 是部分更新，缺键不会清空既有报告（重评时若无快照则保留旧值）。
-    if(r.v4Report) baseFields['完整主播报告'] = String(r.v4Report).slice(0, 95000);
+    // ⚠️ 2026-09-23 修复：不 slice 盲截 —— 截断会切出非法 JSON，读取侧解析失败 ⇒ 记录永远展不开。
+    //    超限则本条不写该字段（其余字段照常写入），并回报原因。
+    let repSkip = null;
+    if(r.v4Report){
+      const rep = String(r.v4Report);
+      if(rep.length > 95000){
+        repSkip = rep.length + ' 字符超上限（>95000），本条未写「完整主播报告」';
+        console.warn('[feishu-fill] ' + repSkip + ' | ' + host + ' ' + date);
+      } else {
+        baseFields['完整主播报告'] = rep;
+      }
+    }
 
     // 匹配不到 → 自动创建记录（评分结果自动写入飞书的完整闭环）
     if(!rec){
@@ -188,7 +199,7 @@ module.exports = async function handler(req, res){
         return res.status(200).json({ok:false, reason:'飞书自动建记录失败: '+(cr.msg||'')+' code='+cr.code});
       }
       const newRec = cr.data && cr.data.record;
-      return res.status(200).json({ok:true, created:true, recordId: newRec ? newRec.record_id : '', host, date, total: r.total, fieldsWritten: Object.keys(createFields).length, removedDup});
+      return res.status(200).json(Object.assign({ok:true, created:true, recordId: newRec ? newRec.record_id : '', host, date, total: r.total, fieldsWritten: Object.keys(createFields).length, removedDup}, repSkip ? {reportSkipped: repSkip} : {}));
     }
 
     const fields = Object.assign({}, baseFields);
@@ -198,7 +209,7 @@ module.exports = async function handler(req, res){
     if(up.code !== 0){
       return res.status(200).json({ok:false, reason:'飞书写入失败: '+(up.msg||'')+' code='+up.code, recordId: rec.record_id});
     }
-    return res.status(200).json({ok:true, recordId: rec.record_id, host, date, total: r.total, fieldsWritten: Object.keys(fields).length, removedDup});
+    return res.status(200).json(Object.assign({ok:true, recordId: rec.record_id, host, date, total: r.total, fieldsWritten: Object.keys(fields).length, removedDup}, repSkip ? {reportSkipped: repSkip} : {}));
   }catch(e){
     return res.status(500).json({ok:false, error: e.message});
   }

@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.24';
+var V4_VERSION = 'v4.11.25';
 (function(){
   function paint(){
     ['pageBadge', 'brandVer', 'footVer'].forEach(function(id){
@@ -448,11 +448,12 @@ function v4ArchRender(type){
         + '<span style="font-size:11px;color:var(--text2);flex:1;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc((r.product || '—')) + '</span>'
         + '<label for="' + uid + '" class="v4his-lb">查看完整评分记录</label>'
         + '</div>'
-        + '<div class="v4his-det">' + (det ? v4DetailHTML(det) : '<div class="v4his-none">该记录无完整明细存档（升级 v4.10 前产生的数据，需重新评分后才会沉淀逐子点证据）</div>') + '</div>'
+        + '<div class="v4his-det">' + (det ? v4DetailHTML(det) : '<div class="v4his-none">该记录暂无完整报告。<b>完整报告功能于 v4.11.24（2026-09-23）上线</b>，此前的记录没有生成过报告、无法回填 —— 重新评分一次即可，评完立即全员可见。</div>') + '</div>'
         + '</div>';
       if(det) hisDetN++; else hisMissN++;
     }
-    h += '<div style="margin-top:4px;font-size:11px;color:var(--text3)">完整存档 ' + hisDetN + ' 条 ｜ 仅摘要 ' + hisMissN + ' 条（v4.10 起每次评分自动沉淀完整明细）</div>';
+    h += '<div style="margin-top:4px;font-size:11px;color:var(--text3)">可展开完整报告 ' + hisDetN + ' 条 ｜ 仅摘要 ' + hisMissN +
+      ' 条' + (hisMissN ? '（仅摘要的多为 v4.11.24 上线前的历史记录，未生成过报告、无法回填）' : '') + '</div>';
   }
   box.innerHTML = h;
 }
@@ -3804,7 +3805,18 @@ document.addEventListener('DOMContentLoaded', function(){
 //         读取侧无需改动（JSON.parse 自动还原）；官方单格上限 100,000 ⇒ 转义后余量约 2.9 倍
 //   ② 历史 tab 合并飞书「历史评分」表 → 全员评分记录可见（不再只有自己那几条）
 //   ③ 展开详情时本机无档 → 回退云端「完整主播报告」→ 完整报告可见
-// 回退：localStorage.setItem('v4rpt_enabled','0') + 刷新；诊断：V4RPT.debug()
+// 回退：localStorage.setItem('v4rpt_enabled','0') + 刷新
+// 诊断：V4RPT.debug()（总览）｜ V4RPT.probe(ts, host)（单条为何展不开）｜ V4RPT.refresh(1)（强制刷新）
+//
+// ★ 2026-09-23 二次修复（老大：「先把我的需求完善好」）—— 上一版有三个会让报告「明明有却看不到」的硬缺陷：
+//   A. 键口径不一致：DET_MAP 键用归一化日期（2026-08-18），IDX_MAP 却存原始日期（2026-8-18）
+//      ⇒ 本机摘要日期为非标格式时两键对不上，云端有报告也查不出来（必然空态）
+//   B. 刷新只做一次（refreshDone 一次性）⇒ 同事刚上传的记录，不整页刷新就永远看不到
+//      —— 这与「拿到链接的人都能看到」的需求直接冲突
+//   C. 展开完全依赖「ts→日期→报告」反查，格式一乱就断链
+//   修法：① 全链路统一 ddate()/dkey() 单一口径；② 合并时用 TS_DET 按「ts|host」把报告直接挂到行上，
+//        展开时优先命中该直挂结果，不再依赖日期反查；③ 刷新改 8s 防抖 + 可重复触发 + 失败可重试，
+//        真实请求频率由底层 V4CLOUD.TTL(60s) 控制，不会打爆飞书限流；④ 底部与空态文案改为准确表述。
 (function(){
   try{
     if(typeof window === 'undefined' || typeof document === 'undefined') return;
@@ -3813,17 +3825,26 @@ document.addEventListener('DOMContentLoaded', function(){
 
     var RPT_FIELD = '完整主播报告';
     var RPT_MAX = 95000;                 // 官方单格上限 100,000 留余量；按 ASCII 转义后的长度计（中文膨胀约 2.7 倍）
-    var DET_MAP = Object.create(null);   // 'host|date' → det 对象（云端完整报告）
-    var IDX_MAP = Object.create(null);   // 'ts|host'   → date（供 v4DetailByTs 反查云端）
-    var CLOUD_ROWS = null;               // 云端摘要行（已归一化）
+    var DET_MAP = Object.create(null);   // 'host|YYYY-MM-DD' → det 对象（云端完整报告；键一律归一化）
+    var TS_DET = Object.create(null);    // 'ts|host' → det（渲染时按行精确挂好，免日期反查）
+    var IDX_MAP = Object.create(null);   // 'ts|host' → 'YYYY-MM-DD'（供 v4DetailByTs 反查云端）
+    var CLOUD_ROWS = null;               // 云端摘要行（date 已归一化）
     var LOADING = false, LOADED = false, FAILS = 0;
-    var refreshDone = false;
+    var LAST_OK_TS = 0;                  // 上次成功拉取时刻（只用于 UI 判断数据新鲜度，不做短路）
+    var LAST_UI_TS = 0;                  // 上次触发刷新时刻（8s 防抖，兼作递归保护）
+    var IN_RENDER = false;               // 重渲染中标志（防 _ar 内部再触发本函数）
     var PENDING = null;                  // ensureCloud 进行中的 Promise（防并发重取）
     var _ar = null;                      // 见 ⑥ 段末尾赋值（原 v4ArchRender）
     var TIP_ID = 'v4rpt-tip';
 
     function log(m){ try{ console.log('[v4.11.24] ' + m); }catch(e){} }
     function normDate(s){ try{ return (typeof v4NormDate === 'function') ? v4NormDate(s) : {m:'',d:''}; }catch(e){ return {m:'',d:''}; } }
+    // ★ 统一「主播+日期」键（2026-09-23 二次修复）
+    //   上一版缺陷：DET_MAP 写的是归一化日期（2026-08-18），IDX_MAP 存的却是原始日期（2026-8-18）
+    //   本机摘要有 '2026-8-18' 这类非标格式时两键对不上 ⇒ 云端明明有报告也查不出来（必然空态）
+    //   现在写/读两侧一律走 ddate() / dkey()，单一口径；ddate 幂等（'2026-8-18' 与 '2026-08-18' 归一相同）
+    function ddate(s){ var nd = normDate(s); return nd.d || String(s || ''); }
+    function dkey(host, date){ return String(host) + '|' + ddate(date); }
     function boxOf(){ return document.getElementById('v4arch-history'); }
     function esc2(v){ try{ return (typeof esc === 'function') ? esc(v) : String(v == null ? '' : v); }catch(e){ return String(v == null ? '' : v); } }
 
@@ -3929,11 +3950,18 @@ document.addEventListener('DOMContentLoaded', function(){
     }catch(e){}
 
     // ================= ③ 云端拉取（历史评分表） =================
-    function ensureCloud(){
+    // ⚠️ 本层不做自身 TTL 短路（2026-09-23 二次修复）：
+    //    上一版「LOADED 后直接返回缓存」= 页面生命周期内只拉一次 ⇒ 同事刚评完、我这边
+    //    切到历史 tab 也永远看不到（要整页刷新）。现在每次都走底层，由底层 V4CLOUD.TTL(60s)
+    //    控制真实请求频率；force=true 时连底层缓存一并清掉，用于「立即刷新」逃生阀。
+    function ensureCloud(force){
       if(LOADING) return PENDING || Promise.resolve(CLOUD_ROWS);
-      if(LOADED && CLOUD_ROWS && FAILS < 3) return Promise.resolve(CLOUD_ROWS);
       if(typeof window.v4FsEnsure !== 'function') return Promise.resolve(null);
+      if(force){
+        try{ if(window.V4CLOUD && window.V4CLOUD.cache) delete window.V4CLOUD.cache['history']; }catch(e){}
+      }
       LOADING = true;
+      var badReport = 0;
       var p = window.v4FsEnsure('history').then(function(d){
         var rows = (d && d.rows) || [];
         var out = [];
@@ -3941,23 +3969,27 @@ document.addEventListener('DOMContentLoaded', function(){
           var x = rows[i] || {};
           var host = String(x['主播'] || '').trim();
           if(!host) continue;
-          var nd = normDate(x['标准日期'] || x['日期'] || '');
-          var date = nd.d || String(x['日期'] || '');
+          var date = ddate(x['标准日期'] || x['日期'] || '');
           if(!date) continue;
           var rep = x[RPT_FIELD];
           if(typeof rep === 'string' && rep.length > 20){
             try{
               var det = JSON.parse(rep);
-              if(det && det.mods && det.mods.length) DET_MAP[host + '|' + date] = det;
-            }catch(e){}
+              if(det && det.mods && det.mods.length) DET_MAP[dkey(host, date)] = det;
+              else { badReport++; log('报告结构异常（无 mods）: ' + host + ' ' + date); }
+            }catch(e){
+              badReport++;
+              log('报告解析失败（' + host + ' ' + date + '，' + rep.length + ' 字符）: ' + ((e && e.message) || e));
+            }
           }
           out.push({ host: host, date: date,
             total: x['总分'] || x['历史总分(数值)'] || '—',
             c1Score: x['c1产品理解'] || x['产品理解(数值)'] || '',
             product: x['产品'] || '', grade: x['等级'] || '', _src: 'cloud' });
         }
-        CLOUD_ROWS = out; LOADED = true; LOADING = false; FAILS = 0;
-        log('云端历史评分 ' + out.length + ' 条，其中含完整报告 ' + Object.keys(DET_MAP).length + ' 条');
+        CLOUD_ROWS = out; LOADED = true; LOADING = false; FAILS = 0; LAST_OK_TS = Date.now();
+        log('云端历史评分 ' + out.length + ' 条，其中含完整报告 ' + Object.keys(DET_MAP).length + ' 条' +
+            (badReport ? '（解析失败 ' + badReport + ' 条）' : ''));
         return out;
       })['catch'](function(e){
         LOADING = false; FAILS++;
@@ -3970,22 +4002,31 @@ document.addEventListener('DOMContentLoaded', function(){
     // ================= ④ 历史列表合并（本机优先，云端补齐） =================
     function mergeHistory(local){
       var map = Object.create(null), order = [];
-      function keyOf(x){
-        if(!x || !x.host) return '';
-        var nd = normDate(x.date || '');
-        return String(x.host) + '|' + (nd.d || String(x.date || ''));
-      }
+      function keyOf(x){ return (x && x.host) ? dkey(x.host, x.date) : ''; }
       (local || []).forEach(function(x){ var k = keyOf(x); if(!k) return; if(!map[k]) order.push(k); map[k] = x; });
       (CLOUD_ROWS || []).forEach(function(x){ var k = keyOf(x); if(!k) return; if(!map[k]){ order.push(k); map[k] = x; } });
       var out = order.map(function(k){ return map[k]; });
       out.forEach(function(x){
         try{
-          // 云端行补「确定性 ts」：用于排序，也供 v4DetailByTs(ts, host) 反查该行日期
-          if(x._src === 'cloud' && x.ts == null && x.date){
+          // 展示口径统一：'2026-8-18' → '2026-08-18'（分组本就靠 v4NormDate，显示统一更整齐）
+          var dd = ddate(x.date);
+          if(dd) x.date = dd;
+          // 补「确定性 ts」：云端行没有 ts；本机老摘要也可能缺 ts。
+          // ts 既用于排序，也供 v4DetailByTs(ts, host) 反查该行日期 ⇒ 缺它这一行就永远展不开。
+          if(x.ts == null && x.date){
             var t = Date.parse(String(x.date).replace(/-/g, '/') + ' 12:00:00');
             if(!isNaN(t)) x.ts = t;
           }
-          if(x.ts != null) IDX_MAP[String(x.ts) + '|' + x.host] = x.date;
+          // ⚠️ 必须存「归一化日期」，与 DET_MAP 的键口径一致
+          //    上一版这里存的是原始日期 ⇒ 本机 '2026-8-18' 去查 DET_MAP 的 '2026-08-18' 必然落空
+          if(x.ts != null && x.host){
+            var kk = String(x.ts) + '|' + x.host;
+            IDX_MAP[kk] = ddate(x.date);
+            // ★ 关键一步：合并时就把该行应有的报告按行挂好。
+            //   无论本机行遮住云端行、还是日期格式再乱，展开时只需 ts+host 就能命中，不依赖任何反查。
+            var hit = DET_MAP[dkey(x.host, x.date)];
+            if(hit) TS_DET[kk] = hit;
+          }
         }catch(e){}
       });
       return out;
@@ -4006,16 +4047,21 @@ document.addEventListener('DOMContentLoaded', function(){
       window.v4DetailByTs = function(ts, host){
         var d = null;
         try{ d = _db.apply(this, arguments); }catch(e){}
-        if(d) return d;
+        if(d) return d;                                  // 本机有明细 → 优先（本机版最完整）
         try{
-          var date = IDX_MAP[String(ts) + '|' + host];
-          if(!date){                                      // 云端尚未拉回时，从本机摘要反查日期
+          var kk = String(ts) + '|' + String(host);
+          if(TS_DET[kk]) return TS_DET[kk];              // ① 合并时按行挂好的云端报告（首选，不依赖日期）
+          var date = IDX_MAP[kk];
+          if(!date){                                     // ② 云端尚未拉回时，从本机摘要反查日期
             var lib = v4ReadLS('grading_history_v1', '[]');
             for(var i=0;i<lib.length;i++){
-              if(String(lib[i].ts) === String(ts) && lib[i].host === host){ date = lib[i].date; break; }
+              if(String(lib[i].ts) === String(ts) && lib[i].host === host){ date = ddate(lib[i].date); break; }
             }
           }
-          if(date && DET_MAP[host + '|' + date]) return DET_MAP[host + '|' + date];
+          if(date){
+            var hit = DET_MAP[dkey(host, date)];         // ③ 日期键兜底（口径已统一）
+            if(hit) return hit;
+          }
         }catch(e){}
         return null;
       };
@@ -4049,18 +4095,35 @@ document.addEventListener('DOMContentLoaded', function(){
       if(!ids || !ids.length) return;
       try{ ids.forEach(function(id){ var el = document.getElementById(id); if(el) el.checked = true; }); }catch(e){}
     }
-    function scheduleCloudRefresh(args){
-      if(refreshDone) return;
-      refreshDone = true;
-      setTip('正在从飞书加载全员评分记录…');
+    // 2026-09-23 二次修复：原先「页面生命周期只刷一次」（refreshDone 一次性）⇒ 同事刚上传的记录
+    // 必须整页刷新才能看到，与「全员可见」的需求相悖。现在改为：8s 防抖 + 可重复触发 + 失败可重试，
+    // 真实请求频率由底层 V4CLOUD.TTL(60s) 控制，不会打爆飞书限流。
+    var UI_DEBOUNCE = 8000;
+    function tipHtml(n){
+      var t = '已合并飞书全员记录 <b>' + n + '</b> 条 ｜ 含完整报告 <b>' + Object.keys(DET_MAP).length +
+              '</b> 条 · ' + new Date().toLocaleTimeString('zh-CN', { hour12: false });
+      // 逃生阀：刚上传完想立刻看到（绕过底层 60s 缓存）时点这里
+      return t + ' ｜ <a href="javascript:void 0" onclick="V4RPT.refresh(1);return false" style="color:var(--gold)">立即刷新</a>';
+    }
+    function scheduleCloudRefresh(args, force){
+      if(IN_RENDER) return;                                    // 防 _ar 内部再触发本函数（递归保护）
+      var now = Date.now();
+      if(!force && now - LAST_UI_TS < UI_DEBOUNCE) return;      // 8s 防抖：切月/切日高频重渲染不重复触发
+      LAST_UI_TS = now;
+      var fresh = LOADED && CLOUD_ROWS && (now - LAST_OK_TS) < 45000;
+      if(!fresh) setTip('正在从飞书加载全员评分记录…');
       var keep = captureExpanded();
-      ensureCloud().then(function(rows){
+      ensureCloud(force).then(function(rows){
         if(!rows || !rows.length){ setTip('飞书暂无全员记录，仅显示本机存档'); return; }
-        _ar.apply(window, args);
+        IN_RENDER = true;
+        try{ _ar.apply(window, args || ['history']); }         // 重渲染会清空 tip，故 tip 在渲染之后重建
+        catch(e){ log('重渲染异常: ' + ((e && e.message) || e)); }
+        IN_RENDER = false;
         restoreExpanded(keep);
-        setTip('已合并飞书全员记录 <b>' + rows.length + '</b> 条 ｜ 含完整报告 <b>' + Object.keys(DET_MAP).length +
-               '</b> 条 · ' + new Date().toLocaleTimeString('zh-CN', { hour12: false }));
-      })['catch'](function(e){ setTip('飞书全员记录加载失败：' + esc2((e && e.message) || e), 'var(--danger)'); });
+        setTip(tipHtml(rows.length));
+      })['catch'](function(e){
+        setTip('飞书全员记录加载失败：' + esc2((e && e.message) || e), 'var(--danger)');
+      });
     }
     var _ar = window.v4ArchRender;        // 原 v4ArchRender（异步补云端后重渲染用；必须在 scheduleCloudRefresh 之前赋值）
     if(typeof _ar === 'function'){
@@ -4080,14 +4143,29 @@ document.addEventListener('DOMContentLoaded', function(){
       fit: fit,
       RPT_MAX: RPT_MAX,
       ensureCloud: ensureCloud,
-      refresh: function(){ refreshDone = false; if(boxOf()) scheduleCloudRefresh(['history']); },
+      refresh: function(force){
+        var f = (force === true || force === 1);
+        if(boxOf()){ LAST_UI_TS = 0; scheduleCloudRefresh(['history'], f); }
+        return '已触发刷新' + (f ? '（强制，已绕过底层 60s 缓存）' : '');
+      },
       debug: function(){
         var o = { enabled: true, loaded: LOADED, fails: FAILS,
                   cloudRows: (CLOUD_ROWS || []).length,
                   cloudReports: Object.keys(DET_MAP).length,
+                  rowBound: Object.keys(TS_DET).length,
+                  lastOkAgo: LAST_OK_TS ? Math.round((Date.now() - LAST_OK_TS) / 1000) + 's' : 'never',
                   sampleKeys: Object.keys(DET_MAP).slice(0, 8) };
         try{ console.log('[v4.11.24] debug', o); }catch(e){}
         return o;
+      },
+      // 排查「有记录但展不开」：分别报告本机明细 / 按行挂载 / 按日期键三条通路各是否命中
+      probe: function(ts, host){
+        var r = { ts: ts, host: host, date: null, local: null, cloudByRow: null, cloudByDate: null };
+        try{ r.date = IDX_MAP[String(ts) + '|' + host] || null; }catch(e){}
+        try{ r.local = _db ? !!_db(ts, host) : null; }catch(e){}
+        try{ r.cloudByRow = !!TS_DET[String(ts) + '|' + host]; }catch(e){}
+        try{ r.cloudByDate = r.date ? !!DET_MAP[dkey(host, r.date)] : null; }catch(e){}
+        return r;
       },
       off: function(){ try{ localStorage.setItem('v4rpt_enabled', '0'); }catch(e){} return 'v4rpt_enabled=0 已写入，刷新页面即回退'; }
     };

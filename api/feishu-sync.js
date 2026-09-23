@@ -147,13 +147,23 @@ async function upsertHistory(token, tableId, h){
     '产品': h.product||'', '总分': h.total!=null?String(h.total):'', '等级': h.grade||'',
     'c1产品理解': h.c1!=null?String(h.c1):''
   };
-  // v4.11.24：完整主播报告（多行文本，官方单格上限 100,000 → 留余量截 95,000）
-  // 由前端 v4.11.24 块把 v4DetailSnapshot() 压缩快照挂到 r.v4Report 传出（实测 11,539 字符原样往返）。
+  // v4.11.24：完整主播报告（多行文本，官方单格上限 100,000）
+  // 由前端 v4.11.24 块把 v4DetailSnapshot() 压缩快照挂到 r.v4Report 传出。
   // 效果：任一拿到工作台链接的人展开历史记录都能看到完整报告，不再只有摘要。
-  if(h.report) fields['完整主播报告'] = String(h.report).slice(0, 95000);
+  // ⚠️ 2026-09-23 修复：绝不 slice 盲截！截断会切出非法 JSON ⇒ 读取侧 JSON.parse 失败
+  //    ⇒ 表现是「这条记录永远展不开」且无声无息，比不写还糟。
+  //    前端 buildReport() 已保证「要么 ≤ RPT_MAX，要么空串」，这里只做防御性校验：
+  //    超限则本条不写该字段（其余字段照常写入），并回报原因以便排查。
+  const reportTooLong = !!(h.report && String(h.report).length > 95000);
+  if(h.report && !reportTooLong) fields['完整主播报告'] = String(h.report);
   const r = await createRecord(token, tableId, fields);
   if(r.code !== 0) return {ok:false, reason:'写入失败: '+(r.msg||'')+' code='+r.code};
-  return {ok:true, recordId: r.data && r.data.record ? r.data.record.record_id : '', removed};
+  const out = {ok:true, recordId: r.data && r.data.record ? r.data.record.record_id : '', removed};
+  if(reportTooLong){
+    out.reportSkipped = String(h.report).length + ' 字符超上限（>95000），本条未写「完整主播报告」';
+    console.warn('[feishu-sync] ' + out.reportSkipped + ' | ' + (h.host||'') + ' ' + (h.date||''));
+  }
+  return out;
 }
 
 // 同步单条（去重 → 无则新建）
