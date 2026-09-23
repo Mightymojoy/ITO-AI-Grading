@@ -11,6 +11,7 @@ function feishuFetch(url, options) {
   return new Promise((resolve, reject) => {
     const req = https.request(url, options, (res) => {
       let data = '';
+      res.setEncoding('utf8');
       res.on('data', c => data += c);
       res.on('end', () => {
         try { resolve(JSON.parse(data)); }

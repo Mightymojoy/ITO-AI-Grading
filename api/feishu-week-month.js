@@ -12,6 +12,7 @@ function httpsJson(opts, body){
   return new Promise((resolve, reject) => {
     const req = https.request(opts, res => {
       let d = '';
+      res.setEncoding('utf8');
       res.on('data', c => d += c);
       res.on('end', () => { try{ resolve(JSON.parse(d)); }catch(e){ reject(new Error('JSON 解析失败: ' + d.slice(0,300))); } });
     });

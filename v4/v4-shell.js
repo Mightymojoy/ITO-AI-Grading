@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.26';
+var V4_VERSION = 'v4.11.27';
 (function(){
   function paint(){
     ['pageBadge', 'brandVer', 'footVer'].forEach(function(id){
@@ -3909,7 +3909,7 @@ document.addEventListener('DOMContentLoaded', function(){
     try{ if(localStorage.getItem('v4rpt_enabled') === '0'){ console.log('[v4.11.24] 已被 v4rpt_enabled=0 关闭'); return; } }catch(e){}
 
     var RPT_FIELD = '完整主播报告';
-    var RPT_MAX = 95000;                 // 官方单格上限 100,000 留余量；按 ASCII 转义后的长度计（中文膨胀约 2.7 倍）
+    var RPT_MAX = 95000;                 // 飞书官方单格上限 100,000 留余量；v4.11.27 起按**中文原文字符数**计（不再有转义膨胀）
     var DET_MAP = Object.create(null);   // 'host|YYYY-MM-DD' → det 对象（云端完整报告；键一律归一化）
     var TS_DET = Object.create(null);    // 'ts|host' → det（渲染时按行精确挂好，免日期反查）
     var IDX_MAP = Object.create(null);   // 'ts|host' → 'YYYY-MM-DD'（供 v4DetailByTs 反查云端）
@@ -3933,10 +3933,18 @@ document.addEventListener('DOMContentLoaded', function(){
     function boxOf(){ return document.getElementById('v4arch-history'); }
     function esc2(v){ try{ return (typeof esc === 'function') ? esc(v) : String(v == null ? '' : v); }catch(e){ return String(v == null ? '' : v); } }
 
-    // ---------- 写云端前的「纯 ASCII 化」（2026-09-23 实测规避飞书多行文本 U+FFFD 损坏） ----------
-    // 飞书「多行文本」在字节边界切断多字节中文 → 产生 U+FFFD 替换字符（实测 14,717 字符版必坏）
-    // 纯 ASCII 载荷没有多字节序列可被切断 ⇒ 转义后 14.7K/22K/65K/81.8K 四种规模均 100% 无损
-    // 读取侧零改动：JSON.parse 自动把 \uXXXX 还原成中文
+    // ---------- 写入格式：直接写中文原文（v4.11.27 起） ----------
+    // v4.11.24 曾判定「飞书多行文本在字节边界切断中文 → U+FFFD」，于是把写入内容整体转成
+    // \uXXXX 纯 ASCII 规避乱码。副作用：飞书表格里显示成一长串代码，人不可读（老大 2026-09-23 反馈）。
+    // v4.11.27 实测推翻该判定 —— 根因不在飞书存储，而在**读取端逐 chunk 解码**：
+    //   · 直连飞书写入 23,266 字符原始中文 → 读回 23,266 字符，逐字节一致、U+FFFD = 0
+    //     ⇒ 飞书「多行文本」存中文完全无损，与长度 / 字节边界无关
+    //   · 同一响应（11 分块 / 137,467 字节）内双解码对照：
+    //       `d += c`（隐式逐 chunk utf8）→ 3 处 U+FFFD ；Buffer.concat 后解码 → 0 处
+    //   · 本地可复现（按 512~2048 字节人为切块）：512B → 50 处乱码、1000B → 23 处，Buffer.concat 恒 0
+    //     ⇒ api/*.js 已同步补 res.setEncoding('utf8')，从根上消除乱码
+    // 因此不再转义：飞书格子里直接是可读中文，体积同时缩小约 2.8 倍（同上限可容纳更完整报告）。
+    // toAscii 仅保留导出作排障工具，不再参与写入。
     function toAscii(s){
       return String(s).replace(/[\u0080-\uFFFF]/g, function(c){
         return '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0');
@@ -3967,14 +3975,14 @@ document.addEventListener('DOMContentLoaded', function(){
       return n;
     }
     function fit(det){
-      var s = toAscii(JSON.stringify(det));
+      var s = JSON.stringify(det);
       if(s.length <= RPT_MAX) return s;
       var d2;
       try{ d2 = JSON.parse(JSON.stringify(det)); }catch(e){ return ''; }
       var caps = [300, 200, 120, 80, 40, 20, 8, 0];
       for(var i=0;i<caps.length;i++){
         deepCap(d2, caps[i]);
-        s = toAscii(JSON.stringify(d2));
+        s = JSON.stringify(d2);
         if(s.length <= RPT_MAX){ log('快照超限 → 文本降级至 ' + caps[i] + ' 字（结构完整，仍可展开）'); return s; }
       }
       log('快照超限且降级无效（' + s.length + ' > ' + RPT_MAX + '）→ 本条不写云端报告，仅本机留档');

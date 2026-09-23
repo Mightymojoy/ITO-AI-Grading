@@ -60,6 +60,7 @@ function deepseekChat(messages){
       }
     }, (res) => {
       let data = '';
+      res.setEncoding('utf8');
       res.on('data', c => data += c);
       res.on('end', () => {
         try {
