@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.22';
+var V4_VERSION = 'v4.11.24';
 (function(){
   function paint(){
     ['pageBadge', 'brandVer', 'footVer'].forEach(function(id){
@@ -3715,4 +3715,382 @@ document.addEventListener('DOMContentLoaded', function(){
 
   var n = apply();
   LOG('历史评分 6 块明细补全已装载：接管 ' + n + '/3 个函数（HOLD=' + HOLD + ' 条，预算 ' + BUDGET + ' 字符）');
+})();
+
+// ---------- v4.11.23：主播名识别「白名单优先」 ----------
+// 背景（2026-09-23 实测）：文件名「2026-09-22-摩登-全程-PISTACHIO2.mkv」
+//   （命名约定 = 日期-直播间简称-主播-产品）→ 主播被识别成「摩登」（直播间简称），实际应为「全程」。
+// 根因：app-core.js:1505 的「直播修饰词」剥离正则里含「全程」，把主播名「全程」当"全程直播"剥离；
+//   剥完只剩「摩登」，而 v4.11.5 的清洗带 `cleaned !== sh` 守卫（恰好等于直播间简称时不剥离）→ 留在主播栏。
+// 同类缺陷（同一次实测发现）：
+//   「2026-09-20-轻熟-（杨光来）-TRUFFLE PRO BACKPACK+TRUFFLE TWO.mkv」→ host 空
+//   「2026-09-10-轻熟-曲姝锜-TRUFFLE PRO BACKPACK.mkv」→ host 空
+//   原因：产品名剥不干净残留「+」/英文，末尾 /^[一-龥]+$/ 校验失败 ⇒ host 不赋值。
+//   ⇒ 结论：「剥离法」本身脆弱（主播名撞词、符号残留），改为「白名单命中」优先。
+//
+// 白名单真源 = OUTFIT_STANDARD.hosts（设置页「主播 / 直播间」表的数据源，当前 21 位）
+//   ⇒ 新增/调整主播只改那份数据，本块无需改动。
+// 纯加法 monkey-patch：不改 app-core.js，只在 v4.11.5 之后再接管 window.autoDetectMeta。
+// 回退：设 window.__v4HostPatchOff = true 即整体失效（删掉本块亦可）。
+(function(){
+  try{
+    if(typeof window === 'undefined' || typeof window.autoDetectMeta !== 'function') return;
+
+    var prev = window.autoDetectMeta;
+    var DICT = null;
+
+    function buildDict(){
+      var d = [];
+      try{
+        var h = (typeof OUTFIT_STANDARD !== 'undefined' && OUTFIT_STANDARD && OUTFIT_STANDARD.hosts) || {};
+        for(var n in h){ if(n && n.length >= 2 && d.indexOf(n) < 0) d.push(n); }
+      }catch(e){}
+      try{
+        if(typeof V4_STAR_HOSTS !== 'undefined' && V4_STAR_HOSTS){
+          for(var i=0;i<V4_STAR_HOSTS.length;i++){
+            if(V4_STAR_HOSTS[i] && d.indexOf(V4_STAR_HOSTS[i]) < 0) d.push(V4_STAR_HOSTS[i]);
+          }
+        }
+      }catch(e){}
+      // 长名优先：避免「张天翊」被更短的名单项抢先命中
+      d.sort(function(a,b){ return b.length - a.length; });
+      return d;
+    }
+
+    // 独立段判据：词的前后都不是中文（命名约定里主播独占一段，如 `-全程-`、`（杨光来）`）
+    function segHit(base, w){
+      var esc = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return new RegExp('(?:^|[^\\u4e00-\\u9fa5])' + esc + '(?:[^\\u4e00-\\u9fa5]|$)').test(base);
+    }
+
+    window.autoDetectMeta = function(filename){
+      var meta = prev.call(this, filename) || {studio:'', host:'', date:''};
+      try{
+        if(window.__v4HostPatchOff) return meta;
+        if(!DICT || !DICT.length) DICT = buildDict();
+        var base = String(filename || '').replace(/\.[^.]*$/, '');
+        if(!base || !DICT.length) return meta;
+        // 只认「独立段」命中：主播名前后必须是非中文（命名约定里主播独占一段，如 -全程- / （杨光来））。
+        // 刻意不做「包含」兜底 —— 2026-09-23 实测：「2026-09-22-全程直播录屏.mkv」的"全程"会被
+        // 宽松包含误判成主播名（"全程直播"是修饰语，不是人名）。独立段判据天然排除该误伤。
+        var i, hit = '';
+        for(i=0;i<DICT.length;i++){ if(segHit(base, DICT[i])){ hit = DICT[i]; break; } }
+        if(hit && meta.host !== hit){
+          if(typeof console !== 'undefined'){
+            console.log('[v4.11.23] 主播白名单命中「' + hit + '」→ 覆盖原识别「' + (meta.host || '空') + '」｜' + filename);
+          }
+          meta.host = hit;
+        }
+      }catch(e){}
+      return meta;
+    };
+
+    if(typeof console !== 'undefined') console.log('[v4.11.23] autoDetectMeta 已再接管：已知主播名白名单优先');
+  }catch(e){ if(typeof console !== 'undefined') console.log('[v4.11.23] 识别接管跳过:', (e && e.message) || e); }
+})();
+
+// ---------- v4.11.24：完整主播报告云端共享（历史评分全员可见 + 详情云端回退） ----------
+// 背景（老大 2026-09-23 报障）：「我或其他人上传评分转译，拿到工作台链接的人都应能看到完整记录」。
+// 实测根因（见技能 grading-semantic-endpoint-troubleshoot 第 9 节）：
+//   完整记录只存本机 localStorage.grading_detail_v1（按 origin 隔离），飞书链路只回摘要
+//   ⇒ 换人 / 换机器 / 换入口后必然「只有摘要、展开为空」。
+// 方案（纯壳层加法，不改 app-core.js；飞书「完整主播报告」多行文本列由老大已加好）：
+//   ① 评分时把 v4DetailSnapshot() 产出的完整快照 JSON 注入 payload（r.v4Report）
+//      → 随既有 sync 链路写到飞书两张表的「完整主播报告」列
+//      ⚠️ 2026-09-23 实测发现并规避：飞书「多行文本」在字节边界会切断多字节中文 → U+FFFD 乱码
+//         （原始 JSON 14,717 字符写入后读回 +2 字符含 3 个 U+FFFD；22,026 字符版 +3 含 5 个）
+//         ⇒ 写入前统一转成纯 ASCII（中文 → \uXXXX 字面转义），纯 ASCII 无多字节边界可切
+//         实测 14.7K / 22K / 65K / 81.8K 四种规模：往返差 0、U+FFFD 0、JSON.parse 后中文完好
+//         读取侧无需改动（JSON.parse 自动还原）；官方单格上限 100,000 ⇒ 转义后余量约 2.9 倍
+//   ② 历史 tab 合并飞书「历史评分」表 → 全员评分记录可见（不再只有自己那几条）
+//   ③ 展开详情时本机无档 → 回退云端「完整主播报告」→ 完整报告可见
+// 回退：localStorage.setItem('v4rpt_enabled','0') + 刷新；诊断：V4RPT.debug()
+(function(){
+  try{
+    if(typeof window === 'undefined' || typeof document === 'undefined') return;
+    if(window.V4RPT && window.V4RPT.__installed) return;
+    try{ if(localStorage.getItem('v4rpt_enabled') === '0'){ console.log('[v4.11.24] 已被 v4rpt_enabled=0 关闭'); return; } }catch(e){}
+
+    var RPT_FIELD = '完整主播报告';
+    var RPT_MAX = 95000;                 // 官方单格上限 100,000 留余量；按 ASCII 转义后的长度计（中文膨胀约 2.7 倍）
+    var DET_MAP = Object.create(null);   // 'host|date' → det 对象（云端完整报告）
+    var IDX_MAP = Object.create(null);   // 'ts|host'   → date（供 v4DetailByTs 反查云端）
+    var CLOUD_ROWS = null;               // 云端摘要行（已归一化）
+    var LOADING = false, LOADED = false, FAILS = 0;
+    var refreshDone = false;
+    var PENDING = null;                  // ensureCloud 进行中的 Promise（防并发重取）
+    var _ar = null;                      // 见 ⑥ 段末尾赋值（原 v4ArchRender）
+    var TIP_ID = 'v4rpt-tip';
+
+    function log(m){ try{ console.log('[v4.11.24] ' + m); }catch(e){} }
+    function normDate(s){ try{ return (typeof v4NormDate === 'function') ? v4NormDate(s) : {m:'',d:''}; }catch(e){ return {m:'',d:''}; } }
+    function boxOf(){ return document.getElementById('v4arch-history'); }
+    function esc2(v){ try{ return (typeof esc === 'function') ? esc(v) : String(v == null ? '' : v); }catch(e){ return String(v == null ? '' : v); } }
+
+    // ---------- 写云端前的「纯 ASCII 化」（2026-09-23 实测规避飞书多行文本 U+FFFD 损坏） ----------
+    // 飞书「多行文本」在字节边界切断多字节中文 → 产生 U+FFFD 替换字符（实测 14,717 字符版必坏）
+    // 纯 ASCII 载荷没有多字节序列可被切断 ⇒ 转义后 14.7K/22K/65K/81.8K 四种规模均 100% 无损
+    // 读取侧零改动：JSON.parse 自动把 \uXXXX 还原成中文
+    function toAscii(s){
+      return String(s).replace(/[\u0080-\uFFFF]/g, function(c){
+        return '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0');
+      });
+    }
+    // 超限降级：只压「字符串长度」，绝不动结构（保证 JSON 始终可解析）
+    // ⚠️ 不能直接 s.slice(0, RPT_MAX)：会切出非法 JSON ⇒ 读取侧 JSON.parse 失败 ⇒ 整条明细白丢
+    function deepCap(o, cap){
+      var n = 0;
+      function walk(v){
+        if(!v || typeof v !== 'object') return;
+        if(Object.prototype.toString.call(v) === '[object Array]'){
+          for(var i=0;i<v.length;i++){
+            var x = v[i];
+            if(typeof x === 'string'){ if(x.length > cap){ v[i] = x.slice(0, cap); n++; } }
+            else walk(x);
+          }
+          return;
+        }
+        for(var k in v){
+          if(!Object.prototype.hasOwnProperty.call(v, k)) continue;
+          var y = v[k];
+          if(typeof y === 'string'){ if(y.length > cap){ v[k] = y.slice(0, cap); n++; } }
+          else walk(y);
+        }
+      }
+      walk(o);
+      return n;
+    }
+    function fit(det){
+      var s = toAscii(JSON.stringify(det));
+      if(s.length <= RPT_MAX) return s;
+      var d2;
+      try{ d2 = JSON.parse(JSON.stringify(det)); }catch(e){ return ''; }
+      var caps = [300, 200, 120, 80, 40, 20, 8, 0];
+      for(var i=0;i<caps.length;i++){
+        deepCap(d2, caps[i]);
+        s = toAscii(JSON.stringify(d2));
+        if(s.length <= RPT_MAX){ log('快照超限 → 文本降级至 ' + caps[i] + ' 字（结构完整，仍可展开）'); return s; }
+      }
+      log('快照超限且降级无效（' + s.length + ' > ' + RPT_MAX + '）→ 本条不写云端报告，仅本机留档');
+      return '';
+    }
+
+    // ================= ① 评分时生成完整快照 =================
+    function buildReport(r){
+      try{
+        if(!r || typeof r !== 'object') return '';
+        if(typeof r.total !== 'number' || !r.host || r.host === '未识别') return '';
+        if(typeof v4DetailSnapshot !== 'function') return '';
+        var det = v4DetailSnapshot(r, Date.now());
+        if(!det || !det.mods || !det.mods.length) return '';
+        return fit(det);
+      }catch(e){ log('快照生成异常: ' + ((e && e.message) || e)); return ''; }
+    }
+    function inject(r){
+      try{
+        if(!r || typeof r !== 'object' || r.v4Report) return;
+        var s = buildReport(r);
+        if(s){ r.v4Report = s; log('已为 ' + r.host + ' ' + r.date + ' 准备好完整报告 ' + s.length + ' 字符'); }
+      }catch(e){}
+    }
+
+    // ================= ② 挂到写飞书的两条既有链路上 =================
+    // 通路 A：autoFillFeishu(r) → V4Jobs.sync(r) → post(feishu-fill, {result:publicResult(r)})
+    //         publicResult 的 replacer 只剔除「__」前缀键 ⇒ v4Report 会保留 ⇒ 服务端可读到
+    // 通路 B：syncFeishuLibs(r) → V4Jobs.syncLibs(r) → buildFeishuLibPayload(r) → feishu-sync
+    //         该函数读原始 r（不经 publicResult）⇒ 直接可用
+    try{
+      if(typeof window.addHistoryRecord === 'function'){
+        var _ah = window.addHistoryRecord;
+        window.addHistoryRecord = function(r){ inject(r); return _ah.apply(this, arguments); };
+      }
+    }catch(e){}
+    try{
+      if(typeof window.autoFillFeishu === 'function'){
+        var _af = window.autoFillFeishu;
+        window.autoFillFeishu = function(r){ inject(r); return _af.apply(this, arguments); };
+      }
+    }catch(e){}
+    try{
+      if(window.V4Jobs && typeof window.V4Jobs.sync === 'function'){
+        var _js = window.V4Jobs.sync;
+        window.V4Jobs.sync = function(r){ inject(r); return _js.apply(this, arguments); };
+      }
+    }catch(e){}
+    try{
+      if(typeof window.buildFeishuLibPayload === 'function'){
+        var _bl = window.buildFeishuLibPayload;
+        window.buildFeishuLibPayload = function(r){
+          var p = _bl.apply(this, arguments);
+          try{ if(p && p.history && p.history.length && r && r.v4Report) p.history[0].report = r.v4Report; }catch(e){}
+          return p;
+        };
+      }
+    }catch(e){}
+
+    // ================= ③ 云端拉取（历史评分表） =================
+    function ensureCloud(){
+      if(LOADING) return PENDING || Promise.resolve(CLOUD_ROWS);
+      if(LOADED && CLOUD_ROWS && FAILS < 3) return Promise.resolve(CLOUD_ROWS);
+      if(typeof window.v4FsEnsure !== 'function') return Promise.resolve(null);
+      LOADING = true;
+      var p = window.v4FsEnsure('history').then(function(d){
+        var rows = (d && d.rows) || [];
+        var out = [];
+        for(var i=0;i<rows.length;i++){
+          var x = rows[i] || {};
+          var host = String(x['主播'] || '').trim();
+          if(!host) continue;
+          var nd = normDate(x['标准日期'] || x['日期'] || '');
+          var date = nd.d || String(x['日期'] || '');
+          if(!date) continue;
+          var rep = x[RPT_FIELD];
+          if(typeof rep === 'string' && rep.length > 20){
+            try{
+              var det = JSON.parse(rep);
+              if(det && det.mods && det.mods.length) DET_MAP[host + '|' + date] = det;
+            }catch(e){}
+          }
+          out.push({ host: host, date: date,
+            total: x['总分'] || x['历史总分(数值)'] || '—',
+            c1Score: x['c1产品理解'] || x['产品理解(数值)'] || '',
+            product: x['产品'] || '', grade: x['等级'] || '', _src: 'cloud' });
+        }
+        CLOUD_ROWS = out; LOADED = true; LOADING = false; FAILS = 0;
+        log('云端历史评分 ' + out.length + ' 条，其中含完整报告 ' + Object.keys(DET_MAP).length + ' 条');
+        return out;
+      })['catch'](function(e){
+        LOADING = false; FAILS++;
+        log('云端拉取失败（第 ' + FAILS + ' 次）: ' + ((e && e.message) || e));
+        return null;
+      });
+      PENDING = p;
+      return p;
+    }
+    // ================= ④ 历史列表合并（本机优先，云端补齐） =================
+    function mergeHistory(local){
+      var map = Object.create(null), order = [];
+      function keyOf(x){
+        if(!x || !x.host) return '';
+        var nd = normDate(x.date || '');
+        return String(x.host) + '|' + (nd.d || String(x.date || ''));
+      }
+      (local || []).forEach(function(x){ var k = keyOf(x); if(!k) return; if(!map[k]) order.push(k); map[k] = x; });
+      (CLOUD_ROWS || []).forEach(function(x){ var k = keyOf(x); if(!k) return; if(!map[k]){ order.push(k); map[k] = x; } });
+      var out = order.map(function(k){ return map[k]; });
+      out.forEach(function(x){
+        try{
+          // 云端行补「确定性 ts」：用于排序，也供 v4DetailByTs(ts, host) 反查该行日期
+          if(x._src === 'cloud' && x.ts == null && x.date){
+            var t = Date.parse(String(x.date).replace(/-/g, '/') + ' 12:00:00');
+            if(!isNaN(t)) x.ts = t;
+          }
+          if(x.ts != null) IDX_MAP[String(x.ts) + '|' + x.host] = x.date;
+        }catch(e){}
+      });
+      return out;
+    }
+
+    // ================= ⑤ 接管三个读取入口 =================
+    var _ad = window.v4ArchData;
+    if(typeof _ad === 'function'){
+      window.v4ArchData = function(type){
+        var out = _ad.apply(this, arguments);
+        if(type !== 'history') return out;
+        try{ return mergeHistory(out); }catch(e){ return out; }
+      };
+    }
+
+    var _db = window.v4DetailByTs;
+    if(typeof _db === 'function'){
+      window.v4DetailByTs = function(ts, host){
+        var d = null;
+        try{ d = _db.apply(this, arguments); }catch(e){}
+        if(d) return d;
+        try{
+          var date = IDX_MAP[String(ts) + '|' + host];
+          if(!date){                                      // 云端尚未拉回时，从本机摘要反查日期
+            var lib = v4ReadLS('grading_history_v1', '[]');
+            for(var i=0;i<lib.length;i++){
+              if(String(lib[i].ts) === String(ts) && lib[i].host === host){ date = lib[i].date; break; }
+            }
+          }
+          if(date && DET_MAP[host + '|' + date]) return DET_MAP[host + '|' + date];
+        }catch(e){}
+        return null;
+      };
+    }
+
+    // ================= ⑥ 历史 tab 渲染：先本机、再异步补云端 =================
+    function setTip(html, color){
+      try{
+        var box = boxOf(); if(!box) return;
+        var el = document.getElementById(TIP_ID);
+        if(!el){
+          el = document.createElement('div');
+          el.id = TIP_ID;
+          el.style.cssText = 'font-size:11.5px;margin:2px 0 6px;line-height:1.6';
+          box.insertBefore(el, box.firstChild);
+        }
+        el.style.color = color || 'var(--text3)';
+        el.innerHTML = html;
+      }catch(e){}
+    }
+    function captureExpanded(){
+      var ids = [];
+      try{
+        var box = boxOf(); if(!box) return ids;
+        var ns = box.querySelectorAll('.v4his-tg');
+        for(var i=0;i<ns.length;i++){ if(ns[i].checked && ns[i].id) ids.push(ns[i].id); }
+      }catch(e){}
+      return ids;
+    }
+    function restoreExpanded(ids){
+      if(!ids || !ids.length) return;
+      try{ ids.forEach(function(id){ var el = document.getElementById(id); if(el) el.checked = true; }); }catch(e){}
+    }
+    function scheduleCloudRefresh(args){
+      if(refreshDone) return;
+      refreshDone = true;
+      setTip('正在从飞书加载全员评分记录…');
+      var keep = captureExpanded();
+      ensureCloud().then(function(rows){
+        if(!rows || !rows.length){ setTip('飞书暂无全员记录，仅显示本机存档'); return; }
+        _ar.apply(window, args);
+        restoreExpanded(keep);
+        setTip('已合并飞书全员记录 <b>' + rows.length + '</b> 条 ｜ 含完整报告 <b>' + Object.keys(DET_MAP).length +
+               '</b> 条 · ' + new Date().toLocaleTimeString('zh-CN', { hour12: false }));
+      })['catch'](function(e){ setTip('飞书全员记录加载失败：' + esc2((e && e.message) || e), 'var(--danger)'); });
+    }
+    var _ar = window.v4ArchRender;        // 原 v4ArchRender（异步补云端后重渲染用；必须在 scheduleCloudRefresh 之前赋值）
+    if(typeof _ar === 'function'){
+      window.v4ArchRender = function(type){
+        var args = arguments;
+        var ret = _ar.apply(this, args);
+        try{ if(type === 'history') scheduleCloudRefresh(args); }catch(e){}
+        return ret;
+      };
+    }
+
+    // ================= ⑦ 诊断 / 回退 =================
+    window.V4RPT = {
+      __installed: true,
+      build: buildReport,
+      toAscii: toAscii,
+      fit: fit,
+      RPT_MAX: RPT_MAX,
+      ensureCloud: ensureCloud,
+      refresh: function(){ refreshDone = false; if(boxOf()) scheduleCloudRefresh(['history']); },
+      debug: function(){
+        var o = { enabled: true, loaded: LOADED, fails: FAILS,
+                  cloudRows: (CLOUD_ROWS || []).length,
+                  cloudReports: Object.keys(DET_MAP).length,
+                  sampleKeys: Object.keys(DET_MAP).slice(0, 8) };
+        try{ console.log('[v4.11.24] debug', o); }catch(e){}
+        return o;
+      },
+      off: function(){ try{ localStorage.setItem('v4rpt_enabled', '0'); }catch(e){} return 'v4rpt_enabled=0 已写入，刷新页面即回退'; }
+    };
+    log('完整主播报告云端共享已装载 → 写入字段「' + RPT_FIELD + '」｜历史 tab 合并飞书全员 + 详情云端回退');
+  }catch(e){ if(typeof console !== 'undefined') console.log('[v4.11.24] 装载跳过:', (e && e.message) || e); }
 })();

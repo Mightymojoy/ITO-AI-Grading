@@ -147,6 +147,10 @@ async function upsertHistory(token, tableId, h){
     '产品': h.product||'', '总分': h.total!=null?String(h.total):'', '等级': h.grade||'',
     'c1产品理解': h.c1!=null?String(h.c1):''
   };
+  // v4.11.24：完整主播报告（多行文本，官方单格上限 100,000 → 留余量截 95,000）
+  // 由前端 v4.11.24 块把 v4DetailSnapshot() 压缩快照挂到 r.v4Report 传出（实测 11,539 字符原样往返）。
+  // 效果：任一拿到工作台链接的人展开历史记录都能看到完整报告，不再只有摘要。
+  if(h.report) fields['完整主播报告'] = String(h.report).slice(0, 95000);
   const r = await createRecord(token, tableId, fields);
   if(r.code !== 0) return {ok:false, reason:'写入失败: '+(r.msg||'')+' code='+r.code};
   return {ok:true, recordId: r.data && r.data.record ? r.data.record.record_id : '', removed};

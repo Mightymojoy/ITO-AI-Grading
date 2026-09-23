@@ -19,7 +19,10 @@ const { exec } = require('child_process');
 // 本服务新增 /api/feishu-fill、/api/feishu-week-month、/api/feishu-sync 三条 POST 代理，
 // 原样转发到云端 Vercel 函数（飞书凭据所在），页面请求与响应均同源，免跨域。
 const CLOUD_HOST = 'ito-ai-grading.vercel.app';
-const PROXY_PATHS = ['/api/feishu-fill', '/api/feishu-week-month', '/api/feishu-sync'];
+// v4.11.24：加入 /api/feishu-read —— 本地 8791 原先读不到飞书「历史评分」表（无此代理），
+//   导致工作台历史 tab 只能看本机 localStorage（同事/换机后为空）。
+//   加上后本机与线上同源走云端读取，历史 tab 可合并飞书全员记录 + 展开云端完整报告。
+const PROXY_PATHS = ['/api/feishu-fill', '/api/feishu-week-month', '/api/feishu-sync', '/api/feishu-read'];
 
 // ---- v4.11.14：本地无 Key → 语义判定透传云端（同源代理，Key 留在服务端） ----
 // 背景：交付包刻意不含 sem_key_local.txt（防 Key 外泄），于是同事端本地判定必然返回
@@ -175,6 +178,7 @@ server.listen(PORT, BIND, () => {
   lines.push('  判定接口   : ' + BASE_URL + '/semantic-judge（与页面同源，免跨域' +
     (hasKey ? '・本机直连' : SEM_CLOUD_FALLBACK ? '・转发云端' : '') + '）');
   lines.push('  飞书写回   : /api/feishu-fill｜feishu-week-month｜feishu-sync → 云端代理（同源接管，无需 3712）');
+  lines.push('  飞书读取   : /api/feishu-read → 云端代理（v4.11.24 新增：历史 tab 可见全员记录 + 完整报告）');
   lines.push('  评分公式   : level × quality × 20（不动）；语义只覆写"判卷依据"');
   lines.push('  DeepSeek   : ' + (hasKey ? 'Key 已注入 ✓ 语义判定可用（本机直连）'
     : SEM_CLOUD_FALLBACK ? 'Key 未配置 → 语义判定走云端兜底 ✓（' + CLOUD_HOST + '）'

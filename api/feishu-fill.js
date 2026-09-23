@@ -171,6 +171,10 @@ module.exports = async function handler(req, res){
     if(golden) baseFields['黄金话术'] = golden;
     if(bad) baseFields['违规话术'] = bad;
     if(advice) baseFields['改善建议'] = advice;
+    // v4.11.24：完整主播报告（多行文本，官方单格上限 100,000 → 留余量截 95,000）
+    // 前端 v4.11.24 块将 v4DetailSnapshot() 压缩快照挂到 result.v4Report 传出。
+    // ⚠️ 仅在非空时写入：PUT 是部分更新，缺键不会清空既有报告（重评时若无快照则保留旧值）。
+    if(r.v4Report) baseFields['完整主播报告'] = String(r.v4Report).slice(0, 95000);
 
     // 匹配不到 → 自动创建记录（评分结果自动写入飞书的完整闭环）
     if(!rec){
