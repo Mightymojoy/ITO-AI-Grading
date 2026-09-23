@@ -12,8 +12,14 @@
  * ⚠️ 已知边界（如实标注，不掩盖）：
  *   · 字面扫描**抓不到**"意思违规但用词自由"的表达（实测业务侧错误话术召回仅 4%，
  *     已有 C 违规词组也只命中 2/5：C2/C3 拉踩、C4 保价全漏）⇒ 必须与语义通道并用。
- *   · Sheet1 第 6/7/8 类（政治敏感／拉踩／侮辱用户）**表中原文本就没有字面词**，
+ *   · Sheet1 第 6/7/8/9 类（政治敏感／拉踩／侮辱用户／虚假承诺）**表中原文本就没有字面词**，
  *     本扫描器对其返回 `semanticOnly`，由语义通道负责，不硬编码词表。
+ *
+ * v1.1.0（2026-09-23）—— **唯一改动**：S1 命中原子补透 `tier` / `mod` / `point` 三个字段。
+ *     起因：规则库 v2.0.0 按新版表把 S1 拆成「一级→SESSION_ZERO / 二级→MODULE_ZERO」，
+ *     而旧扫描器只对 S2 透传 `mod` ⇒ S1 的二级条目 `mod` 恒 undefined，
+ *     `summarize()` 里 `if(x.mod && ...)` 收集不到模块号 ⇒ 二级形同不判。
+ *     本次**未动任何判定逻辑**（GUARD/EXEMPT/summarize 全未改），只是让字段能传下去。
  *
  * 两层安全阀：
  *   1) EXEMPT（整场级、逐词）—— 词条落在"业务事实陈述"语境即整词豁免
@@ -33,7 +39,7 @@
 (function(root){
   'use strict';
 
-  var _v = '1.0.3';
+  var _v = '1.1.0';
 
   function getRules(){
     if(root && root.V4ViolationRules) return root.V4ViolationRules;
@@ -137,6 +143,7 @@
             continue;
           }
           out.push({ src:'S1', group:cat.cat, catId:cat.id, term:t, action:cat.action,
+                     tier:cat.tier, mod:cat.mod, point:cat.point,
                      quote: window_(raw, m), at:m.index });
           if(m.index === re.lastIndex) re.lastIndex++;
         }
