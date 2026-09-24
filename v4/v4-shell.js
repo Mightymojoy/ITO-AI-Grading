@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.29';
+var V4_VERSION = 'v4.11.30';
 (function(){
   function paint(){
     ['pageBadge', 'brandVer', 'footVer'].forEach(function(id){
@@ -4264,4 +4264,140 @@ document.addEventListener('DOMContentLoaded', function(){
     };
     log('完整主播报告云端共享已装载 → 写入字段「' + RPT_FIELD + '」｜历史 tab 合并飞书全员 + 详情云端回退');
   }catch(e){ if(typeof console !== 'undefined') console.log('[v4.11.24] 装载跳过:', (e && e.message) || e); }
+})();
+
+// ---------- v4.11.30：历史评分补「平台红线判罚」（与每日报告同形态） ----------
+// 背景（2026-09-24 老大报障）：每日评分能看到红线横幅，**历史评分展开后看不到**。
+// 根因（已实测）：v4DetailSnapshot() 返回的是**白名单字段**对象，r.__redline 在存档那一步被丢掉
+//                ⇒ grading_detail_v1 / 飞书「完整主播报告」里从来没有红线数据（自检：含 __redline = false）。
+// 时序已排除嫌疑：workflow.js evaluate() 内 `await v4Evaluate(...)`（**内部已 redlineApply**）
+//                → 之后才 commit() → addHistoryRecord() → v4DetailSave() → v4DetailSnapshot()
+//                ⇒ 存档时刻 r.__redline **已存在**，只需把字段挑出来，**不必二次写入**。
+// 修法（照抄 v4.11.22「6 块明细」成熟范式，全在壳层，app-core.js 一个字不动）：
+//   ① 包装 v4DetailSnapshot → det.redline（压缩版）+ det.redlineV（版本标记）
+//   ② 包装 v4DetailHTML     → 在返回 HTML **最前面** prepend 红线块（与每日横幅同配色、同样置顶）
+//   ③ 云端自动跟随：飞书「完整主播报告」的 JSON 就是 v4DetailSnapshot 的产物（:3998），
+//      fit() 只压字符串长度、不动结构；读取侧 JSON.parse 原样还原 ⇒ 服务端无需改动。
+//   ④ 字段名必须是 redline，**不能叫 __redline** —— publicResult 的 replacer 会剔除以 __ 开头的键
+//      （workflow.js:97），叫 __redline 会写不进飞书。
+// 限制（如实登记，不粉饰）：
+//   · **存量记录无法回填**（从没存过该字段）⇒ 只对**新评分**生效，与 v4.11.24「完整报告」同性质；
+//   · `#/vision`「一键完整日报」通道内部裸调 runGrading、不走 redlineApply ⇒ 该通道的评分历史里同样没有红线。
+// 回退：localStorage 置 v4rl_hist_enabled='0'（或调 V4RLH.off()）后刷新页面即恢复原状。
+(function(){
+  var LOG = function(m){ try{ console.log('[v4.11.30] ' + m); }catch(e){} };
+  var LS_OFF = 'v4rl_hist_enabled';
+  var QMAX = 120;      // 存档里原句截断长度（防膨胀）
+  var RMAX = 20;       // 存档里命中组数上限
+  var SHOWQ = 90;      // 渲染时原句截断（与每日横幅一致）
+  var STATS = { snap: 0, html: 0, clean: 0, legacy: 0, err: '' };
+
+  function isOff(){ try{ return localStorage.getItem(LS_OFF) === '0'; }catch(e){ return false; } }
+  function E(v){ try{ return (typeof esc === 'function') ? esc(v) : String(v == null ? '' : v); }catch(e){ return String(v == null ? '' : v); } }
+
+  // ① 压缩 r.__redline → 存档用（只留展示必需字段；不命中则返回 null）
+  function pick(r){
+    var rel = r && r.__redline;
+    if(!rel) return null;
+    var sess = !!rel.sessionZero, modz = !!rel.moduleZero;
+    if(!sess && !modz) return null;
+    var rs = rel.reasons || [], out = [];
+    for(var i=0; i<rs.length && i<RMAX; i++){
+      var x = rs[i] || {};
+      out.push({
+        cat:    String(x.cat    || ''),
+        term:   String(x.term   || ''),
+        src:    String(x.src    || ''),
+        action: String(x.action || ''),
+        ts:     String(x.ts     || ''),
+        quote:  String(x.quote  || '').slice(0, QMAX)
+      });
+    }
+    return { sessionZero: sess, moduleZero: modz, n: rs.length, reasons: out };
+  }
+
+  // ② 渲染块 —— 行内样式/配色/措辞与 v4-shell.js:1569 redlineBanner 逐项对齐
+  //    注意：**不用 id**（历史列表可能同时展开多条，用 id 会重复）⇒ 统一走 class .v4rl-his
+  function html(rel){
+    if(!rel || (!rel.sessionZero && !rel.moduleZero)) return '';
+    var sess = !!rel.sessionZero;
+    var acc  = sess ? '#b0524c' : '#c9a962';
+    var h = '<div class="v4rl-his" style="border:1px solid ' + acc + ';border-left:4px solid ' + acc
+      + ';background:' + (sess ? '#fbf3f2' : '#fbf8ef')
+      + ';border-radius:8px;padding:12px 14px;margin:0 0 10px;font-size:13px;line-height:1.7">'
+      + '<div style="font-weight:600;color:' + acc + ';margin-bottom:6px">'
+      + (sess ? '⚠️ 命中平台红线 —— 本场总分按 0 计' : '⚠️ 命中平台红线 —— 对应能力模块按 0 计') + '</div>'
+      + '<div style="color:#5c564e">';
+    var rs = rel.reasons || [];
+    for(var i=0;i<rs.length;i++){
+      var x = rs[i] || {};
+      h += '<div>· <b>' + E(x.cat) + '</b>'
+        + (x.term ? '　触发词「<b>' + E(x.term) + '</b>」' : '')
+        + '　<span style="color:#8b857c">[' + E(x.src) + '（'
+        + (x.action === 'MODULE_ZERO' ? '模块归0' : '整场归0') + '）]</span>'
+        + (x.ts ? ' <span style="color:#8b857c">' + E(x.ts) + '</span>' : '')
+        + (x.quote ? '<div style="color:#8b857c;font-size:12px;margin-left:12px">「' + E(String(x.quote).slice(0, SHOWQ)) + '」</div>' : '')
+        + '</div>';
+    }
+    if((rel.n || 0) > rs.length) h += '<div>· …另有 ' + ((rel.n || 0) - rs.length) + ' 组命中</div>';
+    h += '</div>';
+    if(sess) h += '<div style="color:#8b857c;font-size:12px;margin-top:6px">模块明细仅供参考复盘，不计入总分。依据《抖音直播客观违规规则》。</div>';
+    h += '</div>';
+    return h;
+  }
+
+  // 早于 v4.11.30 的记录：存档里没有 redlineV 标记 ⇒ 给一行灰字说明，免得以为又坏了
+  function legacyHint(){
+    return '<div class="v4his-none" style="margin:0 0 8px">该记录产生于 v4.11.30 之前，未沉淀红线判罚数据；重新评分一次即可看到（与每日报告同款横幅）</div>';
+  }
+
+  /* ---------- ③ 接管两个顶层函数（壳层包装；调用点是运行时查找 ⇒ patch 生效） ---------- */
+  function apply(){
+    var ok = 0;
+    if(typeof v4DetailSnapshot === 'function'){
+      var _snap = v4DetailSnapshot;
+      v4DetailSnapshot = function(r, ts){
+        var det = _snap.apply(this, arguments);
+        try{
+          if(!isOff() && det && r){
+            var rl = pick(r);
+            if(rl){ det.redline = rl; STATS.snap++; }
+            else   { STATS.clean++; }
+            det.redlineV = '4.11.30';     // 标记「这一版能沉淀红线」——用于区分新旧记录
+          }
+        }catch(e1){ STATS.err = 'snap:' + ((e1 && e1.message) || e1); LOG('红线快照异常：' + STATS.err); }
+        return det;
+      };
+      ok++;
+    }
+    if(typeof v4DetailHTML === 'function'){
+      var _html = v4DetailHTML;
+      v4DetailHTML = function(det){
+        var h = _html.apply(this, arguments);
+        try{
+          if(!isOff() && det){
+            // v4.11.22 的 wrapper 把 6 块明细**追加在尾**；本块包在它外层 ⇒ prepend 才能真正置顶
+            if(det.redline){ h = html(det.redline) + h; STATS.html++; }
+            else if(!det.redlineV){ STATS.legacy++; h = legacyHint() + h; }
+          }
+        }catch(e2){ STATS.err = 'html:' + ((e2 && e2.message) || e2); LOG('红线渲染异常：' + STATS.err); }
+        return h;
+      };
+      ok++;
+    }
+    return ok;
+  }
+
+  window.V4RLH = {
+    swap: apply,
+    on:     function(){ try{ localStorage.removeItem(LS_OFF); }catch(e){} return 'on'; },
+    off:    function(){ try{ localStorage.setItem(LS_OFF, '0'); }catch(e){} return 'off'; },
+    offQ:   isOff,
+    pick:   pick,
+    render: html,
+    debug:  function(){ return JSON.parse(JSON.stringify(STATS)); }
+  };
+
+  var n = apply();
+  LOG('历史评分红线判罚已装载：接管 ' + n + '/2 个函数（存档原句截 ' + QMAX + ' 字 · 命中组上限 ' + RMAX + '）');
 })();
