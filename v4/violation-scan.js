@@ -21,6 +21,13 @@
  *     `summarize()` 里 `if(x.mod && ...)` 收集不到模块号 ⇒ 二级形同不判。
  *     本次**未动任何判定逻辑**（GUARD/EXEMPT/summarize 全未改），只是让字段能传下去。
  *
+ * v1.2.0（2026-09-30）—— **唯一改动**：命中原子补透 `code`（规则编号，如 `S1-04` / `S2-023`）。
+ *     起因：业务侧要求「给于编号，让评判的结果有依可寻」⇒ 规则库 v3.0.0 给每条规则加了稳定编号，
+ *     需要一路带到判罚明细与报告横幅（「[S1-04] 极限词表达 触发词「行业第一」」）。
+ *     **判定逻辑仍一行未动**（GUARD / EXEMPT / summarize / 处置分级全未改）；`code` 缺省为空串，
+ *     老规则库（无 `id`）下表现为不显示编号，不会报错。
+ *     ⚠️ v3.0.0 起规则库**不再有 `tier` 字段**（全表取消分级），`h.tier` 恒 undefined 属预期。
+ *
  * 两层安全阀：
  *   1) EXEMPT（整场级、逐词）—— 词条落在"业务事实陈述"语境即整词豁免
  *   2) GUARD （紧邻窗口、逐命中，v1.0.2 起；v1.0.3 扩到 11 条）——
@@ -39,7 +46,7 @@
 (function(root){
   'use strict';
 
-  var _v = '1.1.0';
+  var _v = '1.2.0';
 
   function getRules(){
     if(root && root.V4ViolationRules) return root.V4ViolationRules;
@@ -142,7 +149,7 @@
             if(m.index === re.lastIndex) re.lastIndex++;   // 防零宽死循环
             continue;
           }
-          out.push({ src:'S1', group:cat.cat, catId:cat.id, term:t, action:cat.action,
+          out.push({ src:'S1', group:cat.cat, catId:cat.id, code:cat.id, term:t, action:cat.action,
                      tier:cat.tier, mod:cat.mod, point:cat.point,
                      quote: window_(raw, m), at:m.index });
           if(m.index === re.lastIndex) re.lastIndex++;
@@ -162,7 +169,7 @@
           if(m2.index === re2.lastIndex) re2.lastIndex++;
           continue;
         }
-        out.push({ src:'S2', group:it.cat, catId:'s2-r'+it.row, term:it.term, level:it.level,
+        out.push({ src:'S2', group:it.cat, catId:'s2-r'+it.row, code:it.id, term:it.term, level:it.level,
                    action:it.action, mod:it.mod, point:it.point,
                    quote: window_(raw, m2), at:m2.index });
         if(m2.index === re2.lastIndex) re2.lastIndex++;

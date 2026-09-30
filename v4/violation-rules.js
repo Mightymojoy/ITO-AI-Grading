@@ -1,422 +1,285 @@
 /* ============================================================
- * v4/violation-rules.js —— 直播平台红线规则库（v2.1.0）
+ * v4/violation-rules.js —— 直播平台红线规则库（v3.0.0）
  *
- * 来源：抖音直播客观违规规则.xlsx（逐字提取，未发明任何词条）
- *    Sheet1「ITO箱包直播违规表达」 八类 —— B1 原文「提到就触发客观0分违规」
- *    Sheet2「平台通用违规高风险词库」170 条 / 11 类
+ * 来源：**《抖音直播客观违规规则V3版.xlsx》**（2026-09-30 老大提供）——逐字提取，未发明任何词条。
+ *    · Sheet1「ITO箱包直播违规表达」      9 类  → 编号 S1-01 .. S1-09
+ *    · Sheet2「平台通用违规高风险词库」 170 条 → 编号 S2-001 .. S2-170
  *
- * 处置口径（2026-09-17 业务侧拍板）：
- *    SESSION_ZERO = 命中即该场**总分归 0**
- *    MODULE_ZERO  = 命中即**对应能力模块归 0**
- *    （模块权重 25/20/20/15/20/0/0/0 ⇒ 映射到 6/7/8 的条目不改变总分，属已知空转）
+ * 业务侧 2026-09-30 三点拍板（本版全部据此执行）：
+ *   ① 「没写的可以一律删除」  ⇒ V3 表为**完整清单**。表内找不到的上一版词条**一律不再判定**，
+ *      逐条登记在 `REMOVED_IN_V3`（**未静默删除**，共 54 条），便于业务侧复核与随时恢复。
+ *   ② 「这个是判罚标准」      ⇒ **全表取消分级**。Sheet1 原来的「一级0容忍/二级擦边」与 Sheet2 原来的
+ *      「高/中高」全部作废：**命中任意一条 ⇒ 本场总分归 0**（SESSION_ZERO）。
+ *      ⇒ Sheet2 由「47 条整场0 + 123 条模块0」变为 **170 条全部整场0**；`mod` 一律 null，
+ *        `MODULE_ZERO` 在本版**不再产生**（`moduleZero` 恒 false 属预期，不是 bug）。
+ *   ③ 「给于编号，让评判的结果有依可寻」⇒ 每条规则带稳定编号 `id`（S1-xx / S2-xxx），
+ *      判罚明细 `reasons[].id` 一路带到报告横幅；同时登记 `tblRow`（源表行号）便于回表核对。
+ *      例：横幅显示「[S1-04] 极限词表达 触发词「行业第一」」。
  *
- * v1.0.1（2026-09-17 业务侧拍板「A」）：新增 GUARD —— 8 个"词根级"条目加**宣传/诱导语境必配**。
- *    依据：真实 4 小时逐字稿实测，这 8 个词根造成 112 次命中、真阳性 0，不加约束则**每场必 0 分**。
- *    **条目一条未删**；`redline_strict='1'` 可一键回退原口径。
+ * 与上一版（v2.1.0）的**唯一差异**就是上面这三条；GUARD / EXEMPT 两个安全阀**逐字未动**。
+ *   · GUARD/EXEMPT 是**判定精度**约束（如"行业第一"必须 4 字连写、"完全"不含口语搭配），
+ *     不是"分级"，也不改变处置等级 ⇒ 本次保留，与「取消分级」不冲突。
+ *   · Sheet1 第 4 类（极限词）表内自述「只有同时出现四个字或以上字数才能触发违规」⇒ 本类不含 2~3 字裸词。
  *
- * v1.0.2（2026-09-17 业务侧二次拍板）—— GUARD 由"±30 字窗口"**收紧为紧邻窗口**：
- *    原话「行业第一，必须是 4 个字都说了才判断违规；如果只讲到'第一'、或是'行业'等，不归纳到违规中」。
- *    ⚠️ 注意分工：`行业第一/中国第一/全球领先第一品牌` 本就是 **S1-4 表内逐字的独立条目**（裸匹配即命中），
- *       `全网/全球/世界/行业/全国/宇宙第一` 与 `销量/市占率/回购率第一` 同样是 **S2 R16-21 / R132-135 的独立条目**；
- *       GUARD 只负责 **S2 R10 那条孤立的裸「第一」** —— 替它补上"必须与宣传名词连写"的判据。
- *       收紧前：同段出现"行业第一"后，其后 30 字内的「第一个/第一点」会被**连带判违规**（证据清单串味）。
+ * ⚠️ 已知边界（如实登记，不粉饰）：
+ *   · Sheet1 第 6/7/8/9 类（政治敏感／拉踩／侮辱用户／虚假承诺）表内**没有可枚举字面词**
+ *     ⇒ `semantic:true`，交语义通道；字面扫描器对其返回 semanticOnly。
+ *     🔴 09-24 为拉踩加的「6 个竞品名 + 14 条他方没有锚点」已按「表外一律删除」移除 ⇒ **拉踩字面召回回到 0**。
+ *   · 「评论 / 关注 / 点赞」按表内裸列字面判定（老大 09-24 口径A），中文多义误伤如实登记、未擅自豁免。
+ *   · `#/vision`「一键完整日报」通道内部裸调 runGrading、不走 redlineApply ⇒ 该通道不判红线（既有结构性盲区）。
  *
- * v1.0.3（2026-09-17 业务侧三次拍板「B：诱导互动类也加语境必配」）——
- *    ① Sheet1 第5类另 3 个裸词条 `点关注` / `评论区评论` / `行李牌字母` 一并加语境必配
- *       （依据表原文 B6「引导直播间点关注，赠送XXX…等**诱导评论点关注**的话术」⇒ 违规在"诱导"）；
- *    ② **修正 `完全` 的语境白名单**：移出 `没问题|放心|可以放心`（口语，非宣传语境）——
- *       59 份真实逐字稿 / 105.7 万字实测该词 468 次命中，移出前它单独导致约 20 份场次整场归 0；
- *    ③ 补 `百分百` 豁免（与已豁免的 `100%` 同指，24 处全是"百分百全新的PC材料"）；
- *    ④ 补 `最好` 豁免 `卖最好|卖最多`（ASR 少"得"字，7 处漏豁免）。
- *    **为什么必须做这套实测**：初版口径下 53 份真实场次有 30 份（56.6%）会整场归 0 —— 那样红线
- *    功能等于把整场评分统一压成 0，8 能力维度失去区分度。判据收窄后见 assets/viol_allscan_*.txt。
- *
- * v2.0.0（2026-09-23，业务侧拍板「一级归0 + 二级归模块0」）—— 依据新版《抖音直播客观违规规则(0923更新).xlsx》：
- *    ① **Sheet2 170 条 = 逐条对拍零变化**（新增 0 / 删除 0 / 分类等级 0 / 行号全同）⇒ 本文件 S2 一字节未动。
- *    ② Sheet1 **8 类 → 9 类**，新增 R10「虚假承诺」（一级；表内明写"没有擦边的任何可能性"⇒无二级）。
- *    ③ Sheet1 **引入「一级违规（0容忍）/ 二级违规（擦边话术）」分级**，全表重写：
- *       一级 → SESSION_ZERO（整场归 0）；二级 → MODULE_ZERO（对应模块归 0）。
- *       为此把原「类别一条」拆成「同类目 × 一级/二级两条」，**壳层 v4-shell.js 与扫描器判定逻辑未变**。
- *    ④ R5 表内首次写明「**违规词定义：只有同时出现四个字或以上字数才能触发违规**」——
- *       与业务侧 09-17 原话一致；本版仅登记，**未据此清理其余 2~3 字裸词**（属口径变更，待拍板）。
- *    ⑤ 表内已删除的上一版条目 → `DELETED_FROM_NEW_TABLE`（登记在案，未静默删除）。
- *
- * v2.1.0（2026-09-24，业务侧拍板「口径A：**提到就判 0**」）—— 只动 R6，其余类别一字节未改：
- *    ① 移除 R6 的 **6 条「须利益诱导」语境约束**（`公屏`/`打在公屏上`/`评论`/`评论区评论`/`点赞`/`点关注`）
- *       ⇒ 表内裸列词一律按**字面直接判**（一级 → 整场归 0）。
- *    ② **补入 `关注` 词条**——老大原话是「关注」，而旧词条只有 `点关注`：
- *       实测漏判真违规（张天翊 09-15 摩登场 13 次「关注我们直播间会有一个5元优惠券」，因不含"点"字零命中）。
- *    ③ 保留 `赠送`（表原文「做XXX就赠XXX（**有条件加赠**违规）」，表本身要求"有条件"，老大未点名）
- *       与 `告诉主播`（R6 二级，老大未点名；实测裸判与否影响 29→29 场，为 0）。
- *    实测代价（48 份真实逐字稿 / 21.3 MB）：整场归 0 **17/48 (35.4%) → 29/48 (60.4%)**。
- *    两处中文多义误伤（`评论`/`关注` 共 3 场）已在 GUARD 区注释中逐条登记，**未擅自豁免**。
- *    回退：`redline_strict='1'` 仍可切回纯字面条目口径；恢复旧约束的判据原文留档于 GUARD 区注释。
- *
- * ⚠️ 本文件不含政治敏感类具体词表（Sheet1 第6类）、拉踩（第7类）、侮辱类（第8类）与虚假承诺（第9类）：
- *    这四类表内没有"话术字面词"（判的是性质/真假，不是用词），硬编码会失真且误伤 ⇒ 交语义通道判定。
- *    ⚠️ 新版表 R7 出现了可枚举国别锚点（日本/韩国/美国/日韩）、R9 二级出现「提示场控处理一下用户」——
- *       本版**刻意未采纳**为字面词条（讲产地/竞品国别/正常叫场控会大面积误伤），已在代码内逐条注明。
- *    🔴 v2.1.0 补充实测（拉踩第7类）—— **结论是"不能靠改语义判据"**：
- *       现行语义 n3 片段级召回仅 2/14 (14.3%)、整场层 12/48 (25.0%)（且多为真阳性）；
- *       把判据改宽 → 47/48 (97.9%)、收窄版 → 39/48 (81.3%)，**两条路都会让红线功能失效**。
- *       ⇒ 最终**不动 `semantic-core.js`**，改走确定性字面锚点（见 R8 条目内注释）。
- *       实测脚本：`_n3_recall_test.js` / `_n3_impact.js` / `_n3_impact2.js` / `_scan_lacai_literal.js`。
+ * 回退：localStorage `redline_enabled='0'` 关闭整条红线；`redline_strict='1'` 忽略 GUARD（纯字面）。
  * ============================================================ */
 (function(root){
   'use strict';
-  var _v = '2.1.0';
+  var _v = '3.0.0';
+  var _src = '抖音直播客观违规规则V3版.xlsx';
 
-  // ---- Sheet1：ITO 自有红线九类（v2.0.0：引入「一级/二级」分级）----
-  //   处置映射（业务侧 2026-09-23 拍板「一级归0 + 二级归模块0」）：
-  //     一级违规（0容忍）  → SESSION_ZERO：本场**总分归 0**（模块明细保留，仅供复盘）
-  //     二级违规（擦边话术）→ MODULE_ZERO ：对应能力模块**归 0**，随后重算总分
-  //   ⚠️ 已知空转（如实标注，不掩盖）：模块权重 c1..c5 = 25/20/20/15/20、**c6/c7/c8 = 0**
-  //      ⇒ 二级条目若映射到 c6/c7/c8，只落明细与横幅，**不改变总分**。
-  //      本版命中者：`1 保价承诺·二级`(mod8 价格类，沿用 S2「价格/优惠宣传」惯例)、
-  //                  `5 诱导互动·二级`(mod8 转化引导)。
-  //      若业务侧要求二级必须真扣分，这两条的 mod 需改指到计分模块（c1 或 c5），属口径变更，待拍板。
-  //   词条来源（代码里不可见，在此登记）：[表] = 新版表逐字；[沿用] = 上一版保留。
-  //   新版表已不再列出的上一版条目 → 见 DELETED_FROM_NEW_TABLE（**未静默删除**）。
-  //   ⚠️ 本版**未新增任何 GUARD**（除逐字沿用者）——按「先实测、再收窄」纪律，
-  //      先以纯字面跑全语料普查，据证据再决定给哪些短词加语境约束。
   var S1 = [
-    // ---- R2 保价承诺话术 ----
-    { id: 's1-1-1', cat: '1 保价承诺·一级(0容忍)', tier: 1, action: 'SESSION_ZERO', mod: null, point: null, semantic: false,
-      terms: ['全年保价', '全年不打折', '不降价', '保价'] },
-    { id: 's1-1-2', cat: '1 保价承诺·二级(擦边)', tier: 2, action: 'MODULE_ZERO', mod: 8, point: '8.2', semantic: false,
-      terms: ['价格统一', '全渠道统一', '统一价格', '保证价格', '价格保证'] },
+    // S1-01  ｜ 源表 R2「保价承诺话术」
+    //   B 列逐字。表内 C 列另有裸词「统一/打折/降价」——过于宽泛（“统一”是常用词），未采纳为字面词条，如实登记
+    { id: 'S1-01', tblRow: 2, cat: '保价承诺话术', action: 'SESSION_ZERO', mod: null, point: null,
+      terms: [
+        '保价', '全年保价', '全年不打折', '不降价', '价格统一', '全渠道统一', '统一价格', '保证价格', '价格保证',
+      ] },
 
-    // ---- R3 物流时效违规承诺 ----
-    { id: 's1-2-1', cat: '2 物流时效·一级(0容忍)', tier: 1, action: 'SESSION_ZERO', mod: null, point: null, semantic: false,
-      terms: ['18点前截单发', '江浙沪周边明天到', '今天加急发', '今天拍今天发', '今天上午拍下午发货', '今天加急发出', '今天发', '下午发'] },
-    { id: 's1-2-2', cat: '2 物流时效·二级(擦边)', tier: 2, action: 'MODULE_ZERO', mod: 1, point: '1.1', semantic: false,
-      terms: ['今天拍明天发', '全国都次日达', '今天拍明天一定到', '明天发', '次日达', '两天到'] },
+    // S1-02  ｜ 源表 R3「物流时效违规承诺」
+    //   B 列逐字 + C 列「截单发/明天到」。B 列「明天发，次日达，两天到」逐字保留
+    { id: 'S1-02', tblRow: 3, cat: '物流时效违规承诺', action: 'SESSION_ZERO', mod: null, point: null,
+      terms: [
+        '18点前截单发', '江浙沪周边明天到', '今天加急发', '今天发', '下午发', '明天发', '截单发', '次日达', '明天到', '两天到',
+      ] },
 
-    // ---- R4 售后保障违规承诺 ----
-    { id: 's1-3-1', cat: '3 售后保障·一级(0容忍)', tier: 1, action: 'SESSION_ZERO', mod: null, point: null, semantic: false,
-      terms: ['360天内出现任何情况都可以免费换新', '任何情况都能退', '拆了用了也能退', '什么情况都可以换新', '运费险可以包运费'] },
-    { id: 's1-3-2', cat: '3 售后保障·二级(擦边)', tier: 2, action: 'MODULE_ZERO', mod: 1, point: '1.1', semantic: false,
-      terms: ['质保'] },
+    // S1-03  ｜ 源表 R4「售后保障违规承诺」
+    //   📌 本类**不再含裸词「质保」**（V3 表内没有）—— 这是本次归零率回落的主因之一，已单独登记
+    { id: 'S1-03', tblRow: 4, cat: '售后保障违规承诺', action: 'SESSION_ZERO', mod: null, point: null,
+      terms: [
+        '360天内出现任何情况都可以免费换新', '任何情况都能退', '拆了用了也能退', '运费险可以包运费', '全额免运费', '运费不要钱',
+      ] },
 
-    // ---- R5 极限词表达 ----
-    //   ⚠️ 新版表在 R5 一级栏内首次写明：「违规词定义：只有同时出现四个字或以上字数才能触发违规」。
-    //      现行做法只给裸「第一」加了紧邻窗口约束（GUARD L4/R4），**未按此条清理其余 2~3 字裸词**
-    //      （上表 S2 内的 唯一/完美/绝对/彻底/首选/永久/终身/永不 等）。是否统一收窄，待拍板。
-    { id: 's1-4-1', cat: '4 极限词·一级(0容忍)', tier: 1, action: 'SESSION_ZERO', mod: null, point: null, semantic: false,
-      terms: ['全球领先第一品牌', '所有航空公司一定能登机', '同尺寸容量最大', '全球设计大奖',
-              '行业第一', '中国第一', '全球第一', '绝对静音', '完全静音',
-              '全网最低价', '全网最低', '史上最低', '全年最低',
-              '100%抗菌', '100%杀菌', '100%抑菌', '永久抗菌', '永久杀菌', '永久抑菌',
-              '完全抗菌', '完全杀菌', '完全抑菌',
-              '100%防水', '完全防水', '无限容量', '一辈子不用换', '一辈子不用坏',
-              '终身免费', '永久免费', '坏了终身免费换', '永久免费换新',
-              '获奖无数', 'RIMOWA平替', '某大牌同款', '同厂同线', '永久下架', '一定能登机'] },
-    { id: 's1-4-2', cat: '4 极限词·二级(擦边)', tier: 2, action: 'MODULE_ZERO', mod: 1, point: '1.1', semantic: false,
-      terms: ['所有航空公司都能登机', '用十年都不会坏', '十年不用换', '十年不会坏',
-              '泡水也没事', '淋雨没事', '泡水没事', '什么都能装',
-              '99%杀菌', '99%抑菌', '99抗菌', '杀菌99.9%',
-              '0噪音', '至低价', '史低价', '国际大奖', '马上永久下架', '马上下架'] },
+    // S1-04  ｜ 源表 R5「极限词表达」
+    //   B 列逐字。表内自述「只有同时出现四个字或以上字数才能触发违规」⇒ 本类**不含** 2~3 字裸词（完美/绝对/彻底/完全/永久/终身/唯一…）；表外的这些裸词若在 Sheet2 中逐字列出，则仍由 Sheet2 判定
+    { id: 'S1-04', tblRow: 5, cat: '极限词表达', action: 'SESSION_ZERO', mod: null, point: null,
+      terms: [
+        '行业第一', '中国第一', '全球第一', '绝对静音', '完全静音', '0噪音', '全网最低', '全网最低价', '史上最低', '全年最低', '100%抗菌', '永久抗菌',
+        '完全抗菌', '100%杀菌', '永久杀菌', '完全杀菌', '100%抑菌', '永久抑菌', '完全抑菌', '100%防水', '完全防水', '一定能登机', '无限容量',
+        '同尺寸容量最大', '一辈子不用换', '一辈子不用坏', '终身免费', '永久免费', '获奖无数', '全球设计大奖', 'RIMOWA平替', '永久下架',
+      ] },
 
-    // ---- R6 诱导互动表达 ----
-    //   表内**一级栏裸列** 点关注/评论/飘公屏/扣评论/打在公屏上/点赞/关注点一点/小赞点一点。
-    //   🟢 v2.1.0 口径变更（业务侧 2026-09-24 拍板「**口径A：提到就判 0**」）：
-    //      上述表内裸列词**一律按字面直接判**，不再要求"须利益诱导"（GUARD 约束已移除；
-    //      老大原话「提及到 关注/点赞/评论/公屏 也判定违规，0容忍」）。
-    //      代价经 48 份真实逐字稿实测如实登记：整场归 0 由 17/48(35.4%) → **29/48(60.4%)**，
-    //      其中「评论」「关注」两个中文多义词各含实测误伤（详见 GUARD 区注释）。
-    //   ⚠️ 补入 `关注`（v2.1.0）：老大原话是「**关注**」而旧词条只有 `点关注` ⇒
-    //      实测漏判真违规——张天翊 09-15 摩登场 13 次「关注我们直播间会有一个5元优惠券」
-    //      （利益诱导）因**不含"点"字**而零命中、当次不归零。这是本次补词条的实测依据。
-    { id: 's1-5-1', cat: '5 诱导互动·一级(0容忍)', tier: 1, action: 'SESSION_ZERO', mod: null, point: null, semantic: false,
-      terms: ['打在公屏上', '关注点一点', '小赞点一点', '飘公屏', '扣评论',
-              '点关注', '评论区评论', '赠送', '公屏', '评论', '点赞', '关注'] },
-    //   R6 二级原文：「XXX宝贝（用户昵称），把想要的颜色和尺寸告诉主播」⇒ 违规在**昵称+索取规格**。
-    { id: 's1-5-2', cat: '5 诱导互动·二级(擦边)', tier: 2, action: 'MODULE_ZERO', mod: 8, point: '8.2', semantic: false,
-      terms: ['告诉主播'] },
+    // S1-05  ｜ 源表 R6「诱导互动表达」
+    //   B 列逐字 + 老大 09-24 明确点名的裸「关注」。「赠送」按表原文「做XXX就赠XXX（有条件加赠违规）」保留，配“诱导语境必配”约束
+    { id: 'S1-05', tblRow: 6, cat: '诱导互动表达', action: 'SESSION_ZERO', mod: null, point: null,
+      terms: [
+        '打在公屏上', '关注点一点', '小赞点一点', '飘公屏', '扣评论', '点关注', '关注', '评论', '点赞', '赠送',
+      ] },
 
-    // ---- R7 政治敏感表达 ----
-    //   ⚠️ 新版表一级栏出现**可枚举字面锚点**（日本/韩国/美国/日韩、918/711/54青年节）。
-    //      本版**未采纳**为字面词条：讲产地/竞品国别/节点会大面积误伤，且这几类历来交语义通道。
-    //      ⇒ 保持 semanticOnly。若业务侧要求字面拦截，需先定义排除语境（属口径变更）。
-    //   ⚠️ 二级语义（正能量/热搜话题）**当前无实现**：字面通道无词条 ⇒ 不触发；
-    //      语义通道（neg0 n1–n8）只产出整场级 ⇒ 无法表达"二级"。故 mod 留空并如实登记
-    //      （不硬指到某个能力模块制造"看起来落地了"的假象）。待语义侧支持分级后再补。
-    { id: 's1-6-1', cat: '6 政治敏感·一级(0容忍)', tier: 1, action: 'SESSION_ZERO', mod: null, point: null, semantic: true, terms: [] },
-    { id: 's1-6-2', cat: '6 政治敏感·二级(擦边)', tier: 2, action: 'MODULE_ZERO', mod: null, point: null, semantic: true, terms: [] },
+    // S1-06  ｜ 源表 R7「政治敏感表达」
+    //   B 列无可枚举字面词（判的是话题性质）⇒ 交语义通道
+    { id: 'S1-06', tblRow: 7, cat: '政治敏感表达', action: 'SESSION_ZERO', mod: null, point: null, semantic: true, terms: [] },
 
-    // ---- R8 拉踩表达 ----
-    //   🟢 v2.1.0 起**补入字面锚点**（原为 semantic:true + terms:[]，100% 依赖语义通道）。
-    //   起因：业务侧 09-24 要求「主播话术中有拉踩其他品牌来提升自我的产品…也需要判定违规」。
-    //
-    //   🔴 为什么最终没有改语义判据（实测三版，48 份真实语料 / 生产截断口径 30000 字）：
-    //      现行 n3（要件"点名或暗指竞品**并贬损**"）        = 12/48 (25.0%)  ← 多为真阳性，合理
-    //      扩宽 n3（加"泛指主体负面衬托"）                  = 47/48 (97.9%)  ⛔ 红线失效
-    //      收窄版（只留表依据两类 + 显式排除泛泛对比）      = 39/48 (81.3%)  ⛔ 仍收不干净
-    //   根因：中文直播语境里「比普通箱子轻」与「比市面上的其他同尺寸箱子轻」语义**几无差别**，
-    //         模型一律算作"与他方比较" ⇒ **靠改判据文本收不干净**，故改走确定性字面通道。
-    //   实测脚本：`_n3_impact.js`（三版整场影响面）、`_n3_impact2.js`（收窄版）、
-    //             `_n3_recall_test.js`（片段级召回：现行 2/14 = 14.3%）
-    //
-    //   一级锚点（点名/暗指**具体竞品** → 表 R8 一级「拉踩其他品牌抬高ITO产品」）：
-    //      词条共 6 个品牌名，两类来源必须分开看（此处措辞已按代码实际内容更正）：
-    //        · `某某利` —— **实测命中 1 处**（赵亚男 08-21 736s），是主播对新秀丽的 ASR/口播变体；
-    //        · `新秀丽`/`日默瓦`/`爱可乐`/`途加`/`90分` —— 48 份语料 **零出现**，是作为
-    //          **通用竞品名登记在册**（未来场次若提及即可命中），本次实测**不触发**。
-    { id: 's1-7-1', cat: '7 拉踩·一级(0容忍)', tier: 1, action: 'SESSION_ZERO', mod: null, point: null, semantic: true,
-      terms: ['某某利', '新秀丽', '日默瓦', '爱可乐', '途加', '90分'] },
-    //   二级锚点（**明确声称他方没有/做不到** → 表 R8 二级原文
-    //              「ITO产品有但是其他产品或者品牌没有的功能和卖点」）。
-    //      ⚠️ `只有我们` 带强约束：裸字面会误伤「每个主播**只有我们**两单名额给大家」（实测 1 处），
-    //         故要求后接"才有/才能/可以做得到"这类**排他性独有**结构（见 GUARD）。
-    //      ⚠️ 刻意**未采纳**「市面上没有」（实测唯一命中是张天翊 10549s「不叫道市面上没有」= ASR 乱码），
-    //         以及「千篇一律/老土/刻板/笨重」等贬损形容词（属常见措辞，单用会大面积误伤）。
-    //     📊 实测影响面（`_measure_r8_marginal.js` —— 用**边际测量**而非集合对比，见下注）：
-    //        锚点真实命中 **7 处 / 5 场次**（已过 GUARD），整场归零率**逐字不变 29/48 → 29/48**。
-    //        这 5 场另有归零原因，**并非"被 R6 覆盖"**（早期注释措辞已按实测更正）：
-    //          · 3 场由 R6 口径A 的 `公屏`/`打在公屏上`（张文静 8.14 / 8.18 / 08-21）
-    //          · 2 场由 S2 字面一级（邹晨汐 08-26「吊打/最好/天花板」、赵亚男 08-21「完全」）
-    //        ⇒ 确认为**零额外代价的真阳性补齐**，价值在于报告能标注"因拉踩被判"。
-    //     ⚠️ 方法论更正：`_scan_lacai_literal.js`（P0=P1=P2=29）只证明"集合大小相同"，
-    //        证不了"锚点无边际贡献"。本版改用**逐变体跑同一语料再取差集**（NO_R8/R8_1/R8_2），
-    //        并顺带验证 GUARD 真在挡（裸子串 11 处 → 过 GUARD 后 7 处；
-    //        被挡的 4 处为「只有我们家柴油的」「也只有我们的开始我而来」等 ASR 乱码/非排他句）。
-    //     ⚠️ 一级锚点 `某某利` 是**唯一**的一级命中（赵亚男 08-21 736s「很多老的顾客之前都是买
-    //        某某利行李箱的」）—— 该处**点名竞品但无贬损**（属"老客转投"陈述），
-    //        已登记为**业务侧待复核的边界**；因该场早被 S2 `完全` 归零，当前不改变任何结果。
-    //     🔴 已知落地缺口（比"空转"更严重，务必知悉）：本条目 `mod` 留 null ⇒
-    //        扫描器 `summarize()` 里 `mods` 只收 `mod` 为真的条目 ⇒ `moduleZero=false`
-    //        ⇒ 壳层 `redlineApply` 的 `if(sc.moduleZero)` 不成立 ⇒ **reasons 不推入、横幅不显示**。
-    //        即：二级拉踩命中**在用户可见的报告里完全不可见**（只在扫描器 `hits` 与
-    //        `_measure_r8_marginal.js` 的明细里能看到），既不归零也不改分。
-    //        表 R8 二级未指定模块 ⇒ 未硬凑。若要让它可见/真扣分，需业务侧二选一拍板：
-    //          (a) 指 `c8 转化引导能力`（权重 0，与 R6 二级一致 ⇒ 可见但仍不扣分）
-    //          (b) 指 `c1 产品理解能力`（权重 25，含 1.3 产品差异化表达 ⇒ 真扣分，代价大）
-    { id: 's1-7-2', cat: '7 拉踩·二级(擦边)', tier: 2, action: 'MODULE_ZERO', mod: null, point: null, semantic: true,
-      terms: ['其他家没有', '别家没有', '别人没有', '同行没有', '其他品牌没有', '其他牌子没有',
-              '别家做不到', '别人做不到', '其他品牌做不到', '很多品牌做不到', '其他家做不到',
-              '只有ITO', '只有我们ITO', '只有我们'] },
+    // S1-07  ｜ 源表 R8「拉踩表达」
+    //   B 列无可枚举字面词 ⇒ 交语义通道。⚠️ 09-24 曾加的 6 个竞品名 + 14 条「他方没有」锚点，V3 表内**没有** ⇒ 按「表外一律删除」移除，登记在 REMOVED_IN_V3
+    { id: 'S1-07', tblRow: 8, cat: '拉踩表达', action: 'SESSION_ZERO', mod: null, point: null, semantic: true, terms: [] },
 
-    // ---- R9 侮辱直播用户表达 ----
-    //   ⚠️ R9 二级新增「提示运营/小助理/场控处理一下用户」——高频动作，字面检测必误伤，未采纳。
-    { id: 's1-8-1', cat: '8 侮辱用户·一级(0容忍)', tier: 1, action: 'SESSION_ZERO', mod: null, point: null, semantic: true, terms: [] },
-    { id: 's1-8-2', cat: '8 侮辱用户·二级(擦边)', tier: 2, action: 'MODULE_ZERO', mod: null, point: null, semantic: true, terms: [] },
+    // S1-08  ｜ 源表 R9「侮辱直播用户表达」
+    //   B 列无可枚举字面词（判的是行为性质）⇒ 交语义通道
+    { id: 'S1-08', tblRow: 9, cat: '侮辱直播用户表达', action: 'SESSION_ZERO', mod: null, point: null, semantic: true, terms: [] },
 
-    // ---- R10 虚假承诺（新增类别）----
-    //   一级：虚假产品卖点/材质和功能承诺、虚假品牌售后服务承诺、虚假赠品承诺、虚假价格承诺
-    //   二级：表内原文「虚假承诺是红线行为，没有擦边的任何可能性」⇒ **本类无二级**
-    //   ⚠️ 表内无字面词（判的是"真假"，不是"用词"）⇒ semanticOnly；与 1.1 参数准确 邻接，勿重复扣。
-    { id: 's1-9-1', cat: '9 虚假承诺·一级(0容忍)', tier: 1, action: 'SESSION_ZERO', mod: null, point: null, semantic: true, terms: [] },
+    // S1-09  ｜ 源表 R10「虚假承诺」
+    //   B 列无可枚举字面词（判的是"真假"，不是"用词"）⇒ 交语义通道
+    { id: 'S1-09', tblRow: 10, cat: '虚假承诺', action: 'SESSION_ZERO', mod: null, point: null, semantic: true, terms: [] },
+
   ];
 
-  // ---- 新版表已不再列出的上一版条目（**登记在案，未静默删除**；处置见注释）----
-  //   本版把它们保留在同一 tier 的 terms 里（宁多勿漏），仅在此登记，便于业务侧核对后决定去留：
-  //     全球领先第一品牌 / 某大牌同款 / 同厂同线 → 保留于 4 极限词·一级
-  //     杀菌99.9% / 用十年都不会坏 / 史低价 / 泡水也没事 → 保留于 4 极限词·二级
-  //     坏了终身免费换 / 永久免费换新 → 保留于 4 极限词·一级
-  //     马上永久下架 → 保留于 4 极限词·二级（其子串「永久下架」已由一级命中，处置取重）
-  //     什么情况都可以换新 → 保留于 3 售后保障·一级（表内改写为「360天内出现任何情况都可以免费换新」）
-  //     一定能登机 → 保留于 4 极限词·一级（表内改写为「所有航空公司一定能登机」）
-  //     行李牌字母 → **未保留为独立词条**：新版表 R6 一级把动作改写成「打在公屏上」，
-  //                  旧判据（要求用户把字母发到公屏）已由「打在公屏上」+ 公屏 GUARD 覆盖。
-  //                  若业务侧认为仍需单独拦，把它加回 5 诱导互动·一级 并配 GUARD 即可。
-  var DELETED_FROM_NEW_TABLE = [
-    '全球领先第一品牌', '某大牌同款', '同厂同线', '杀菌99.9%', '用十年都不会坏', '史低价',
-    '泡水也没事', '坏了终身免费换', '永久免费换新', '马上永久下架', '什么情况都可以换新', '一定能登机',
-    '行李牌字母',
-  ];
-
-  // ---- Sheet2：170 条词条（按类别决定处置）----
+  // ---- Sheet2：平台通用违规高风险词库 170 条 ----
+  //   业务侧 2026-09-30 拍板「Sheet2 中的也取消分级」⇒ **170 条全部 SESSION_ZERO**
+  //   （旧版：47 条整场0 + 123 条模块0；现行：0/170 条模块0，mod 一律置 null）
+  //   `level` 与 `tblRow` 仅作**登记信息**（表内原风险等级/行号），不参与判定。
   var S2 = [
-    { row: 2, cat: '绝对化/极限宣传', level: '高', term: '国家级', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 3, cat: '绝对化/极限宣传', level: '高', term: '最高级', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 4, cat: '绝对化/极限宣传', level: '高', term: '最佳', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 5, cat: '绝对化/极限宣传', level: '高', term: '最好', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 6, cat: '绝对化/极限宣传', level: '高', term: '最强', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 7, cat: '绝对化/极限宣传', level: '高', term: '最优', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 8, cat: '绝对化/极限宣传', level: '高', term: '顶级', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 9, cat: '绝对化/极限宣传', level: '高', term: '极品', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 10, cat: '绝对化/极限宣传', level: '高', term: '第一', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 11, cat: '绝对化/极限宣传', level: '高', term: '唯一', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 12, cat: '绝对化/极限宣传', level: '高', term: '首选', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 13, cat: '绝对化/极限宣传', level: '高', term: '冠军', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 14, cat: '绝对化/极限宣传', level: '高', term: '天花板', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 15, cat: '绝对化/极限宣传', level: '高', term: '史上最', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 16, cat: '绝对化/极限宣传', level: '高', term: '全网第一', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 17, cat: '绝对化/极限宣传', level: '高', term: '全球第一', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 18, cat: '绝对化/极限宣传', level: '高', term: '世界第一', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 19, cat: '绝对化/极限宣传', level: '高', term: '行业第一', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 20, cat: '绝对化/极限宣传', level: '高', term: '全国第一', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 21, cat: '绝对化/极限宣传', level: '高', term: '宇宙第一', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 22, cat: '绝对化/极限宣传', level: '高', term: '无敌', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 23, cat: '绝对化/极限宣传', level: '高', term: '完美', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 24, cat: '绝对化/极限宣传', level: '高', term: '绝对', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 25, cat: '绝对化/极限宣传', level: '高', term: '100%', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 26, cat: '绝对化/极限宣传', level: '高', term: '零缺点', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 27, cat: '绝对化/极限宣传', level: '高', term: '零风险', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 28, cat: '绝对化/极限宣传', level: '高', term: '永不', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 29, cat: '绝对化/极限宣传', level: '高', term: '永久', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 30, cat: '绝对化/极限宣传', level: '高', term: '终身', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 31, cat: '绝对化/极限宣传', level: '高', term: '彻底', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 32, cat: '绝对化/极限宣传', level: '高', term: '完全', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 33, cat: '绝对化/极限宣传', level: '高', term: '百分百', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 34, cat: '权威背书/资质', level: '高', term: '国家认证', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 35, cat: '权威背书/资质', level: '高', term: '国家推荐', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 36, cat: '权威背书/资质', level: '高', term: '政府推荐', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 37, cat: '权威背书/资质', level: '高', term: '官方指定', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 38, cat: '权威背书/资质', level: '高', term: '央视推荐', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 39, cat: '权威背书/资质', level: '高', term: '人民大会堂同款', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 40, cat: '权威背书/资质', level: '高', term: '军方指定', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 41, cat: '权威背书/资质', level: '高', term: '国家机关推荐', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 42, cat: '权威背书/资质', level: '高', term: '专家认证', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 43, cat: '权威背书/资质', level: '高', term: '权威认证', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 44, cat: '权威背书/资质', level: '高', term: '国际权威认证', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 45, cat: '权威背书/资质', level: '高', term: '国家免检', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 46, cat: '权威背书/资质', level: '高', term: '质量免检', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 47, cat: '功效/性能宣传', level: '高', term: '摔不坏', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 48, cat: '功效/性能宣传', level: '高', term: '压不坏', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 49, cat: '功效/性能宣传', level: '高', term: '刮不花', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 50, cat: '功效/性能宣传', level: '高', term: '永不变形', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 51, cat: '功效/性能宣传', level: '高', term: '永不褪色', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 52, cat: '功效/性能宣传', level: '高', term: '绝不漏水', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 53, cat: '功效/性能宣传', level: '高', term: '100%防水', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 54, cat: '功效/性能宣传', level: '高', term: '完全防水', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 55, cat: '功效/性能宣传', level: '高', term: '零噪音', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 56, cat: '功效/性能宣传', level: '高', term: '完全静音', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 57, cat: '功效/性能宣传', level: '高', term: '0噪音', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 58, cat: '功效/性能宣传', level: '高', term: '永久抗菌', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 59, cat: '功效/性能宣传', level: '高', term: '100%抗菌', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 60, cat: '功效/性能宣传', level: '高', term: '杀菌100%', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 61, cat: '功效/性能宣传', level: '高', term: '永久耐磨', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 62, cat: '功效/性能宣传', level: '高', term: '永不卡顿', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 63, cat: '功效/性能宣传', level: '高', term: '永不掉色', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 64, cat: '功效/性能宣传', level: '高', term: '绝对安全', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 65, cat: '功效/性能宣传', level: '高', term: '绝对不会坏', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 66, cat: '价格/优惠宣传', level: '高', term: '全网最低价', action: 'MODULE_ZERO', mod: 8, point: '8.2' },
-    { row: 67, cat: '价格/优惠宣传', level: '高', term: '史低价', action: 'MODULE_ZERO', mod: 8, point: '8.2' },
-    { row: 68, cat: '价格/优惠宣传', level: '高', term: '最低价', action: 'MODULE_ZERO', mod: 8, point: '8.2' },
-    { row: 69, cat: '价格/优惠宣传', level: '高', term: '全网最低', action: 'MODULE_ZERO', mod: 8, point: '8.2' },
-    { row: 70, cat: '价格/优惠宣传', level: '高', term: '全网最便宜', action: 'MODULE_ZERO', mod: 8, point: '8.2' },
-    { row: 71, cat: '价格/优惠宣传', level: '高', term: '全年最低', action: 'MODULE_ZERO', mod: 8, point: '8.2' },
-    { row: 72, cat: '价格/优惠宣传', level: '高', term: '全年最便宜', action: 'MODULE_ZERO', mod: 8, point: '8.2' },
-    { row: 73, cat: '价格/优惠宣传', level: '高', term: '最低到手价', action: 'MODULE_ZERO', mod: 8, point: '8.2' },
-    { row: 74, cat: '价格/优惠宣传', level: '高', term: '跳楼价', action: 'MODULE_ZERO', mod: 8, point: '8.2' },
-    { row: 75, cat: '价格/优惠宣传', level: '高', term: '白菜价', action: 'MODULE_ZERO', mod: 8, point: '8.2' },
-    { row: 76, cat: '价格/优惠宣传', level: '高', term: '骨折价', action: 'MODULE_ZERO', mod: 8, point: '8.2' },
-    { row: 77, cat: '价格/优惠宣传', level: '高', term: '厂家亏本卖', action: 'MODULE_ZERO', mod: 8, point: '8.2' },
-    { row: 78, cat: '价格/优惠宣传', level: '高', term: '赔钱卖', action: 'MODULE_ZERO', mod: 8, point: '8.2' },
-    { row: 79, cat: '价格/优惠宣传', level: '高', term: '成本价', action: 'MODULE_ZERO', mod: 8, point: '8.2' },
-    { row: 80, cat: '价格/优惠宣传', level: '高', term: '出厂价', action: 'MODULE_ZERO', mod: 8, point: '8.2' },
-    { row: 81, cat: '价格/优惠宣传', level: '高', term: '进货价', action: 'MODULE_ZERO', mod: 8, point: '8.2' },
-    { row: 82, cat: '价格/优惠宣传', level: '高', term: '原价XX现在XX', action: 'MODULE_ZERO', mod: 8, point: '8.2' },
-    { row: 83, cat: '价格/优惠宣传', level: '高', term: '最后一天最低价', action: 'MODULE_ZERO', mod: 8, point: '8.2' },
-    { row: 84, cat: '价格/优惠宣传', level: '高', term: '以后绝不再有这个价', action: 'MODULE_ZERO', mod: 8, point: '8.2' },
-    { row: 85, cat: '价格/优惠宣传', level: '高', term: '买贵包赔', action: 'MODULE_ZERO', mod: 8, point: '8.2' },
-    { row: 86, cat: '价格/优惠宣传', level: '高', term: '永久保价', action: 'MODULE_ZERO', mod: 8, point: '8.2' },
-    { row: 87, cat: '价格/优惠宣传', level: '高', term: '全网比价最低', action: 'MODULE_ZERO', mod: 8, point: '8.2' },
-    { row: 88, cat: '价格/优惠宣传', level: '高', term: '比官网便宜', action: 'MODULE_ZERO', mod: 8, point: '8.2' },
-    { row: 89, cat: '价格/优惠宣传', level: '高', term: '专柜价XX', action: 'MODULE_ZERO', mod: 8, point: '8.2' },
-    { row: 90, cat: '价格/优惠宣传', level: '高', term: '市场价XX', action: 'MODULE_ZERO', mod: 8, point: '8.2' },
-    { row: 91, cat: '促销玩法/互动诱导', level: '高', term: '评论区扣1才发福利', action: 'MODULE_ZERO', mod: 8, point: '8.2' },
-    { row: 92, cat: '促销玩法/互动诱导', level: '高', term: '点赞到XX才改价', action: 'MODULE_ZERO', mod: 8, point: '8.2' },
-    { row: 93, cat: '促销玩法/互动诱导', level: '高', term: '满XX赞才降价', action: 'MODULE_ZERO', mod: 8, point: '8.2' },
-    { row: 94, cat: '服务/售后承诺', level: '高', term: '无理由终身退', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 95, cat: '服务/售后承诺', level: '高', term: '永久包退', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 96, cat: '服务/售后承诺', level: '高', term: '终身免费换新', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 97, cat: '服务/售后承诺', level: '高', term: '终身质保', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 98, cat: '服务/售后承诺', level: '高', term: '永久质保', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 99, cat: '服务/售后承诺', level: '高', term: '坏了随便换', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 100, cat: '服务/售后承诺', level: '高', term: '任何情况都能退', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 101, cat: '服务/售后承诺', level: '高', term: '随时退', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 102, cat: '服务/售后承诺', level: '高', term: '无条件退', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 103, cat: '服务/售后承诺', level: '高', term: '100%退款', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 104, cat: '服务/售后承诺', level: '高', term: '必赔', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 105, cat: '服务/售后承诺', level: '高', term: '一定赔', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 106, cat: '服务/售后承诺', level: '高', term: '运费全包', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 107, cat: '服务/售后承诺', level: '高', term: '到货不满意随便退', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 108, cat: '服务/售后承诺', level: '高', term: '全国任何地方都包邮', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 109, cat: '来源/资质/专利', level: '中高', term: '原厂', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 110, cat: '来源/资质/专利', level: '中高', term: '厂家直营', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 111, cat: '来源/资质/专利', level: '中高', term: '厂家直销', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 112, cat: '来源/资质/专利', level: '中高', term: '工厂直发', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 113, cat: '来源/资质/专利', level: '中高', term: '自家工厂', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 114, cat: '来源/资质/专利', level: '中高', term: '自家生产', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 115, cat: '来源/资质/专利', level: '中高', term: '进口原装', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 116, cat: '来源/资质/专利', level: '中高', term: '海外原装', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 117, cat: '来源/资质/专利', level: '中高', term: '原装进口', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 118, cat: '来源/资质/专利', level: '中高', term: '海关正品', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 119, cat: '来源/资质/专利', level: '中高', term: '专柜正品', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 120, cat: '来源/资质/专利', level: '中高', term: '官方正品', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 121, cat: '来源/资质/专利', level: '中高', term: '100%正品', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 122, cat: '来源/资质/专利', level: '中高', term: '专利产品', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 123, cat: '来源/资质/专利', level: '中高', term: '专利技术', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 124, cat: '来源/资质/专利', level: '中高', term: '独家专利', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 125, cat: '来源/资质/专利', level: '中高', term: '国际专利', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 126, cat: '来源/资质/专利', level: '中高', term: '获奖产品', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 127, cat: '来源/资质/专利', level: '中高', term: '行业大奖', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 128, cat: '来源/资质/专利', level: '中高', term: '设计大奖', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 129, cat: '比较/竞品宣传', level: '高', term: '吊打', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 130, cat: '比较/竞品宣传', level: '高', term: '秒杀同行', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 131, cat: '比较/竞品宣传', level: '高', term: '碾压同行', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 132, cat: '数据/排名/口碑', level: '中高', term: '销量第一', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 133, cat: '数据/排名/口碑', level: '中高', term: '销量冠军', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 134, cat: '数据/排名/口碑', level: '中高', term: '市占率第一', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 135, cat: '数据/排名/口碑', level: '中高', term: '回购率第一', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 136, cat: '数据/排名/口碑', level: '中高', term: '好评率100%', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 137, cat: '数据/排名/口碑', level: '中高', term: '全网爆款', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 138, cat: '数据/排名/口碑', level: '中高', term: '百万用户选择', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 139, cat: '数据/排名/口碑', level: '中高', term: '千万用户选择', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 140, cat: '数据/排名/口碑', level: '中高', term: '零差评', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 141, cat: '数据/排名/口碑', level: '中高', term: '0投诉', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 142, cat: '数据/排名/口碑', level: '中高', term: '全五星好评', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 143, cat: '数据/排名/口碑', level: '中高', term: '全网销量领先', action: 'SESSION_ZERO', mod: null, point: null },
-    { row: 144, cat: '材质/检测/等级', level: '中高', term: '食品级', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 145, cat: '材质/检测/等级', level: '中高', term: '医用级', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 146, cat: '材质/检测/等级', level: '中高', term: '航空级', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 147, cat: '材质/检测/等级', level: '中高', term: '航天级', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 148, cat: '材质/检测/等级', level: '中高', term: '军工级', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 149, cat: '材质/检测/等级', level: '中高', term: '军用级', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 150, cat: '材质/检测/等级', level: '中高', term: '母婴级', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 151, cat: '材质/检测/等级', level: '中高', term: '婴儿级', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 152, cat: '材质/检测/等级', level: '中高', term: '零甲醛', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 153, cat: '材质/检测/等级', level: '中高', term: '无甲醛', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 154, cat: '材质/检测/等级', level: '中高', term: '零污染', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 155, cat: '材质/检测/等级', level: '中高', term: '无毒无害', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 156, cat: '材质/检测/等级', level: '中高', term: '绝对环保', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 157, cat: '材质/检测/等级', level: '中高', term: '环保无害', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 158, cat: '材质/检测/等级', level: '中高', term: '抗菌99.9%', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 159, cat: '材质/检测/等级', level: '中高', term: '抑菌99.9%', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 160, cat: '商品基础信息', level: '中高', term: '纯天然', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 161, cat: '商品基础信息', level: '中高', term: '纯手工', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 162, cat: '商品基础信息', level: '中高', term: '纯进口', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 163, cat: '商品基础信息', level: '中高', term: '100%真皮', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 164, cat: '商品基础信息', level: '中高', term: '100%羊绒', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 165, cat: '商品基础信息', level: '中高', term: '100%棉', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 166, cat: '商品基础信息', level: '中高', term: '全PC', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 167, cat: '商品基础信息', level: '中高', term: '德国材质', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 168, cat: '商品基础信息', level: '中高', term: '日本技术', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 169, cat: '商品基础信息', level: '中高', term: '意大利设计', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 170, cat: '商品基础信息', level: '中高', term: '法国设计', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
-    { row: 171, cat: '商品基础信息', level: '中高', term: '原产地XX', action: 'MODULE_ZERO', mod: 1, point: '1.1' },
+    { id: 'S2-001', tblRow: 2, cat: '绝对化/极限宣传', level: '高', term: '国家级', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-002', tblRow: 3, cat: '绝对化/极限宣传', level: '高', term: '最高级', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-003', tblRow: 4, cat: '绝对化/极限宣传', level: '高', term: '最佳', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-004', tblRow: 5, cat: '绝对化/极限宣传', level: '高', term: '最好', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-005', tblRow: 6, cat: '绝对化/极限宣传', level: '高', term: '最强', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-006', tblRow: 7, cat: '绝对化/极限宣传', level: '高', term: '最优', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-007', tblRow: 8, cat: '绝对化/极限宣传', level: '高', term: '顶级', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-008', tblRow: 9, cat: '绝对化/极限宣传', level: '高', term: '极品', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-009', tblRow: 10, cat: '绝对化/极限宣传', level: '高', term: '第一', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-010', tblRow: 11, cat: '绝对化/极限宣传', level: '高', term: '唯一', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-011', tblRow: 12, cat: '绝对化/极限宣传', level: '高', term: '首选', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-012', tblRow: 13, cat: '绝对化/极限宣传', level: '高', term: '冠军', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-013', tblRow: 14, cat: '绝对化/极限宣传', level: '高', term: '天花板', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-014', tblRow: 15, cat: '绝对化/极限宣传', level: '高', term: '史上最', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-015', tblRow: 16, cat: '绝对化/极限宣传', level: '高', term: '全网第一', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-016', tblRow: 17, cat: '绝对化/极限宣传', level: '高', term: '全球第一', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-017', tblRow: 18, cat: '绝对化/极限宣传', level: '高', term: '世界第一', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-018', tblRow: 19, cat: '绝对化/极限宣传', level: '高', term: '行业第一', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-019', tblRow: 20, cat: '绝对化/极限宣传', level: '高', term: '全国第一', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-020', tblRow: 21, cat: '绝对化/极限宣传', level: '高', term: '宇宙第一', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-021', tblRow: 22, cat: '绝对化/极限宣传', level: '高', term: '无敌', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-022', tblRow: 23, cat: '绝对化/极限宣传', level: '高', term: '完美', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-023', tblRow: 24, cat: '绝对化/极限宣传', level: '高', term: '绝对', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-024', tblRow: 25, cat: '绝对化/极限宣传', level: '高', term: '100%', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-025', tblRow: 26, cat: '绝对化/极限宣传', level: '高', term: '零缺点', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-026', tblRow: 27, cat: '绝对化/极限宣传', level: '高', term: '零风险', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-027', tblRow: 28, cat: '绝对化/极限宣传', level: '高', term: '永不', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-028', tblRow: 29, cat: '绝对化/极限宣传', level: '高', term: '永久', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-029', tblRow: 30, cat: '绝对化/极限宣传', level: '高', term: '终身', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-030', tblRow: 31, cat: '绝对化/极限宣传', level: '高', term: '彻底', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-031', tblRow: 32, cat: '绝对化/极限宣传', level: '高', term: '完全', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-032', tblRow: 33, cat: '绝对化/极限宣传', level: '高', term: '百分百', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-033', tblRow: 34, cat: '权威背书/资质', level: '高', term: '国家认证', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-034', tblRow: 35, cat: '权威背书/资质', level: '高', term: '国家推荐', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-035', tblRow: 36, cat: '权威背书/资质', level: '高', term: '政府推荐', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-036', tblRow: 37, cat: '权威背书/资质', level: '高', term: '官方指定', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-037', tblRow: 38, cat: '权威背书/资质', level: '高', term: '央视推荐', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-038', tblRow: 39, cat: '权威背书/资质', level: '高', term: '人民大会堂同款', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-039', tblRow: 40, cat: '权威背书/资质', level: '高', term: '军方指定', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-040', tblRow: 41, cat: '权威背书/资质', level: '高', term: '国家机关推荐', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-041', tblRow: 42, cat: '权威背书/资质', level: '高', term: '专家认证', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-042', tblRow: 43, cat: '权威背书/资质', level: '高', term: '权威认证', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-043', tblRow: 44, cat: '权威背书/资质', level: '高', term: '国际权威认证', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-044', tblRow: 45, cat: '权威背书/资质', level: '高', term: '国家免检', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-045', tblRow: 46, cat: '权威背书/资质', level: '高', term: '质量免检', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-046', tblRow: 47, cat: '功效/性能宣传', level: '高', term: '摔不坏', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-047', tblRow: 48, cat: '功效/性能宣传', level: '高', term: '压不坏', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-048', tblRow: 49, cat: '功效/性能宣传', level: '高', term: '刮不花', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-049', tblRow: 50, cat: '功效/性能宣传', level: '高', term: '永不变形', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-050', tblRow: 51, cat: '功效/性能宣传', level: '高', term: '永不褪色', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-051', tblRow: 52, cat: '功效/性能宣传', level: '高', term: '绝不漏水', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-052', tblRow: 53, cat: '功效/性能宣传', level: '高', term: '100%防水', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-053', tblRow: 54, cat: '功效/性能宣传', level: '高', term: '完全防水', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-054', tblRow: 55, cat: '功效/性能宣传', level: '高', term: '零噪音', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-055', tblRow: 56, cat: '功效/性能宣传', level: '高', term: '完全静音', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-056', tblRow: 57, cat: '功效/性能宣传', level: '高', term: '0噪音', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-057', tblRow: 58, cat: '功效/性能宣传', level: '高', term: '永久抗菌', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-058', tblRow: 59, cat: '功效/性能宣传', level: '高', term: '100%抗菌', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-059', tblRow: 60, cat: '功效/性能宣传', level: '高', term: '杀菌100%', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-060', tblRow: 61, cat: '功效/性能宣传', level: '高', term: '永久耐磨', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-061', tblRow: 62, cat: '功效/性能宣传', level: '高', term: '永不卡顿', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-062', tblRow: 63, cat: '功效/性能宣传', level: '高', term: '永不掉色', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-063', tblRow: 64, cat: '功效/性能宣传', level: '高', term: '绝对安全', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-064', tblRow: 65, cat: '功效/性能宣传', level: '高', term: '绝对不会坏', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-065', tblRow: 66, cat: '价格/优惠宣传', level: '高', term: '全网最低价', action: 'SESSION_ZERO', mod: null, point: '8.2' },
+    { id: 'S2-066', tblRow: 67, cat: '价格/优惠宣传', level: '高', term: '史低价', action: 'SESSION_ZERO', mod: null, point: '8.2' },
+    { id: 'S2-067', tblRow: 68, cat: '价格/优惠宣传', level: '高', term: '最低价', action: 'SESSION_ZERO', mod: null, point: '8.2' },
+    { id: 'S2-068', tblRow: 69, cat: '价格/优惠宣传', level: '高', term: '全网最低', action: 'SESSION_ZERO', mod: null, point: '8.2' },
+    { id: 'S2-069', tblRow: 70, cat: '价格/优惠宣传', level: '高', term: '全网最便宜', action: 'SESSION_ZERO', mod: null, point: '8.2' },
+    { id: 'S2-070', tblRow: 71, cat: '价格/优惠宣传', level: '高', term: '全年最低', action: 'SESSION_ZERO', mod: null, point: '8.2' },
+    { id: 'S2-071', tblRow: 72, cat: '价格/优惠宣传', level: '高', term: '全年最便宜', action: 'SESSION_ZERO', mod: null, point: '8.2' },
+    { id: 'S2-072', tblRow: 73, cat: '价格/优惠宣传', level: '高', term: '最低到手价', action: 'SESSION_ZERO', mod: null, point: '8.2' },
+    { id: 'S2-073', tblRow: 74, cat: '价格/优惠宣传', level: '高', term: '跳楼价', action: 'SESSION_ZERO', mod: null, point: '8.2' },
+    { id: 'S2-074', tblRow: 75, cat: '价格/优惠宣传', level: '高', term: '白菜价', action: 'SESSION_ZERO', mod: null, point: '8.2' },
+    { id: 'S2-075', tblRow: 76, cat: '价格/优惠宣传', level: '高', term: '骨折价', action: 'SESSION_ZERO', mod: null, point: '8.2' },
+    { id: 'S2-076', tblRow: 77, cat: '价格/优惠宣传', level: '高', term: '厂家亏本卖', action: 'SESSION_ZERO', mod: null, point: '8.2' },
+    { id: 'S2-077', tblRow: 78, cat: '价格/优惠宣传', level: '高', term: '赔钱卖', action: 'SESSION_ZERO', mod: null, point: '8.2' },
+    { id: 'S2-078', tblRow: 79, cat: '价格/优惠宣传', level: '高', term: '成本价', action: 'SESSION_ZERO', mod: null, point: '8.2' },
+    { id: 'S2-079', tblRow: 80, cat: '价格/优惠宣传', level: '高', term: '出厂价', action: 'SESSION_ZERO', mod: null, point: '8.2' },
+    { id: 'S2-080', tblRow: 81, cat: '价格/优惠宣传', level: '高', term: '进货价', action: 'SESSION_ZERO', mod: null, point: '8.2' },
+    { id: 'S2-081', tblRow: 82, cat: '价格/优惠宣传', level: '高', term: '原价XX现在XX', action: 'SESSION_ZERO', mod: null, point: '8.2' },
+    { id: 'S2-082', tblRow: 83, cat: '价格/优惠宣传', level: '高', term: '最后一天最低价', action: 'SESSION_ZERO', mod: null, point: '8.2' },
+    { id: 'S2-083', tblRow: 84, cat: '价格/优惠宣传', level: '高', term: '以后绝不再有这个价', action: 'SESSION_ZERO', mod: null, point: '8.2' },
+    { id: 'S2-084', tblRow: 85, cat: '价格/优惠宣传', level: '高', term: '买贵包赔', action: 'SESSION_ZERO', mod: null, point: '8.2' },
+    { id: 'S2-085', tblRow: 86, cat: '价格/优惠宣传', level: '高', term: '永久保价', action: 'SESSION_ZERO', mod: null, point: '8.2' },
+    { id: 'S2-086', tblRow: 87, cat: '价格/优惠宣传', level: '高', term: '全网比价最低', action: 'SESSION_ZERO', mod: null, point: '8.2' },
+    { id: 'S2-087', tblRow: 88, cat: '价格/优惠宣传', level: '高', term: '比官网便宜', action: 'SESSION_ZERO', mod: null, point: '8.2' },
+    { id: 'S2-088', tblRow: 89, cat: '价格/优惠宣传', level: '高', term: '专柜价XX', action: 'SESSION_ZERO', mod: null, point: '8.2' },
+    { id: 'S2-089', tblRow: 90, cat: '价格/优惠宣传', level: '高', term: '市场价XX', action: 'SESSION_ZERO', mod: null, point: '8.2' },
+    { id: 'S2-090', tblRow: 91, cat: '促销玩法/互动诱导', level: '高', term: '评论区扣1才发福利', action: 'SESSION_ZERO', mod: null, point: '8.2' },
+    { id: 'S2-091', tblRow: 92, cat: '促销玩法/互动诱导', level: '高', term: '点赞到XX才改价', action: 'SESSION_ZERO', mod: null, point: '8.2' },
+    { id: 'S2-092', tblRow: 93, cat: '促销玩法/互动诱导', level: '高', term: '满XX赞才降价', action: 'SESSION_ZERO', mod: null, point: '8.2' },
+    { id: 'S2-093', tblRow: 94, cat: '服务/售后承诺', level: '高', term: '无理由终身退', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-094', tblRow: 95, cat: '服务/售后承诺', level: '高', term: '永久包退', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-095', tblRow: 96, cat: '服务/售后承诺', level: '高', term: '终身免费换新', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-096', tblRow: 97, cat: '服务/售后承诺', level: '高', term: '终身质保', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-097', tblRow: 98, cat: '服务/售后承诺', level: '高', term: '永久质保', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-098', tblRow: 99, cat: '服务/售后承诺', level: '高', term: '坏了随便换', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-099', tblRow: 100, cat: '服务/售后承诺', level: '高', term: '任何情况都能退', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-100', tblRow: 101, cat: '服务/售后承诺', level: '高', term: '随时退', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-101', tblRow: 102, cat: '服务/售后承诺', level: '高', term: '无条件退', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-102', tblRow: 103, cat: '服务/售后承诺', level: '高', term: '100%退款', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-103', tblRow: 104, cat: '服务/售后承诺', level: '高', term: '必赔', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-104', tblRow: 105, cat: '服务/售后承诺', level: '高', term: '一定赔', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-105', tblRow: 106, cat: '服务/售后承诺', level: '高', term: '运费全包', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-106', tblRow: 107, cat: '服务/售后承诺', level: '高', term: '到货不满意随便退', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-107', tblRow: 108, cat: '服务/售后承诺', level: '高', term: '全国任何地方都包邮', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-108', tblRow: 109, cat: '来源/资质/专利', level: '中高', term: '原厂', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-109', tblRow: 110, cat: '来源/资质/专利', level: '中高', term: '厂家直营', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-110', tblRow: 111, cat: '来源/资质/专利', level: '中高', term: '厂家直销', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-111', tblRow: 112, cat: '来源/资质/专利', level: '中高', term: '工厂直发', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-112', tblRow: 113, cat: '来源/资质/专利', level: '中高', term: '自家工厂', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-113', tblRow: 114, cat: '来源/资质/专利', level: '中高', term: '自家生产', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-114', tblRow: 115, cat: '来源/资质/专利', level: '中高', term: '进口原装', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-115', tblRow: 116, cat: '来源/资质/专利', level: '中高', term: '海外原装', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-116', tblRow: 117, cat: '来源/资质/专利', level: '中高', term: '原装进口', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-117', tblRow: 118, cat: '来源/资质/专利', level: '中高', term: '海关正品', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-118', tblRow: 119, cat: '来源/资质/专利', level: '中高', term: '专柜正品', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-119', tblRow: 120, cat: '来源/资质/专利', level: '中高', term: '官方正品', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-120', tblRow: 121, cat: '来源/资质/专利', level: '中高', term: '100%正品', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-121', tblRow: 122, cat: '来源/资质/专利', level: '中高', term: '专利产品', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-122', tblRow: 123, cat: '来源/资质/专利', level: '中高', term: '专利技术', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-123', tblRow: 124, cat: '来源/资质/专利', level: '中高', term: '独家专利', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-124', tblRow: 125, cat: '来源/资质/专利', level: '中高', term: '国际专利', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-125', tblRow: 126, cat: '来源/资质/专利', level: '中高', term: '获奖产品', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-126', tblRow: 127, cat: '来源/资质/专利', level: '中高', term: '行业大奖', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-127', tblRow: 128, cat: '来源/资质/专利', level: '中高', term: '设计大奖', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-128', tblRow: 129, cat: '比较/竞品宣传', level: '高', term: '吊打', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-129', tblRow: 130, cat: '比较/竞品宣传', level: '高', term: '秒杀同行', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-130', tblRow: 131, cat: '比较/竞品宣传', level: '高', term: '碾压同行', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-131', tblRow: 132, cat: '数据/排名/口碑', level: '中高', term: '销量第一', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-132', tblRow: 133, cat: '数据/排名/口碑', level: '中高', term: '销量冠军', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-133', tblRow: 134, cat: '数据/排名/口碑', level: '中高', term: '市占率第一', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-134', tblRow: 135, cat: '数据/排名/口碑', level: '中高', term: '回购率第一', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-135', tblRow: 136, cat: '数据/排名/口碑', level: '中高', term: '好评率100%', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-136', tblRow: 137, cat: '数据/排名/口碑', level: '中高', term: '全网爆款', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-137', tblRow: 138, cat: '数据/排名/口碑', level: '中高', term: '百万用户选择', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-138', tblRow: 139, cat: '数据/排名/口碑', level: '中高', term: '千万用户选择', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-139', tblRow: 140, cat: '数据/排名/口碑', level: '中高', term: '零差评', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-140', tblRow: 141, cat: '数据/排名/口碑', level: '中高', term: '0投诉', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-141', tblRow: 142, cat: '数据/排名/口碑', level: '中高', term: '全五星好评', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-142', tblRow: 143, cat: '数据/排名/口碑', level: '中高', term: '全网销量领先', action: 'SESSION_ZERO', mod: null, point: null },
+    { id: 'S2-143', tblRow: 144, cat: '材质/检测/等级', level: '中高', term: '食品级', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-144', tblRow: 145, cat: '材质/检测/等级', level: '中高', term: '医用级', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-145', tblRow: 146, cat: '材质/检测/等级', level: '中高', term: '航空级', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-146', tblRow: 147, cat: '材质/检测/等级', level: '中高', term: '航天级', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-147', tblRow: 148, cat: '材质/检测/等级', level: '中高', term: '军工级', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-148', tblRow: 149, cat: '材质/检测/等级', level: '中高', term: '军用级', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-149', tblRow: 150, cat: '材质/检测/等级', level: '中高', term: '母婴级', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-150', tblRow: 151, cat: '材质/检测/等级', level: '中高', term: '婴儿级', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-151', tblRow: 152, cat: '材质/检测/等级', level: '中高', term: '零甲醛', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-152', tblRow: 153, cat: '材质/检测/等级', level: '中高', term: '无甲醛', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-153', tblRow: 154, cat: '材质/检测/等级', level: '中高', term: '零污染', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-154', tblRow: 155, cat: '材质/检测/等级', level: '中高', term: '无毒无害', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-155', tblRow: 156, cat: '材质/检测/等级', level: '中高', term: '绝对环保', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-156', tblRow: 157, cat: '材质/检测/等级', level: '中高', term: '环保无害', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-157', tblRow: 158, cat: '材质/检测/等级', level: '中高', term: '抗菌99.9%', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-158', tblRow: 159, cat: '材质/检测/等级', level: '中高', term: '抑菌99.9%', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-159', tblRow: 160, cat: '商品基础信息', level: '中高', term: '纯天然', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-160', tblRow: 161, cat: '商品基础信息', level: '中高', term: '纯手工', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-161', tblRow: 162, cat: '商品基础信息', level: '中高', term: '纯进口', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-162', tblRow: 163, cat: '商品基础信息', level: '中高', term: '100%真皮', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-163', tblRow: 164, cat: '商品基础信息', level: '中高', term: '100%羊绒', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-164', tblRow: 165, cat: '商品基础信息', level: '中高', term: '100%棉', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-165', tblRow: 166, cat: '商品基础信息', level: '中高', term: '全PC', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-166', tblRow: 167, cat: '商品基础信息', level: '中高', term: '德国材质', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-167', tblRow: 168, cat: '商品基础信息', level: '中高', term: '日本技术', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-168', tblRow: 169, cat: '商品基础信息', level: '中高', term: '意大利设计', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-169', tblRow: 170, cat: '商品基础信息', level: '中高', term: '法国设计', action: 'SESSION_ZERO', mod: null, point: '1.1' },
+    { id: 'S2-170', tblRow: 171, cat: '商品基础信息', level: '中高', term: '原产地XX', action: 'SESSION_ZERO', mod: null, point: '1.1' },
   ];
 
-  // ---- 词根级条目的语境约束（v1.0.1，2026-09-17 业务侧拍板「A：加宣传语境必配」）----
-  // 背景：用真实 4 小时逐字稿（7054 段 / 83915 字）实测，170+52 条里只有 9 条会命中，
-  //       其中 7 条是 2 字"词根级"条目 —— 共 112 次命中，**真阳性 0**：
-  //       第一 71 次（全是「第一个/第一点/第一天/第一波」）、完全 25 次（「完全分享」「完全一致」）、
-  //       赠送 9 次（含「确实是没有这个赠送」否定式）、最好/绝对/首选/彻底 各 1~2 次（口语）。
-  //       ⇒ 不加约束则**每一场真实直播都必然整场归 0**，整个 8 能力评分失去区分度。
-  // 口径：命中点**紧邻**的 L/R 字窗口内出现下列短语才算违规（默认 L=6 / R=6，逐条可覆盖）。
-  //       **条目一条不删**；同场 213/222 条零触发（含全部短语级硬红线）⇒ 只有会独立成词的短条目需要约束。
-  //
-  // v1.0.2（2026-09-17 业务侧二次拍板）—— 由"±30 字窗口"**收紧为紧邻窗口**：
-  //   原话「行业第一，必须是 4 个字都说了才判断违规；如果只讲到'第一'、或是'行业'等，不归纳到违规中」。
-  //   ±30 字的问题：同段一旦出现"行业第一"，其后 30 字内的「第一个/第一点」会被**连带判违规**（证据清单串味）。
-  //   L=4 后 ⇒ "行业第一"必命中；"行业不景气，第一点要讲的"里那个「第一」**不再命中**。
-  //   ⚠️ 本条不是"另立新词"：`全网/全球/世界/行业/全国/宇宙第一`（表内 R16-21）与
-  //      `销量/市占率/回购率第一`（表内 R132/134/135）本就是**表里逐字列出的独立条目**，
-  //      裸匹配即可命中；此处只是替 R10 那条孤立的裸「第一」补上"必须连写"的判据。
-  //      前缀中 `中国` 系业务侧举例认可（"中国第一"），`品牌/排名/市占/回购/好评/口碑/权威/官方/
-  //      类目/品质/人气/热销/复购` 为同类补充（表内无逐字条目）—— 如需增删，改这一行即可。
+  // ---- V3 表外、按业务侧「没写的可以一律删除」移除的上一版词条（**登记在案，未静默删除**）----
+  //   与 v2.0.0 的 DELETED_FROM_NEW_TABLE 不同：那一版是"表里删了但我仍保留"，
+  //   本版是**真的不判**。如需恢复任意一条，加回对应类的 terms 即可（源表变更时优先查这里）。
+  var REMOVED_IN_V3 = [
+    '今天拍今天发', '今天上午拍下午发货', '今天加急发出', '今天拍明天发', '全国都次日达', '今天拍明天一定到', '什么情况都可以换新', '质保', '全球领先第一品牌',
+    '所有航空公司一定能登机', '坏了终身免费换', '永久免费换新', '某大牌同款', '同厂同线', '所有航空公司都能登机', '用十年都不会坏', '十年不用换', '十年不会坏',
+    '泡水也没事', '淋雨没事', '泡水没事', '什么都能装', '99%杀菌', '99%抑菌', '99抗菌', '杀菌99.9%', '至低价', '史低价', '国际大奖', '马上永久下架',
+    '马上下架', '评论区评论', '公屏', '告诉主播', '某某利', '新秀丽', '日默瓦', '爱可乐', '途加', '90分', '其他家没有', '别家没有', '别人没有',
+    '同行没有', '其他品牌没有', '其他牌子没有', '别家做不到', '别人做不到', '其他品牌做不到', '很多品牌做不到', '其他家做不到', '只有ITO', '只有我们ITO',
+    '只有我们',
+  ];
+
   var GUARD = [
     { term: '第一',  L: 4, R: 4,
       re: /(行业|全国|全网|全球|世界|中国|销量|品牌|排名|市占|回购|好评|口碑|权威|官方|类目|品质|人气|热销|复购)第一|第一名|第一品牌|牌子第一/,
@@ -480,7 +343,6 @@
       why: '裸字面会误伤：实测「每个主播**只有我们**两单名额给大家」（张文静 08-23 @468s）是名额播报、不是拉踩。要求后接"才有/才能/可以做得到"这类**排他性独有**结构 ⇒ 只判"只有我们家才有的"这类声称他方缺失的表述。实测约束后命中 2 场，引文均为真阳性（"轮子也是只有我们家才有的"）' },
   ];
 
-  // ---- 安全阀：只对有实测误伤证据、且属业务事实陈述的词加豁免 ----
   var EXEMPT = [
     { term: '最好', re: /卖得最好|卖得最多|卖最好|卖最多|明星自用最多|明星同款最多/,
       why: '业务方自己的满分示范话术就是「卖得最好，明星自用最多」（实测误伤 2 处）。v1.0.3 补 `卖最好|卖最多`：ASR 常少"得"字，59 份语料里 7 处「直播间卖最好／这边卖最好」因此漏豁免' },
@@ -491,45 +353,39 @@
   ];
 
   // ---- 派生统计（供自检与报告显示）----
-  var S2_SESSION = S2.filter(function(x){ return x.action === 'SESSION_ZERO'; });
-  var S2_MODULE  = S2.filter(function(x){ return x.action === 'MODULE_ZERO'; });
   var S1_TERMS   = S1.reduce(function(a,x){ return a + x.terms.length; }, 0);
   var S2_TERMS   = S2.length;
-  var S1_T1      = S1.filter(function(x){ return x.tier === 1; });
-  var S1_T2      = S1.filter(function(x){ return x.tier === 2; });
-  var S1_T1_TERMS = S1_T1.reduce(function(a,x){ return a + x.terms.length; }, 0);
-  var S1_T2_TERMS = S1_T2.reduce(function(a,x){ return a + x.terms.length; }, 0);
+  var S2_SESSION = S2.filter(function(x){ return x.action === 'SESSION_ZERO'; });
+  var S2_MODULE  = S2.filter(function(x){ return x.action === 'MODULE_ZERO'; });
   var MODULE_W   = { c1: 25, c2: 20, c3: 20, c4: 15, c5: 20, c6: 0, c7: 0, c8: 0 };  // 真源 v3/standard.js
 
   root.V4ViolationRules = {
     _v: _v,
-    src: '抖音直播客观违规规则(0923更新).xlsx',
-    rulesAt: '2026-09-23',
+    src: '抖音直播客观违规规则V3版.xlsx',
+    rulesAt: '2026-09-30',
     S1: S1,
     S2: S2,
     EXEMPT: EXEMPT,
     GUARD: GUARD,
-    GUARD_L: 6,                      // v1.0.2 紧邻窗口默认半径：命中点左侧 6 字（逐条可覆盖）
-    GUARD_R: 6,                      // v1.0.2 紧邻窗口默认半径：命中点右侧 6 字（逐条可覆盖）
+    GUARD_L: 6,                      // 紧邻窗口默认半径：命中点左侧 6 字（逐条可覆盖）
+    GUARD_R: 6,                      // 紧邻窗口默认半径：命中点右侧 6 字（逐条可覆盖）
     MODULE_NAME: { c1: '产品理解能力', c2: '逻辑组织能力（流畅度）', c3: '场景化表达能力（延展性）',
                    c4: '可视化道具运用', c5: '情绪感染能力', c6: '需求识别能力（权重0）',
                    c7: '临场反应能力（权重0）', c8: '转化引导能力（权重0）' },
     MODULE_W: MODULE_W,
-    DELETED_FROM_NEW_TABLE: DELETED_FROM_NEW_TABLE,
+    REMOVED_IN_V3: REMOVED_IN_V3,
     stat: {
-      s1Cats: S1.length,                 // v2.0.0 起 = 规则条数（同类目一级/二级各拆一条）
+      s1Cats: S1.length,                       // v3.0.0 起 = 表内类目数（**不再拆一级/二级**）
       s1Terms: S1_TERMS,
-      s1Tier1: S1_T1.length, s1Tier2: S1_T2.length,
-      s1Tier1Terms: S1_T1_TERMS, s1Tier2Terms: S1_T2_TERMS,
       s1SemanticOnly: S1.filter(function(x){ return x.semantic; }).length,
       s2Total: S2_TERMS,
       s2SessionZero: S2_SESSION.length,
       s2ModuleZero: S2_MODULE.length,
       matchers: S1_TERMS + S2_TERMS,
       guarded: GUARD.length,
-      // 二级映射到权重为 0 的模块 ⇒ 归0 不改变总分（如实计入，供报告与横幅提示）
-      tier2NoEffect: S1_T2.filter(function(x){ return x.mod && !MODULE_W['c' + x.mod]; })
-                          .map(function(x){ return x.id + ':' + x.cat; })
+      exempt: EXEMPT.length,
+      removedTerms: REMOVED_IN_V3.length,
+      codes: S1.length + S2.length
     }
   };
   if (typeof module === 'object' && module.exports) module.exports = root.V4ViolationRules;

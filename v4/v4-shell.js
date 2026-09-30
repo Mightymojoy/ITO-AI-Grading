@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.30';
+var V4_VERSION = 'v4.11.31';
 (function(){
   function paint(){
     ['pageBadge', 'brandVer', 'footVer'].forEach(function(id){
@@ -1496,7 +1496,16 @@ document.addEventListener('DOMContentLoaded', function(){
     //      初版口径下 53 份场次有 **30 份（56.6%）会整场归 0**；上述三项修正后降到 **13 份（24.5%）**，
     //      且余下 13 份逐条核对**全部为真违规**（"全网最好的/吊打市面/完全不卡顿/完全不会爆开"）。
     //      不加约束则红线功能会把整场评分统一压成 0，8 个能力维度彻底失去区分度。
-    var rel = { _v:'4.11.22', enabled:true, sessionZero:false, moduleZero:false,
+    // ---- v4.11.31（2026-09-30 业务侧三点拍板）—— 判定逻辑**一行未动**，改动全在规则库 ----
+    //   ① 「没写的可以一律删除」  ⇒ 规则库按《抖音直播客观违规规则V3版.xlsx》全量重建（_v 3.0.0），
+    //      表外 54 条旧词条不再判定（登记于 REMOVED_IN_V3）。典型：裸词 `质保`、拉踩 20 条锚点。
+    //   ② 「这个是判罚标准」      ⇒ **全表取消分级**：Sheet1 原「一级/二级」与 Sheet2 原「高/中高」作废，
+    //      命中任意一条 = SESSION_ZERO（整场 0）。⇒ Sheet2 由 47+123 拆分为 **170 条全整场 0**，
+    //      `rel.moduleZero` 在本版**恒 false**（属预期，不是 bug）；红色横幅恒为一级形态。
+    //   ③ 「给于编号」            ⇒ `reasons[].code` 携带规则编号（S1-01..S1-09 / S2-001..S2-170），
+    //      横幅行首渲染为 `[S1-04] 极限词表达　触发词「行业第一」`，可回表核对。
+    //   实测（48 份真实逐字稿 / 114.8 万字）：整场归 0 **29/48 (60.4%) → 37/48 (77.1%)**。
+    var rel = { _v:'4.11.31', enabled:true, sessionZero:false, moduleZero:false,
                 rulesV: (window.V4ViolationRules && window.V4ViolationRules._v) || '',
                 scanV: (S && S._v) || '',
                 reasons:[], modules:[], scan:null, err:'', guardBlocked:0, strict:false };
@@ -1513,14 +1522,15 @@ document.addEventListener('DOMContentLoaded', function(){
           if(sc.sessionZero){
             rel.sessionZero = true;
             (sc.sessionHits||[]).forEach(function(h){
-              rel.reasons.push({ src:'字面', cat:h.group, term:h.term, action:'SESSION_ZERO',
+              // v4.11.31：带上规则编号（h.code，规则库 v3.0.0 起提供）⇒ 报告可「有依可寻」地引用条款
+              rel.reasons.push({ src:'字面', cat:h.group, code:h.code||'', term:h.term, action:'SESSION_ZERO',
                                  ts:h.ts||'', quote:h.quote||'', count:h.count||1 });
             });
           }
           if(sc.moduleZero){
             rel.modules = (sc.modules||[]).slice();
             (sc.moduleHits||[]).forEach(function(h){
-              rel.reasons.push({ src:'字面', cat:h.group, term:h.term, action:'MODULE_ZERO',
+              rel.reasons.push({ src:'字面', cat:h.group, code:h.code||'', term:h.term, action:'MODULE_ZERO',
                                  mod:h.mod, ts:h.ts||'', quote:h.quote||'', count:h.count||1 });
             });
           }
@@ -1586,7 +1596,9 @@ document.addEventListener('DOMContentLoaded', function(){
     var shown = rel.reasons.slice(0, 8);
     for(var i=0;i<shown.length;i++){
       var x = shown[i];
-      h += '<div>· <b>' + esc(x.cat) + '</b>'
+      // v4.11.31：行首显示规则编号（如 [S1-04] / [S2-145]），便于回表核对
+      h += '<div>· ' + (x.code ? '<span style="color:' + acc + ';font-weight:600">[' + esc(x.code) + ']</span> ' : '')
+        + '<b>' + esc(x.cat) + '</b>'
         + (x.term ? '　触发词「<b>' + esc(x.term) + '</b>」' : '')
         + '　<span style="color:#8b857c">[' + esc(x.src) + '（'
         + (x.action === 'MODULE_ZERO' ? '模块归0' : '整场归0') + '）]</span>'
@@ -4267,6 +4279,10 @@ document.addEventListener('DOMContentLoaded', function(){
 })();
 
 // ---------- v4.11.30：历史评分补「平台红线判罚」（与每日报告同形态） ----------
+// v4.11.31（2026-09-30）：同形态保留，新增**规则编号**列 —— 存档 `redline.reasons[].code` 与横幅行首 `[S1-04]`。
+//   ① 规则库 v3.0.0 起每条规则带编号，判定结果可回表核对（业务侧「有依可寻」）。
+//   ② `redlineV` 升为 '4.11.31'；**v4.11.30 期间的存档仍可正常渲染**（无 code ⇒ 不显示编号，不是丢失）。
+//   ③ 全表取消分级后本块恒为**一级（红色）**形态，琥珀色二级分支保留但不会命中。
 // 背景（2026-09-24 老大报障）：每日评分能看到红线横幅，**历史评分展开后看不到**。
 // 根因（已实测）：v4DetailSnapshot() 返回的是**白名单字段**对象，r.__redline 在存档那一步被丢掉
 //                ⇒ grading_detail_v1 / 飞书「完整主播报告」里从来没有红线数据（自检：含 __redline = false）。
@@ -4285,7 +4301,7 @@ document.addEventListener('DOMContentLoaded', function(){
 //   · `#/vision`「一键完整日报」通道内部裸调 runGrading、不走 redlineApply ⇒ 该通道的评分历史里同样没有红线。
 // 回退：localStorage 置 v4rl_hist_enabled='0'（或调 V4RLH.off()）后刷新页面即恢复原状。
 (function(){
-  var LOG = function(m){ try{ console.log('[v4.11.30] ' + m); }catch(e){} };
+  var LOG = function(m){ try{ console.log('[v4.11.31] ' + m); }catch(e){} };
   var LS_OFF = 'v4rl_hist_enabled';
   var QMAX = 120;      // 存档里原句截断长度（防膨胀）
   var RMAX = 20;       // 存档里命中组数上限
@@ -4306,6 +4322,7 @@ document.addEventListener('DOMContentLoaded', function(){
       var x = rs[i] || {};
       out.push({
         cat:    String(x.cat    || ''),
+        code:   String(x.code   || ''),          // v4.11.31：规则编号（老存档无此字段 ⇒ 空串，渲染时不显示）
         term:   String(x.term   || ''),
         src:    String(x.src    || ''),
         action: String(x.action || ''),
@@ -4331,7 +4348,8 @@ document.addEventListener('DOMContentLoaded', function(){
     var rs = rel.reasons || [];
     for(var i=0;i<rs.length;i++){
       var x = rs[i] || {};
-      h += '<div>· <b>' + E(x.cat) + '</b>'
+      h += '<div>· ' + (x.code ? '<span style="color:' + acc + ';font-weight:600">[' + E(x.code) + ']</span> ' : '')
+        + '<b>' + E(x.cat) + '</b>'
         + (x.term ? '　触发词「<b>' + E(x.term) + '</b>」' : '')
         + '　<span style="color:#8b857c">[' + E(x.src) + '（'
         + (x.action === 'MODULE_ZERO' ? '模块归0' : '整场归0') + '）]</span>'
@@ -4363,7 +4381,7 @@ document.addEventListener('DOMContentLoaded', function(){
             var rl = pick(r);
             if(rl){ det.redline = rl; STATS.snap++; }
             else   { STATS.clean++; }
-            det.redlineV = '4.11.30';     // 标记「这一版能沉淀红线」——用于区分新旧记录
+            det.redlineV = '4.11.31';     // 标记「这一版能沉淀红线数据（含规则编号）」——用于区分新旧记录
           }
         }catch(e1){ STATS.err = 'snap:' + ((e1 && e1.message) || e1); LOG('红线快照异常：' + STATS.err); }
         return det;
