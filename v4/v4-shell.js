@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.31';
+var V4_VERSION = 'v4.11.33';
 (function(){
   function paint(){
     ['pageBadge', 'brandVer', 'footVer'].forEach(function(id){
@@ -4301,7 +4301,7 @@ document.addEventListener('DOMContentLoaded', function(){
 //   · `#/vision`「一键完整日报」通道内部裸调 runGrading、不走 redlineApply ⇒ 该通道的评分历史里同样没有红线。
 // 回退：localStorage 置 v4rl_hist_enabled='0'（或调 V4RLH.off()）后刷新页面即恢复原状。
 (function(){
-  var LOG = function(m){ try{ console.log('[v4.11.31] ' + m); }catch(e){} };
+  var LOG = function(m){ try{ console.log('[v4.11.32] ' + m); }catch(e){} };
   var LS_OFF = 'v4rl_hist_enabled';
   var QMAX = 120;      // 存档里原句截断长度（防膨胀）
   var RMAX = 20;       // 存档里命中组数上限
@@ -4418,4 +4418,371 @@ document.addEventListener('DOMContentLoaded', function(){
 
   var n = apply();
   LOG('历史评分红线判罚已装载：接管 ' + n + '/2 个函数（存档原句截 ' + QMAX + ' 字 · 命中组上限 ' + RMAX + '）');
+})();
+
+// ---------- v4.11.32：产品判定「三路打架」修复（A 文件名兜底 + B ④ 模块对齐） ----------
+// 背景（2026-10-08 老大报障 · 10-07 轻熟 甘晋铭场）：
+//   报告顶部「考核产品」= TRUFFLE PRO BACKPACK（**双肩包**，正确，且分数就是按它算的 c1=80 / 总分 70.5），
+//   但报告 ④「产品识别与讲品分析」显示 **PISTACHIO Plus**，并列出「大尺寸顶开盖/深仓、4层全新PC、
+//   静音越负重越省力」等**行李箱卖点**当未覆盖项 —— 同一份报告两个产品名打架。
+// 根因（已实测复现；脚本 _census_product_paths.js / _diag_analyze_1007.js / _read_pd_1007.py）：
+//   三条**独立**判定路径各跑各的：
+//     K1  detectProductFromName(file.name, text)  ← 只有 #/daily 与批量走（workflow.js:107）  → 正确
+//     K2  analyzeProducts(segs)                   ← ④ 模块唯一数据源（经 r.products）        → 错
+//     K3  runGrading(segs, 'auto')                ← #/vision 一键完整日报（app-core:1827）    → 错
+//   本场真实语料 604 段里：TRUFFLE / 双肩包 / 上下 / 刘知礼 / 设计师 / 爱马仕 **命中 0 次**
+//   （只有「背包」×60、「扩容」×5）；而**「双肩包」三字不在任何产品的别名表里**
+//   ⇒ 别名零命中 ⇒ 落「专属词兜底」投票：
+//       pistachio_plus        3×1000 + 4 = 3004   ← 命中 快速取物 / 隐私 / 低调（通用商务话术，非行李箱专属）
+//       truffle_pro_backpack  1×1000 + 5 = 1005   ← 只有「扩容」是纯中文专属词
+//   48 份语料普查（25 场文件名含产品名可比对）：K2≠K1 = 5/25 (20.0%)；**K3≠K1 = 14/25 (56.0%)**，
+//   且错判方向高度单一（K3 有 12/14 全落到 PISTACHIO Plus）。
+// 修法（全在壳层；v4/app-core.js 一个字不动；**不动任何评分口径 / 不改权重 / 不改词表**）：
+//   A  patch window.runGrading —— productKey==='auto' 且「当前正在跑的任务」有文件名时，
+//      先用 detectProductFromName 推断（业务口径：主播整场不念品名时，**以文件名为准**）。
+//      只补没定过 key 的入口；key 已明确的通道（如 #/daily 已经在 workflow.js:105-109 推断过）不受影响。
+//   B  patch window.analyzeProducts —— 本场考核品已明确、④ 模块却没识别出它、**且整场无任何产品别名命中**
+//      （说明 ④ 的结果全部来自「专属词兜底」= 纯猜测）时，用「注入一行产品名」的方式**复用原生窗口/评分逻辑**
+//      重算一次，让 ④ 模块对齐考核品。**场内有别名命中的场次一律不动**（那时多品识别本身是对的）。
+//   C 不做（另立项）—— 挪专属词（快速取物/隐私/低调）/ 给背包补中文别名 / 权重按词表规模归一。
+//      ⚠️ 实测教训：只补别名治不了根 —— 补上「双肩包」也只有 2 个词(2000)，
+//      只要主播讲了那 3 个通用词，行李箱照样先拿 3000 分，**还是输**。属于修错层。
+// 为什么只改一处数据源就够：
+//   当场报告（app-core.js:1350 / 1966）与历史详情（v4ExtraPick → ex.pd）**都读 r.products**
+//   = analyzeProducts 的返回值 ⇒ 数据源修好，两处渲染**自动一致**，无需碰任何渲染代码。
+// 限制（如实登记，不粉饰）：
+//   · 存量记录（升级前评的）④ 模块的错品名**无法回填** ⇒ 只有**新评分**才正确；
+//   · 仅对「考核品能确定」的场次生效；考核品本身未定的场次保持原状（无从对齐）。
+// 逃生阀：localStorage 置 v4pfix_enabled='0' 后刷新即恢复原状。
+// 自检：V4PFX.debug() / V4PFX.off() / V4PFX.on()
+(function(){
+  if(window.V4PFX && window.V4PFX.__installed) return;
+
+  var LOG = function(m){ try{ console.log('[v4.11.32] ' + m); }catch(e){} };
+  var LS_OFF = 'v4pfix_enabled';
+  var WEAK = ['p','plus','一代','二代','一','二'];   // 弱别名白名单，与 app-core analyzeProducts 保持一致
+  var SCANMAX = 50;
+  var STATS = { run: 0, autoFixed: 0, align: 0, skip: 0, err: '', scan: [] };
+  var forcedKey = null;      // 本次 runGrading 的考核品（仅供 ④ 模块对齐读取）
+
+  function isOff(){ try{ return localStorage.getItem(LS_OFF) === '0'; }catch(e){ return false; } }
+  function STD(){
+    try{ if(typeof GRADING_STANDARD !== 'undefined' && GRADING_STANDARD) return GRADING_STANDARD; }catch(e){}
+    return window.GRADING_STANDARD || null;
+  }
+  function S(v){ return String(v == null ? '' : v); }
+  function txt(segs){ var o = [], i; for(i=0;i<(segs||[]).length;i++) o.push(S((segs[i]||{}).text)); return o.join('\n'); }
+  function nameOf(k){
+    var st = STD(), p = st && st.products && st.products[k];
+    return p ? S(p.name) : '';
+  }
+
+  // A 的文件名来源：只认「正在跑的任务」，**不读 DOM** —— 避免在 #/daily 跑批时误取 #/vision 已选中的文件
+  function runningFile(){
+    try{
+      var J = window.V4Jobs;
+      if(!J || !J.getJob) return '';
+      var order = ['vision','daily','batch'], i;
+      for(i=0;i<order.length;i++){
+        var jb = J.getJob(order[i]);
+        if(jb && jb.state === 'running' && jb.file && jb.file.name) return jb.file.name;
+      }
+    }catch(e){}
+    return '';
+  }
+  function laneOf(){
+    try{
+      var J = window.V4Jobs;
+      if(!J || !J.getJob) return '';
+      var order = ['vision','daily','batch'], i;
+      for(i=0;i<order.length;i++){
+        var jb = J.getJob(order[i]);
+        if(jb && jb.state === 'running') return order[i];
+      }
+    }catch(e){}
+    return '';
+  }
+
+  // B 的判据：整场是否出现任何产品别名（弱别名按 app-core 规则跳过，长度 <2 也跳过）
+  function anyAlias(segs){
+    var st = STD();
+    if(!st || !st.products) return false;
+    var low = txt(segs).toLowerCase(), k, i;
+    for(k in st.products){
+      var p = st.products[k] || {};
+      var ns = [p.name].concat(p.aliases || []);
+      for(i=0;i<ns.length;i++){
+        var a = S(ns[i]).toLowerCase();
+        if(a.length < 2 || WEAK.indexOf(a) >= 0) continue;
+        if(low.indexOf(a) >= 0) return true;
+      }
+    }
+    return false;
+  }
+
+  function apply(){
+    var ok = 0;
+
+    // ---------- A：auto → 文件名兜底（只补入口，不改已定好的 key） ----------
+    if(typeof window.runGrading === 'function'){
+      var _rg = window.runGrading;
+      window.runGrading = function(segs, productKey, opts){
+        STATS.run++;
+        var key = productKey, from = '', fn = '', lane = '';
+        if(!isOff() && key === 'auto'){
+          try{
+            fn = runningFile();
+            lane = laneOf();
+            if(fn){
+              var inf = (typeof window.detectProductFromName === 'function')
+                ? window.detectProductFromName(fn, txt(segs)) : null;
+              var st = STD();
+              if(inf && st && st.sellpoints && st.sellpoints[inf]){
+                key = inf; from = 'filename'; STATS.autoFixed++;
+                if(STATS.scan.length < SCANMAX) STATS.scan.push({ t:'A', lane: lane, file: fn, key: key });
+                LOG('A 生效：auto → ' + key + '（来自文件名「' + fn + '」，通道 ' + lane + '）');
+              }
+            }
+          }catch(e1){ STATS.err = 'infer:' + ((e1 && e1.message) || e1); LOG('A 推断异常：' + STATS.err); }
+        }
+        // 记录本场考核品，供 B 读取（一次 runGrading 的有效期内）
+        forcedKey = (!isOff() && key && key !== 'auto') ? key : null;
+        var r;
+        try{ r = _rg.call(this, segs, key, opts); }
+        finally{ forcedKey = null; }     // analyzeProducts 在 _rg 内同步调用，此处清理不影响 B
+        if(from && r && !r.noProduct){
+          // __ 开头 ⇒ publicResult 的 replacer 会剔除（workflow.js:97）⇒ 只用于本机诊断，不进存档/飞书
+          try{ r.__pfix = { from: from, key: key, file: fn, lane: lane }; }catch(e2){}
+        }
+        return r;
+      };
+      ok++;
+    }
+
+    // ---------- B：④ 模块对齐考核品（只在「结果全是专属词猜测」时介入） ----------
+    if(typeof window.analyzeProducts === 'function'){
+      var _ap = window.analyzeProducts;
+      window.analyzeProducts = function(segs){
+        var r = _ap.apply(this, arguments);
+        try{
+          var fk = forcedKey;
+          if(isOff() || !fk || !segs || !segs.length) return r;
+          var i, list = (r && r.products) || [];
+          for(i=0;i<list.length;i++){ if(list[i] && list[i].key === fk){ STATS.skip++; return r; } }  // 已识别出考核品 → 原样
+          if(anyAlias(segs)){ STATS.skip++; return r; }   // 场内有别名命中却被漏 ⇒ 另有原因，不擅自改
+          var nm = nameOf(fk);
+          if(!nm) return r;
+          // 注入一行「考核产品 <name>」→ 别名必命中 ⇒ 原生逻辑走正常路径（20 分钟窗口 / 评分全部复用）
+          var marked = [{ ts: (segs[0] && segs[0].ts) || '', text: '考核产品 ' + nm }].concat(segs);
+          var r2 = _ap.call(this, marked);
+          var got = null, list2 = (r2 && r2.products) || [];
+          for(i=0;i<list2.length;i++){ if(list2[i] && list2[i].key === fk) got = list2[i]; }
+          if(!got) return r;
+          var was = [];
+          for(i=0;i<list.length;i++) was.push(S(list[i] && list[i].name));
+          STATS.align++;
+          if(STATS.scan.length < SCANMAX) STATS.scan.push({ t:'B', key: fk, name: nm, replaced: was, rounds: got.totalRounds || 0 });
+          LOG('B 生效：④ 模块 ' + (was.join('/') || '(空)') + ' → ' + nm + '（' + (got.totalRounds||0) + ' 轮）');
+          return { products: [got], totalRounds: got.totalRounds || 0, aligned: 1, replaced: was };
+        }catch(e3){
+          STATS.err = 'align:' + ((e3 && e3.message) || e3);
+          LOG('B 对齐异常（已回退原结果）：' + STATS.err);
+          return r;
+        }
+      };
+      ok++;
+    }
+
+    return ok;
+  }
+
+  var n = apply();
+  window.V4PFX = {
+    __installed: true,
+    apply: apply,
+    on:  function(){ try{ localStorage.removeItem(LS_OFF); }catch(e){} return 'on'; },
+    off: function(){ try{ localStorage.setItem(LS_OFF, '0'); }catch(e){} return 'off'; },
+    offQ: isOff,
+    debug: function(){ return JSON.parse(JSON.stringify(STATS)); },
+    reset: function(){ STATS.run = STATS.autoFixed = STATS.align = STATS.skip = 0; STATS.err = ''; STATS.scan = []; return 'reset'; }
+  };
+  LOG('产品判定修复已装载：接管 ' + n + '/2 个函数（A 文件名兜底 + B ④ 模块对齐；口径未动）');
+})();
+
+// ---------- v4.11.33（2026-10-09）：红线「标注不判 0」区 ----------
+// 业务侧口径（老大 2026-10-09 拍板）：「C 列中如有出现了，放宽不判 0，但在细分报告中需要标注出来，
+//   了解主播的话术情况」。
+// 数据来源（只读，判定逻辑一行未动）：`r.__redline.scan.annotateHits`
+//   —— 由 violation-scan v1.3.0 的 summarize() 放进 stat；redlineApply 把整个 stat 挂到 `rel.scan`
+//   （见本文件 :1517 `rel.scan = (sc && sc.stat) ? sc.stat : null;`）⇒ 本块只读，不碰 redlineApply。
+// 挂点（关键，别改错）：
+//   ① 当场报告 —— 包装**公开函数** `window.v4AttachSemanticEvidence`（本文件 :1649 导出；
+//      workflow.js :138 / :279 均以**全局裸名**调用 ⇒ 运行时解析 ⇒ patch 生效）。
+//      ⚠️ 不能去包闭包内的 `redlineBanner` —— attachSemEvidence 直接调闭包引用，patch 不透（项目铁律）。
+//   ② 历史详情 —— 再包一层 `v4DetailSnapshot`（把标注塞进 `det.redline.notes`）
+//      + `v4DetailHTML`（prepend 标注区）。字段名用 `notes`，**不能以 __ 开头**
+//      （publicResult 的 replacer 会剔除以 __ 开头的键 ⇒ 写不进飞书）。
+// 限制（如实登记）：存量记录无法回填 —— 只有**新评分**才会沉淀 notes（与 v4.11.24「完整报告」同性质）；
+//   `#/vision`「一键完整日报」通道内部裸调 runGrading、不走 redlineApply ⇒ 该通道也没有标注数据。
+// 回退：localStorage `v4note_enabled='0'`（或 `V4NOTE.off()`）后刷新页面即恢复原状。
+(function(){
+  var LOG = function(m){ try{ console.log('[v4.11.33] ' + m); }catch(e){} };
+  var LS_OFF = 'v4note_enabled';
+  var ACC = '#c9a962';   // ITO 金 —— 与"判罚"红 #b0524c 刻意区分：这是"记录"，不是"判罚"
+  var BG  = '#f7f5f0';   // ITO 暖白底
+  var TXT = '#5c564e';
+  var SUB = '#8b857c';
+  var SHOWQ = 90;        // 当场报告引文截断
+  var SHOWN = 8;         // 单主播当场报告最多渲染条数
+  var SNAP_Q = 120;      // 存档引文截断
+  var SNAP_N = 20;       // 存档条数上限
+  var STATS = { attach:0, snap:0, html:0, err:'' };
+
+  function isOff(){ try{ return localStorage.getItem(LS_OFF) === '0'; }catch(e){ return false; } }
+  function E(v){ try{ return (typeof esc === 'function') ? esc(v) : String(v == null ? '' : v); }catch(e){ return String(v == null ? '' : v); } }
+
+  /* 只读取标注（数据在 rel.scan.annotateHits） */
+  function pick(r){
+    var rel = r && r.__redline;
+    if(!rel || !rel.scan) return null;
+    var list = rel.scan.annotateHits || [];
+    if(!list.length) return null;
+    return { n: rel.scan.annotateGroups || list.length, list: list };
+  }
+
+  /* 渲染 —— 当场报告与历史详情共用（class 不用 id：历史列表可能同时展开多条） */
+  function render(parts, withHost){
+    var total = 0, i, j;
+    for(i=0;i<parts.length;i++) total += parts[i].p.n;
+    var h = '<div class="v4note-box" style="border:1px solid ' + ACC + ';border-left:4px solid ' + ACC
+      + ';background:' + BG + ';border-radius:8px;padding:12px 14px;margin:10px 0;font-size:13px;line-height:1.7">'
+      + '<div style="font-weight:600;color:#8a6d3b;margin-bottom:6px">📌 已标注（不判 0 分）'
+      + (withHost && parts.length > 1 ? '　—— ' + parts.length + ' 位主播共 ' + total + ' 组' : '')
+      + '</div><div style="color:' + TXT + '">';
+    for(i=0;i<parts.length;i++){
+      var it = parts[i];
+      if(withHost && parts.length > 1) h += '<div style="margin-top:6px"><b>' + E(it.host || '未识别') + '</b></div>';
+      var shown = (it.p.list || []).slice(0, SHOWN);
+      for(j=0;j<shown.length;j++){
+        var x = shown[j] || {};
+        h += '<div>· ' + (x.code ? '<span style="color:#8a6d3b;font-weight:600">[' + E(x.code) + ']</span> ' : '')
+          + '<b>' + E(x.cat) + '</b>'
+          + (x.term ? '　触发词「<b>' + E(x.term) + '</b>」' : '')
+          + ((x.count || 1) > 1 ? ' ×' + x.count : '')
+          + '　<span style="color:' + SUB + '">[' + E(x.src || '字面') + ']</span>'
+          + (x.ts ? ' <span style="color:' + SUB + '">' + E(x.ts) + '</span>' : '')
+          + (x.quote ? '<div style="color:' + SUB + ';font-size:12px;margin-left:12px">「' + E(String(x.quote).slice(0, SHOWQ)) + '」</div>' : '')
+          + '</div>';
+      }
+      if((it.p.n || 0) > shown.length) h += '<div>· …另有 ' + ((it.p.n || 0) - shown.length) + ' 组标注</div>';
+    }
+    h += '</div><div style="color:' + SUB + ';font-size:12px;margin-top:6px">依据《抖音直播客观违规规则V5》'
+      + 'Sheet1「系统特殊违规项调整」C 列：以上表达需标注出来，但不作为判处 0 分的规则，不影响总分与等级。</div></div>';
+    return h;
+  }
+
+  /* ① 当场报告（单主播 / 批量都走 v4AttachSemanticEvidence） */
+  function attach(x){
+    if(isOff() || !x) return 0;
+    var arr = Array.isArray(x) ? x : [x];
+    var parts = [], i;
+    for(i=0;i<arr.length;i++){
+      var r = arr[i];
+      if(!r || !r.modules) continue;
+      var p = pick(r);
+      if(p) parts.push({ host: r.host || '', p: p });
+    }
+    if(!parts.length) return 0;
+    var host = document.getElementById('singleReport') || document.getElementById('result') || document.body;
+    if(!host) return 0;
+    if(host.querySelector && host.querySelector('.v4note-anchor')) return 0;   // 防重复
+    var box = document.createElement('div');
+    box.className = 'v4note-anchor';
+    box.innerHTML = render(parts, Array.isArray(x));
+    try{ host.insertBefore(box, host.firstChild); }catch(e){ return 0; }
+    STATS.attach++;
+    return 1;
+  }
+
+  /* ② 历史详情：存档压缩 + 渲染 */
+  function pickForSnap(r){
+    var p = pick(r);
+    if(!p) return null;
+    var out = [], i;
+    for(i=0;i<p.list.length && i<SNAP_N;i++){
+      var x = p.list[i] || {};
+      out.push({ code: String(x.code || ''), cat: String(x.cat || ''), term: String(x.term || ''),
+                 src: String(x.src || ''), ts: String(x.ts || ''), count: x.count || 1,
+                 quote: String(x.quote || '').slice(0, SNAP_Q) });
+    }
+    return { n: p.n, notes: out };
+  }
+
+  function apply(){
+    var ok = 0;
+    var _att = (typeof window !== 'undefined') && window.v4AttachSemanticEvidence;
+    if(typeof _att === 'function'){
+      window.v4AttachSemanticEvidence = function(x){
+        var ret = _att.apply(this, arguments);
+        try{ attach(x); }catch(e){ STATS.err = 'attach:' + ((e && e.message) || e); LOG(STATS.err); }
+        return ret;
+      };
+      ok++;
+    }
+    if(typeof v4DetailSnapshot === 'function'){
+      var _snap = v4DetailSnapshot;
+      v4DetailSnapshot = function(r, ts){
+        var det = _snap.apply(this, arguments);
+        try{
+          if(!isOff() && det && r){
+            var np = pickForSnap(r);
+            if(np){
+              det.redline = det.redline || {};
+              det.redline.notes  = np.notes;
+              det.redline.notesN = np.n;
+              det.redline.noteV  = '4.11.33';   // 标记"这一版能沉淀标注明细"，用于区分新旧记录
+              STATS.snap++;
+            }
+          }
+        }catch(e1){ STATS.err = 'snap:' + ((e1 && e1.message) || e1); LOG(STATS.err); }
+        return det;
+      };
+      ok++;
+    }
+    if(typeof v4DetailHTML === 'function'){
+      var _html = v4DetailHTML;
+      v4DetailHTML = function(det){
+        var h = _html.apply(this, arguments);
+        try{
+          if(!isOff() && det && det.redline && det.redline.notes && det.redline.notes.length){
+            // v4.11.22 / v4.11.31 的 wrapper 都在里层 ⇒ prepend 才能真正置顶
+            h = render([{ host:'', p:{ n: det.redline.notesN || det.redline.notes.length, list: det.redline.notes } }], false) + h;
+            STATS.html++;
+          }
+        }catch(e2){ STATS.err = 'html:' + ((e2 && e2.message) || e2); LOG(STATS.err); }
+        return h;
+      };
+      ok++;
+    }
+    return ok;
+  }
+
+  window.V4NOTE = {
+    __installed: true,
+    swap: apply,
+    on:   function(){ try{ localStorage.removeItem(LS_OFF); }catch(e){} return 'on'; },
+    off:  function(){ try{ localStorage.setItem(LS_OFF, '0'); }catch(e){} return 'off'; },
+    offQ: isOff,
+    pick: pick,
+    pickForSnap: pickForSnap,
+    attach: attach,
+    render: render,
+    probe: function(r){ var p = pick(r); return p ? { groups: p.n, list: p.list } : { groups: 0, list: [] }; },
+    debug: function(){ return { attach: STATS.attach, snap: STATS.snap, html: STATS.html, err: STATS.err,
+                                rulesV: (window.V4ViolationRules && window.V4ViolationRules._v) || '',
+                                scanV: (window.V4ViolationScan && window.V4ViolationScan._v) || '' }; }
+  };
+
+  var n = apply();
+  LOG('红线「标注不判 0」区已装载：接管 ' + n + '/1 个公开函数 + 2 个详情函数（数据源 rel.scan.annotateHits；判定逻辑未动）');
 })();

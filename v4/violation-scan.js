@@ -28,6 +28,15 @@
  *     老规则库（无 `id`）下表现为不显示编号，不会报错。
  *     ⚠️ v3.0.0 起规则库**不再有 `tier` 字段**（全表取消分级），`h.tier` 恒 undefined 属预期。
  *
+ * v1.3.0（2026-10-09）—— **新增第三处置档 `ANNOTATE`（标注不判 0）**，判定逻辑仍一行未动。
+ *     起因：业务侧按《抖音直播客观违规规则V5.xlsx》Sheet1 的 C 列「系统特殊违规项调整」拍板 ——
+ *     凡被 C 列描述涵盖的条目，**放宽不判 0 分，但必须在细分报告里标注出来**（了解主播话术情况）。
+ *     实现：`summarize()` 里按 `action === 'ANNOTATE'` 单独分一组 `annotateHits`，
+ *     并把**计数 + 压缩明细**放进 `stat.annotateHits`（壳层经 `rel.scan` 直接读取，无需改 redlineApply）：
+ *       · `sessionZero` / `moduleZero` 的判定**完全不受影响** —— ANNOTATE 既不置 sessionZero 也不置 moduleZero
+ *       · 即使某场只有 ANNOTATE 命中，`sessionZero` 仍为 false、总分不变（这是设计要求，不是漏判）
+ *     规则库 v3.1.0 起提供 `ANNOTATE` 档；老规则库（无该档）下 `annotateHits` 恒为空数组，不会报错。
+ *
  * 两层安全阀：
  *   1) EXEMPT（整场级、逐词）—— 词条落在"业务事实陈述"语境即整词豁免
  *   2) GUARD （紧邻窗口、逐命中，v1.0.2 起；v1.0.3 扩到 11 条）——
@@ -46,7 +55,11 @@
 (function(root){
   'use strict';
 
-  var _v = '1.2.0';
+  var _v = '1.3.0';
+
+  /* v1.3.0：ANNOTATE（标注不判 0）明细的压缩参数 —— 只影响 stat 里携带的展示副本，不影响判定 */
+  var ANNOT_Q = 120;    // 每条的引文截断长度
+  var ANNOT_MAX = 24;   // stat 里最多带多少条明细（防膨胀）
 
   function getRules(){
     if(root && root.V4ViolationRules) return root.V4ViolationRules;
@@ -223,6 +236,8 @@
     }
     var session = uniq.filter(function(x){ return x.action === 'SESSION_ZERO'; });
     var moduleZero = uniq.filter(function(x){ return x.action === 'MODULE_ZERO'; });
+    // v1.3.0：第三档 —— 标注不判 0。**不参与** sessionZero / moduleZero 判定，只单独成组供报告显示
+    var annotate = uniq.filter(function(x){ return x.action === 'ANNOTATE'; });
     var mods = [];
     for(var m=0;m<moduleZero.length;m++){
       if(moduleZero[m].mod && mods.indexOf(moduleZero[m].mod) < 0) mods.push(moduleZero[m].mod);
@@ -238,6 +253,8 @@
       moduleZero: mods.length > 0,
       modules: mods,
       moduleHits: moduleZero,
+      annotate: annotate.length > 0,
+      annotateHits: annotate,
       hits: uniq,
       semanticOnly: semOnly,
       stat: {
@@ -245,7 +262,13 @@
         uniqHits: uniq.length,
         sessionGroups: session.length,
         moduleGroups: moduleZero.length,
-        modules: mods.length
+        modules: mods.length,
+        annotateGroups: annotate.length,
+        // 壳层经 `rel.scan`（= 本 stat 对象）直接读取；压缩副本，避免飞书/存档膨胀
+        annotateHits: annotate.slice(0, ANNOT_MAX).map(function(h){
+          return { src: h.src, cat: h.group, code: h.code || '', term: h.term, action: 'ANNOTATE',
+                   ts: h.ts || '', quote: String(h.quote || '').slice(0, ANNOT_Q), count: h.count || 1 };
+        })
       }
     };
   }
