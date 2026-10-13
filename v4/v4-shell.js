@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.33';
+var V4_VERSION = 'v4.11.34';
 (function(){
   function paint(){
     ['pageBadge', 'brandVer', 'footVer'].forEach(function(id){
@@ -526,6 +526,55 @@ function v4SemPointName(stdId, subId){
 }
 // 压缩快照（quote 截 120 / reason 截 150，防 localStorage 膨胀；上限 300 条）
 // v4.10.3：扩捕 weight/weighted/name/desc + 派生概要（核心优势/核心问题/最优能力/最弱能力/一句话总评）——对齐截图形态
+// =====================================================
+// v4.11.34「不计违规项得分」—— 让被判 0 分的场次也能看到一个"真实讲解水平"的分
+// 业务诉求（2026-10-13 老大）：命中平台红线 ⇒ 整场 0 分 / E 级，总分上完全看不到
+//   主播真实讲得怎么样（"评分结果新增一个，不管违规项的给出一个得分结果"）。
+// 口径（写死，**不参与任何判罚**）：
+//   = **完全不做平台红线处置**时的总分，即 redlineApply 执行【之前】的 r.total。
+//   ⚠️ 它【不改变】本场 0 分判定：不写回 r.total / r.grade，不进摘要库、不进飞书任何评分字段，
+//      只作为复盘参考显示（与 v4.11.33「标注区」同性质：只加信息，不改判定）。
+// 取数两条路（精确优先，绝不拿反推值冒充精确值）：
+//   ① 精确：`r.__redline.rawTotal`（v4.11.34 起在 redlineApply 入口捕获）→ 存档 det.rawTotal
+//   ② 反推：Σ det.mods[weight>0].weighted（用于 v4.11.34 之前的**存量记录**，无 rawTotal 可取）
+//      ⚠️ 反推值 = 原总分 + 信息准确性扣分（app-core.js:579 每处 −4、封顶 −12）
+//      ⇒ 反推值是**上限**，渲染时必须带「按模块加权反推」标记，不得与精确值同款呈现。
+// 回退：localStorage `v4raw_enabled='0'`（或 V4RAW.off()）后刷新页面即恢复原状。
+// =====================================================
+function v4RawOn(){
+  try{ return localStorage.getItem('v4raw_enabled') !== '0'; }catch(e){ return true; }
+}
+function v4RawGrade(t){
+  var gs = null;
+  try{ gs = (typeof GRADING_STANDARD !== 'undefined' && GRADING_STANDARD) ? GRADING_STANDARD.grades : null; }catch(e){}
+  if(!gs || !gs.length) gs = [{name:'A',min:90},{name:'B',min:80},{name:'C',min:70},{name:'D',min:60},{name:'E',min:0}];
+  for(var i=0;i<gs.length;i++){ if(t >= gs[i].min) return gs[i].name; }
+  return 'E';
+}
+// 入参可以是运行时结果 r，也可以是存档记录 det
+function v4RawScore(x){
+  try{
+    if(!x) return null;
+    var t = null, exact = false;
+    if(x.__redline && typeof x.__redline.rawTotal === 'number'){ t = x.__redline.rawTotal; exact = true; }
+    else if(typeof x.rawTotal === 'number'){ t = x.rawTotal; exact = true; }
+    if(t == null){
+      var mods = x.mods || x.modules || [], sum = 0, has = false;
+      for(var i=0;i<mods.length;i++){
+        var m = mods[i]; if(!m) continue;
+        // ⚠️ 必须是 number 才累加：写成 `!= null` 的话，脏数据里 weighted='x' 会走字符串拼接
+        //    （0 + 'x' = '0x'）⇒ Math.round('0x'*10) = NaN ⇒ 界面显示成空，比不显示更糟。
+        if((m.weight || 0) > 0 && typeof m.weighted === 'number'){ sum += m.weighted; has = true; }
+      }
+      if(!has) return null;          // 无计权模块 ⇒ 无从反推，宁可不显示
+      t = sum;
+    }
+    var tot = Math.round(t * 10) / 10;
+    if(tot < 0) tot = 0;
+    return { total: tot, exact: exact, grade: v4RawGrade(tot) };
+  }catch(e){ return null; }
+}
+
 function v4DetailSnapshot(r, ts){
   var mods = [];
   for(var mi=0; mi<(r.modules||[]).length; mi++){
@@ -586,6 +635,11 @@ function v4DetailSnapshot(r, ts){
   else if(tot >= 80) tagline = '「整体表现优秀，保持并精细化」';
   else tagline = '「整体处于' + g + '级，需按改进建议逐项训练」';
 
+  // v4.11.34：只有「本场被红线判 0 / 模块判 0」时才沉淀原分（未判 0 时它等于 total，存了是噪音）
+  var _rl = r.__redline || null;
+  var _zeroed = !!(_rl && (_rl.sessionZero || _rl.moduleZero));
+  var _raw = _zeroed ? v4RawScore(r) : null;
+
   return {ts: ts, host: r.host, date: String(r.date||'未填'), studio: String(r.studio||''), product: String(r.product||''),
           total: r.total, grade: String(r.grade||''), c1Score: c1Score,
           bestKey: best?best.key:null, worstKey: worst?worst.key:null,
@@ -593,6 +647,12 @@ function v4DetailSnapshot(r, ts){
           strength: strength, problem: problem, tagline: tagline,
           semUsed: !!(r.__sem && r.__sem.used), mods: mods,
           scoreType:r.scoreType || 'text',
+          // v4.11.34：不计违规项得分（存档格式版本标记 = rawV，见 v4shell 头部注释；
+          //   老存档无此字段 ⇒ 渲染侧回退「按模块加权反推」）
+          rawTotal: _raw ? _raw.total : null,
+          rawGrade: _raw ? _raw.grade : null,
+          rawSrc:   _raw ? (_raw.exact ? 'exact' : 'derived') : null,
+          rawV:     _raw ? '4.11.34' : null,
           fullDaily:r.fullDaily ? JSON.parse(JSON.stringify(r.fullDaily,function(k,v){return k==='repB64'?undefined:v;})) : null};
 }
 // 落库（在 v4.3 链 orig push 摘要后调用；同 r 对象只存一次，防 renderResult 重入重复）
@@ -642,6 +702,23 @@ function v4DetailHTML(det){
   var h = '';
   // ---- 顶部：综合总分头（截图"67/D级"大字号区）----
   var gCl = (det.grade === 'A' || det.grade === 'B') ? 'var(--gold)' : (det.grade === 'C' ? 'var(--warn)' : 'var(--danger)');
+  // ---- v4.11.34：不计违规项得分（总分卡右侧并列第二块；只在本场被红线判 0 时出现）----
+  var _detRL = det.redline || null;
+  var _detZeroed = !!(_detRL && (_detRL.sessionZero || _detRL.moduleZero));
+  var _rawQ = (v4RawOn() && (_detZeroed || typeof det.rawTotal === 'number')) ? v4RawScore(det) : null;
+  if(_rawQ && !_detZeroed && _rawQ.total === det.total) _rawQ = null;   // 本就没判 0 ⇒ 不重复显示同一个数
+  var rawTile = '';
+  if(_rawQ){
+    var rCl = (_rawQ.grade === 'A' || _rawQ.grade === 'B') ? 'var(--gold)'
+            : (_rawQ.grade === 'C' ? 'var(--warn)' : 'var(--danger)');
+    rawTile = '<div class="v4raw-tile" style="text-align:center;flex:none;padding-left:14px;border-left:1px dashed var(--border)">'
+      + '<div style="font-size:34px;font-weight:800;color:' + rCl + ';line-height:1">' + _rawQ.total + '</div>'
+      + '<div style="font-size:10px;color:var(--text3);margin-top:2px">不计违规项得分 / 100</div>'
+      + '<div style="display:inline-block;margin-top:4px;padding:1px 8px;border-radius:10px;background:' + rCl
+      + ';color:#fff;font-size:11px;font-weight:700">' + esc(_rawQ.grade) + ' 级</div>'
+      + (_rawQ.exact ? '' : '<div style="font-size:9px;color:var(--text3);margin-top:3px">按模块加权反推</div>')
+      + '</div>';
+  }
   h += '<div style="display:flex;gap:14px;align-items:flex-start;padding:8px 10px;background:var(--card);border:1px solid var(--border);border-radius:8px;margin-bottom:8px">'
     + '<div style="text-align:center;flex:none">'
     + '<div style="font-size:34px;font-weight:800;color:' + gCl + ';line-height:1">' + (det.total || 0) + '</div>'
@@ -655,7 +732,11 @@ function v4DetailHTML(det){
     + (det.bestKey ? '<div><b>最优能力：</b>' + esc(v4ModNameByKey(det.mods, det.bestKey) + ' ' + v4ModScoreByKey(det.mods, det.bestKey) + ' 分') + '</div>' : '')
     + (det.worstKey ? '<div><b>最弱能力：</b>' + esc(v4ModNameByKey(det.mods, det.worstKey) + ' ' + v4ModScoreByKey(det.mods, det.worstKey) + ' 分') + '</div>' : '')
     + '<div><b style="color:var(--gold)">一句话总评：</b>' + esc(det.tagline || '—') + '</div>'
-    + '</div></div>';
+    + '</div>' + rawTile + '</div>';
+  if(_rawQ) h += '<div style="font-size:11px;color:var(--text3);margin:-2px 0 8px;line-height:1.6">'
+    + '不计违规项得分 = <b>完全不做平台红线处置</b>时的总分，仅用于了解主播真实讲解水平，<b>不改变本场 0 分判定</b>。'
+    + (_rawQ.exact ? '（精确值，本场评分时留存）'
+                   : '（上限值：按已存档模块加权反推，未扣信息准确性扣分 0～12 分）') + '</div>';
   if(det.product) h += '<div style="font-size:11.5px;color:var(--text2);margin-bottom:6px">考核产品：<b style="color:var(--ink)">' + esc(det.product) + '</b> ｜ ' + (det.semUsed ? '<span style="color:#3d6b35;font-weight:700">语义判定</span>' : '<span style="color:#9a927f">关键词规则</span>') + '</div>';
   // ---- 模块胶囊区（截图"6+2 胶囊"三列布局）----
   h += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px">';
@@ -1508,7 +1589,10 @@ document.addEventListener('DOMContentLoaded', function(){
     var rel = { _v:'4.11.31', enabled:true, sessionZero:false, moduleZero:false,
                 rulesV: (window.V4ViolationRules && window.V4ViolationRules._v) || '',
                 scanV: (S && S._v) || '',
-                reasons:[], modules:[], scan:null, err:'', guardBlocked:0, strict:false };
+                reasons:[], modules:[], scan:null, err:'', guardBlocked:0, strict:false,
+                // v4.11.34：「不计违规项得分」的唯一**精确**来源 —— 进入处置【之前】的 r.total。
+                // 下面 step 3 会把 r.total 改成 0（sessionZero）；这里先把原分留档，别处一个字不动。
+                rawTotal: (typeof r.total === 'number' ? r.total : null) };
 
     // ---- 1) 字面通道（确定性）----
     if(S && S.scan){
@@ -1609,6 +1693,19 @@ document.addEventListener('DOMContentLoaded', function(){
     if(rel.reasons.length > shown.length) h += '<div>· …另有 ' + (rel.reasons.length - shown.length) + ' 组命中</div>';
     h += '</div>';
     if(sess) h += '<div style="color:#8b857c;font-size:12px;margin-top:6px">模块明细仅供参考复盘，不计入总分。依据《抖音直播客观违规规则》。</div>';
+    // ---- v4.11.34：不计违规项得分（只在整场判 0 时追加；模块归 0 不整场归 0，总分本就是原分）----
+    if(sess && v4RawOn()){
+      var _rawB = v4RawScore(r);
+      if(_rawB){
+        var rClB = (_rawB.grade === 'A' || _rawB.grade === 'B') ? '#a8873f'
+                 : (_rawB.grade === 'C' ? '#a8873f' : '#b0524c');
+        h += '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed #e6d5d3;color:#5c564e">'
+          + '不计违规项得分：<b style="color:' + rClB + ';font-size:16px">' + _rawB.total + '</b> 分'
+          + '（<b>' + esc(_rawB.grade) + '</b> 级）'
+          + '<div style="color:#8b857c;font-size:12px">＝ 完全不做平台红线处置时的总分，仅用于了解主播真实讲解水平，'
+          + '不改变本场 0 分判定。</div></div>';
+      }
+    }
     box.innerHTML = h;
     try{ host.insertBefore(box, host.firstChild); }catch(e){ return 0; }
     return 1;
@@ -4785,4 +4882,24 @@ document.addEventListener('DOMContentLoaded', function(){
 
   var n = apply();
   LOG('红线「标注不判 0」区已装载：接管 ' + n + '/1 个公开函数 + 2 个详情函数（数据源 rel.scan.annotateHits；判定逻辑未动）');
+})();
+
+// =====================================================
+// v4.11.34「不计违规项得分」诊断入口（与 V4NOTE 并列，便于端到端回归脚本直接调用）
+// 口径全程只读：不改 r.total / r.grade，不进摘要库与飞书评分字段。
+// =====================================================
+(function(){
+  var LOG = function(m){ try{ console.log('[v4.11.34] ' + m); }catch(e){} };
+  window.V4RAW = {
+    __installed: true,
+    version: '4.11.34',
+    on:   function(){ try{ localStorage.removeItem('v4raw_enabled'); }catch(e){} return 'on'; },
+    off:  function(){ try{ localStorage.setItem('v4raw_enabled','0'); }catch(e){} return 'off'; },
+    onQ:  v4RawOn,
+    score: v4RawScore,
+    grade: v4RawGrade,
+    probe: function(x){ return v4RawScore(x); },
+    debug: function(){ return { enabled: v4RawOn(), shellV: V4_VERSION }; }
+  };
+  LOG('已装载：口径 = 红线处置【之前】的 r.total（不改判定、不回写任何评分字段）');
 })();
