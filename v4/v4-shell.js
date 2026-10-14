@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.40';
+var V4_VERSION = 'v4.11.41';
 // v4.11.36：存档格式版本 ≠ 壳层版本。rawV 只在「rawTotal/rawPen/rawBlk 这套字段的形态真变」时才动，
 //   **不跟 V4_VERSION 走**（否则每次改样式/改文案都要假装改了存档格式，溯源反而失真）。
 //   ⚠️ 渲染侧从不读 rawV（write-only 溯源标记）；断言请读本常量，别跟 V4_VERSION 比。
@@ -5213,4 +5213,741 @@ document.addEventListener('DOMContentLoaded', function(){
     debug: function(){ return { on: on(), wrapped: n, stats: STATS, shellV: V4_VERSION }; }
   };
   LOG('已装载：判 0 场次回写飞书独立列（带口径标记）；接管 ' + n + '/4 个写入口，判定逻辑未动');
+})();
+
+// =====================================================
+// v4.11.41：红线判罚「是否误判」人工撤销（老大 2026-10-14 拍板：方案 A + 留痕不真删）
+// -----------------------------------------------------
+// 需求原文：「加入一个功能按钮，是否误判；如果是误判，红线匹配违规标准的这个评分结果
+//   是需要删除这个违规，然后返回一个应有的评分结果。另外不计违规项综合评分结果 这个不需要改变。」
+//   ＋ 追加指令「不要真删除」⇒ 采用**留痕式撤销**：删除线 + 已撤销时间 + 理由 + 可随时恢复。
+//
+// 口径（本版定稿）：
+//   · 撤销的是**处置**，不是**判定**。命中仍留在 rel.reasons 里，只是不再参与「整场归零」。
+//   · 剩余未撤销的整场归零命中数 == 0 ⇒ 总分回到原分（红线处置【之前】的 r.total）。
+//   · 「未记录 违规-综合评分」列**保持不变** —— 它取的就是同一个原分（v4.11.40 口径），
+//     撤销前后是同一个数；本块**一个字都不写该列**（飞书 PUT 是部分更新，缺键不清空）。
+//   · 模块分 / 子标准分 / 信息准确性红旗 −4 处 全部不动。
+//   · ⚠️ 边界（如实登记）：命中若来自**语义通道** neg0，语义层当时已扣过子标准分，
+//     撤「整场归零」不会把那笔扣分退回来（撤销是处置层动作，不重跑判定）。要连判定一起撤属另一范畴。
+//
+// 为什么不必重算：原分在 redlineApply 入口就已存进 rel.rawTotal（v4.11.34），归零只是 r.total=0 一步。
+//   ⇒ 撤销 = 按「未撤销命中数」决定要不要那一步，纯确定性变换，零 token、零延迟。
+//   ⚠️ 老记录没有 rawTotal 时，退用 v4.11.38 的**精确复算**（模块加权 − 红旗扣分）；两者都取不到 ⇒ 拒绝撤销。
+//
+// 挂点（两个公开函数，运行时查找 ⇒ patch 生效；闭包内引用不透，铁律）：
+//   ① 当场报告：包装 window.v4AttachSemanticEvidence（workflow.js:138 全局裸调用）。
+//      ⚠️ 不能去包 window.v4RedlineBanner —— attachSemEvidence 调的是**闭包引用** redlineBanner
+//         （本文件 :2135），patch 不透；v4.11.33 选了同一个挂点，本块沿用。
+//   ② 历史详情：包装 v4DetailHTML（最外层，后加载 ⇒ 能看到内层全部产出），
+//      用 V4RLH.render(rel) 的原样输出**精确定位**并替换那段红色横幅（同一函数同一输入 ⇒ 逐字符相同）。
+//
+// 持久化（三层，目的是团队看到同一个结论）：
+//   ① r.__redline.revoked                        —— 当场即时生效
+//   ② det.rlRevoked（**不以 __ 开头**，能进存档与飞书）
+//      = { zero:0/1, n:原命中总数, list:[{fp,code,cat,term,src,ts,action,quote,at,note}] }
+//   ③ 飞书 PUT { result:{host,date,total,modules,v4Report} }：
+//      · modules **必带全 c1–c8**（feishu-fill 无条件写这 8 列，缺一个就会把那列写空 ⇒ 本块宁可不写）
+//      · 不传 rawScoreText ⇒「未记录 违规-综合评分」列不动 ✓
+//      · v4Report = 更新后的 det ⇒ 换人 / 换机器也看得到撤销结论
+//
+// 回退：localStorage `v4rev_enabled='0'` + 刷新 ⇒ 按钮与留痕消失，判定回到 v4.11.40 原状。
+// 诊断：V4RLREV.debug() / .off() / .on() / .probe(r)
+// 已知不做（如实登记）：
+//   · 批量（≥2 主播）只有汇总横幅、无逐条明细 ⇒ 不挂按钮；
+//   · `#/vision` 一键完整日报本就是红线盲区（裸调 runGrading、不走 redlineApply）⇒ 无横幅即无按钮；
+//   · 云端「历史评分」表（tblkN1e6yCtXl5bG）本块不写，只写「主播日报」表 + 本机存档 ⇒
+//     历史列表行的分数以本机存档为准，跨机看该表仍是旧值（待老大决定是否另开一轮补）。
+// =====================================================
+(function(){
+  if(typeof window === 'undefined' || typeof document === 'undefined') return;
+  if(window.V4RLREV && window.V4RLREV.__installed) return;
+
+  var LOG = function(m){ try{ console.log('[v4.11.41] ' + m); }catch(e){} };
+  var LS_OFF = 'v4rev_enabled';
+  function on(){ try{ return localStorage.getItem(LS_OFF) !== '0'; }catch(e){ return true; } }
+  // ⚠️ 必须自己挡 null/undefined：本文件里 `esc` 有多份实现（其中一份不挡 null），
+  //   一旦漏挡，报告里就会出现字面 "undefined"（沙箱用例抓到过 data-v4host="undefined"）。
+  function E(v){ if(v == null) return ''; try{ return (typeof esc === 'function') ? esc(v) : String(v); }catch(e){ return String(v); } }
+
+  // 视觉：与 v4.11.17 当场横幅 / v4.11.32 历史块逐项对齐（ITO 金白；判罚红 / 留痕金）
+  var ACC_RED = '#b0524c', BG_RED = '#fbf3f2';
+  var ACC_GOLD = '#c9a962', BG_GOLD = '#fbf8ef';
+  var GOLD_TXT = '#8a6d3b';
+  var TXT = '#5c564e', SUB = '#8b857c';
+  var SHOWQ = 90, SHOWN = 8;
+
+  var STATS = { toggle:0, revoke:0, restore:0, fbOk:0, fbFail:0, fbSkip:'', localOk:0, err:'' };
+
+  // ---------------- 指纹：内容级主键 ----------------
+  // 六元组 code/src/cat/term/ts/action。同场两条**完全一样**的命中会一起撤（实际极少，可接受）。
+  var SEP = '\u0001';
+  function fp(x){
+    x = x || {};
+    return [x.code||'', x.src||'', x.cat||'', x.term||'', x.ts||'', x.action||''].join(SEP);
+  }
+  function nowStr(){
+    try{
+      var d = new Date(), p = function(n){ return (n<10?'0':'') + n; };
+      return d.getFullYear() + '-' + p(d.getMonth()+1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+    }catch(e){ return ''; }
+  }
+
+  // ---------------- 归一化：运行时 rel / 存档 det 两路统一 ----------------
+  function normRel(rel, rb){
+    rel = rel || {};
+    var revs = rel.revoked || [];
+    var raw = rel.reasons || null;
+    if((!raw || !raw.length) && rb && rb.list && rb.list.length){
+      // 全部撤销后 v4.11.32 的 pick 会返回 null ⇒ det.redline 不再含 reasons，
+      //   此处用自己沉淀的槽位兜底渲染（否则留痕整块消失）。
+      raw = rb.list.map(function(v){
+        return { code:v.code, cat:v.cat, term:v.term, src:v.src, ts:v.ts, action:v.action,
+                 quote:v.quote, revoked:true, revAt:v.at, revNote:v.note, fp:v.fp };
+      });
+    }
+    raw = raw || [];
+    var list = [], actN = 0, revN = 0, i, k;
+    for(i=0;i<raw.length;i++){
+      var x = raw[i] || {};
+      var f = x.fp || fp(x);
+      var rv = x.revoked ? { at:x.revAt || '', note:x.revNote || '' } : null;
+      if(!rv) for(k=0;k<revs.length;k++){ if(String((revs[k]||{}).fp || '') === f){ rv = { at:(revs[k]||{}).at || '', note:(revs[k]||{}).note || '' }; break; } }
+      if(!rv && rb && rb.list) for(k=0;k<rb.list.length;k++){
+        if(String((rb.list[k]||{}).fp || '') === f){ rv = { at:(rb.list[k]||{}).at || '', note:(rb.list[k]||{}).note || '' }; break; }
+      }
+      list.push({ x:x, fp:f, rid:i, rev:rv });
+      if(rv) revN++; else actN++;
+    }
+    var sess = !!rel.sessionZero;
+    return {
+      sess: sess,
+      zeroBase: (rb && rb.zero) ? true : (rel.zeroBase !== undefined ? !!rel.zeroBase : sess),
+      list: list, actN: actN, revN: revN,
+      total: Math.max(list.length, (rb && typeof rb.n === 'number') ? rb.n : 0)
+    };
+  }
+
+  // 原分（撤销后要回填的那个数）：优先 rawTotal 留存，退用 v4.11.38 精确复算
+  function rawOf(x, rel){
+    if(rel && typeof rel.rawTotal === 'number') return rel.rawTotal;
+    if(x && typeof x.rawTotal === 'number') return x.rawTotal;
+    try{
+      var q = (typeof v4RawScore === 'function') ? v4RawScore(x) : null;
+      if(q && q.exact && typeof q.total === 'number') return q.total;   // via='rebuilt' 精确复算
+    }catch(e){}
+    return null;
+  }
+
+  // ---------------- 重算：只动 total / grade ----------------
+  function recountRel(rel){
+    var revs = rel.revoked || [], rs = rel.reasons || [];
+    var zeroR = 0, revN = 0, i, k;
+    for(i=0;i<rs.length;i++){
+      var x = rs[i] || {}, rv = false;
+      for(k=0;k<revs.length;k++){ if(String((revs[k]||{}).fp || '') === fp(x)){ rv = true; break; } }
+      x.revoked = rv;
+      if(rv) revN++;
+      else if(x.action !== 'MODULE_ZERO') zeroR++;
+    }
+    if(rel.zeroBase === undefined) rel.zeroBase = !!rel.sessionZero;   // 只落一次 ⇒ 幂等
+    rel.revokedN = revN; rel.activeN = rs.length - revN; rel.zeroReasons = zeroR;
+    // 原始未判 0 ⇒ 撤销不影响归零；原始判 0 且**无任何条目**可撤 ⇒ 保持原判（绝不误撤）
+    rel.sessionZero = rel.zeroBase ? (zeroR > 0 || rs.length === 0) : false;
+    return rel.sessionZero;
+  }
+  function recomputeRev(r){
+    var rel = r && r.__redline;
+    if(!rel) return false;
+    var rawT = rawOf(r, rel);
+    if(rawT === null && !rel.sessionZero) return false;
+    var sess = recountRel(rel);
+    if(sess){ r.total = 0; r.grade = 'E'; }
+    else { r.total = rawT; r.grade = v4RawGrade(rawT); }
+    return true;
+  }
+  function canRevoke(rel, rawT){
+    if(!rel) return { ok:false, why:'本场没有红线判罚数据' };
+    var has = (rel.revoked && rel.revoked.length) || 0;
+    // ⚠️ 本块处理的是**整场归零**（sessionZero）。v3.1.x 起 MODULE_ZERO 恒不产生
+    //   （见 violation-rules.js v3.0.0 说明）；万一是老存档留下的模块归零记录，
+    //   撤销它**不影响总分**（本块不回滚 redlineZeroModule 的模块扣分）⇒
+    //   与其给一个"按了没反应"的死按钮，不如明确拒绝并说明。
+    var sessRel = !!rel.sessionZero || !!rel.zeroBase;
+    if(!sessRel && !has) return { ok:false, why:'本场未被整场判 0，撤销对综合评分无影响，故不提供' };
+    if(typeof rawT !== 'number') return { ok:false, why:'取不到本场原分（记录过旧，无原分留存也复算不出），撤销后无法回填分数，已阻止' };
+    return { ok:true, why:'' };
+  }
+
+  // ---------------- 渲染 ----------------
+  function btn(act, rid, scope){
+    // ⚠️ 表头的两个动作是 'allrev' / 'allunrev'，不能只判 'rev' ——
+    //   写漏了会让「全部误判」显示成「恢复」（沙箱用例 L1 抓到过一次）。
+    var isRev = (act === 'rev' || act === 'allrev');
+    var s = 'font-size:12px;padding:1px 8px;margin-left:8px;border-radius:4px;cursor:pointer;line-height:1.5;'
+          + 'border:1px solid ' + (isRev ? ACC_RED : ACC_GOLD) + ';background:#fff;color:' + (isRev ? ACC_RED : GOLD_TXT);
+    var a = ' type="button" data-v4rev="' + act + '" style="' + s + '"';
+    if(typeof rid === 'number' && rid >= 0) a += ' data-v4rid="' + rid + '"';
+    // 空值不落属性：`data-v4host=""` 会让 onClick 误判成"历史路径"且定位失败
+    if(scope && scope.ts != null && scope.ts !== '') a += ' data-v4ts="' + E(scope.ts) + '"';
+    if(scope && scope.host != null && scope.host !== '') a += ' data-v4host="' + E(scope.host) + '"';
+    var label = (act === 'allrev') ? '全部误判' : (act === 'allunrev') ? '全部恢复' : (isRev ? '误判' : '恢复');
+    return '<button' + a + '>' + label + '</button>';
+  }
+
+  function innerHTMLOf(n, scope){
+    var sess = n.sess, acc = sess ? ACC_RED : ACC_GOLD;
+    var title = sess ? '命中平台红线 —— 本场总分按 0 计'
+              : (n.zeroBase ? '全部命中已撤销（误判）—— 本场按原分计'
+                            : '命中平台红线 —— 对应能力模块按 0 计');
+    var h = '<div style="font-weight:600;color:' + acc + ';margin-bottom:6px;display:flex;align-items:center;flex-wrap:wrap;gap:6px">'
+          + '<span>' + title + '</span>';
+    var btns = '';
+    // 只在该场**确实存在「整场归零」可撤**时才给按钮（未判 0 / 仅模块归零 ⇒ 没有可撤的处置，
+    //   给了也是死按钮 —— 与 canRevoke 同一口径）。
+    var canAct = !!(n.zeroBase || n.revN > 0);
+    if(canAct && n.actN > 0) btns += btn('allrev', -1, scope);
+    if(canAct && n.revN > 0) btns += btn('allunrev', -1, scope);
+    if(btns) h += '<span style="margin-left:auto;font-weight:400">' + btns + '</span>';
+    h += '</div><div style="color:' + TXT + '">';
+
+    var shown = n.list.slice(0, SHOWN), i;
+    for(i=0;i<shown.length;i++){
+      var it = shown[i], x = it.x || {}, rv = it.rev;
+      var strike = rv ? 'text-decoration:line-through;color:' + SUB : '';
+      h += '<div style="' + (rv ? 'opacity:.78;' : '') + '">· '
+        + (x.code ? '<span style="color:' + (rv ? SUB : acc) + ';font-weight:600">[' + E(x.code) + ']</span> ' : '')
+        + '<b style="' + strike + '">' + E(x.cat) + '</b>'
+        + (x.term ? '　触发词「<b style="' + strike + '">' + E(x.term) + '</b>」' : '')
+        + '　<span style="color:' + SUB + '">[' + E(x.src) + '（' + (x.action === 'MODULE_ZERO' ? '模块归0' : '整场归0') + '）]</span>'
+        + (x.ts ? ' <span style="color:' + SUB + '">' + E(x.ts) + '</span>' : '')
+        + (canAct ? btn(rv ? 'unrev' : 'rev', it.rid, scope) : '')
+        + (x.quote ? '<div style="color:' + SUB + ';font-size:12px;margin-left:12px">「' + E(String(x.quote).slice(0, SHOWQ)) + '」</div>' : '')
+        + (rv ? '<div style="color:' + GOLD_TXT + ';font-size:12px;margin-left:12px">已撤销（误判）'
+              + (rv.at ? ' · ' + E(rv.at) : '') + '　理由：' + E(rv.note || '未填写') + '</div>' : '')
+        + '</div>';
+    }
+    if(n.total > shown.length) h += '<div>· …另有 ' + (n.total - shown.length) + ' 组命中</div>';
+    h += '</div>';
+
+    var note = '';
+    if(sess){
+      note = '模块明细仅供参考复盘，不计入总分。依据《抖音直播客观违规规则》。'
+           + (canAct ? '<br>点「误判」= 撤回本条判罚并回填原分（留痕，可随时「恢复」）'
+             + (n.revN ? '；已撤销 ' + n.revN + ' 条。' : '。') : '');
+    } else if(n.zeroBase){
+      note = '本条判罚已被人工复核撤销 ⇒ 本场按原分计'
+           + (n.revN ? '（共撤销 ' + n.revN + ' 条）' : '')
+           + '；模块明细与子标准分一字未改。'
+           + '<br>「未记录 违规-综合评分」列保持原值不变（它本就是「不做红线处置」的口径，与撤销后总分同值）。';
+    }
+    if(note) h += '<div style="color:' + SUB + ';font-size:12px;margin-top:6px">' + note + '</div>';
+    return h;
+  }
+
+  function boxStyleOf(n, margin){
+    var acc = n.sess ? ACC_RED : ACC_GOLD;
+    return 'border:1px solid ' + acc + ';border-left:4px solid ' + acc
+      + ';background:' + (n.sess ? BG_RED : BG_GOLD)
+      + ';border-radius:8px;padding:12px 14px;margin:' + (margin || '10px 0') + ';font-size:13px;line-height:1.7';
+  }
+
+  // ---------------- 沉淀 / 反沉淀 ----------------
+  function sinkOf(rel){
+    var revs = (rel && rel.revoked) || [];
+    if(!revs.length) return null;
+    var list = [], i;
+    for(i=0;i<revs.length;i++){
+      var v = revs[i] || {};
+      list.push({ fp:String(v.fp||''), code:String(v.code||''), cat:String(v.cat||''), term:String(v.term||''),
+                  src:String(v.src||''), ts:String(v.ts||''), action:String(v.action||''),
+                  quote:String(v.quote||'').slice(0,120), at:String(v.at||''), note:String(v.note||'').slice(0,120) });
+    }
+    return { zero: rel.zeroBase ? 1 : 0, n: ((rel.reasons||[]).length), list: list };
+  }
+  // 运行时 rel → 存档形状（与 v4.11.32 的 pick 同构，供历史详情继续用 v4.11.32 的渲染契约）
+  function archiveRel(rel){
+    if(!rel) return null;
+    var out = [], rs = rel.reasons || [];
+    for(var i=0;i<rs.length;i++){
+      var x = rs[i] || {};
+      out.push({ cat:String(x.cat||''), code:String(x.code||''), term:String(x.term||''),
+                 src:String(x.src||''), action:String(x.action||''), ts:String(x.ts||''),
+                 quote:String(x.quote||'').slice(0,120) });
+    }
+    return { sessionZero: !!rel.sessionZero, moduleZero: !!rel.moduleZero,
+             n: out.length, reasons: out };
+  }
+
+  // ---------------- 持久化：本机存档 + 飞书 ----------------
+  function fbReady(){ try{ return window.FEISHU_FILL_URL || ''; }catch(e){ return ''; } }
+  // feishu-fill 无条件写「综合评分」+ c1–c8 ⇒ 必须带齐 8 个 key，缺一个就会把那列写空
+  var CN = ['c1','c2','c3','c4','c5','c6','c7','c8'];
+  function modsForWrite(mods){
+    var map = {}, i;
+    for(i=0;i<(mods||[]).length;i++){ var m = mods[i]; if(m && m.key && typeof m.score === 'number') map[m.key] = m.score; }
+    var out = [];
+    for(i=0;i<CN.length;i++){
+      if(typeof map[CN[i]] !== 'number') return null;      // 不齐 ⇒ 宁可不写，也不清空别人的列
+      out.push({ key: CN[i], score: map[CN[i]] });
+    }
+    return out;
+  }
+  // 载荷构造单独成函数（v4.11.41）：只为**可验证** —— 验证脚本能直接取到「将要发出去的 body」，
+  //   断言里面没有 rawScoreText（⇒「未记录 违规-综合评分」列不动）且 c1–c8 齐全。行为与原来逐字符相同。
+  function buildBody(det, total){
+    det = det || {};
+    var mods = modsForWrite(det.mods);
+    if(!mods) return { ok:false, why:'存档缺 c1–c8 任一能力分，已阻止写入（避免清空飞书列）' };
+    var body = { host: det.host, date: det.date, studio: det.studio,
+                 result: { host: det.host, date: det.date, total: total, modules: mods } };
+    var warn = '';
+    try{
+      var rep = JSON.stringify(det);
+      if(rep.length <= 95000) body.result.v4Report = rep;
+      else warn = '（报告 ' + rep.length + ' 字符超上限，本次未写报告列，综合评分照写）';
+    }catch(e){}
+    return { ok:true, body: body, warn: warn };
+  }
+  function fbWrite(det, total, cb){
+    var url = fbReady();
+    if(!url){ STATS.fbSkip = '未配置写回端点'; cb && cb({ ok:false, why:STATS.fbSkip }); return; }
+    if(!/^\d{4}-\d{1,2}-\d{1,2}/.test(String((det && det.date) || ''))){
+      STATS.fbSkip = '日期格式非常规，已阻止写入（避免建重复行）';
+      cb && cb({ ok:false, why:STATS.fbSkip }); return;
+    }
+    var bb = buildBody(det, total);
+    if(!bb.ok){ STATS.fbSkip = bb.why; cb && cb({ ok:false, why:bb.why }); return; }
+    var body = bb.body, repWarn = bb.warn;
+    fetch(url, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(body) })
+      .then(function(res){ return res.json().catch(function(){ return {}; }); })
+      .then(function(j){
+        if(j && j.ok){ STATS.fbOk++; cb && cb({ ok:true, warn:repWarn }); }
+        else { STATS.fbFail++; cb && cb({ ok:false, why:((j && (j.reason || j.error)) || '写入被拒绝') + repWarn }); }
+      })
+      .catch(function(e){ STATS.fbFail++; cb && cb({ ok:false, why:((e && e.message) || '网络失败') + repWarn }); });
+  }
+  // 本机存档：按 ts+host 就地更新（没有就按 host+日期 兜底找最近一条）
+  function localSave(det){
+    try{
+      var ds = v4ReadLS('grading_detail_v1', '[]'), hit = -1, i;
+      for(i=0;i<ds.length;i++){ if(det.ts != null && String(ds[i].ts) === String(det.ts) && ds[i].host === det.host){ hit = i; break; } }
+      if(hit < 0) for(i=ds.length-1;i>=0;i--){
+        if(ds[i].host === det.host && String(ds[i].date||'') === String(det.date||'')){ hit = i; break; }
+      }
+      if(hit < 0) return false;
+      if(det.rlRevoked) ds[hit].rlRevoked = det.rlRevoked; else delete ds[hit].rlRevoked;
+      // ⚠️ revV 必须跟着一起存（真机实测抓到过：只存了 rlRevoked、没存 revV ⇒
+      //   存量记录缺格式标记，日后无法判断它是不是"会留痕的那一版"产出的）。
+      if(det.revV) ds[hit].revV = det.revV; else delete ds[hit].revV;
+      if(det.redline) ds[hit].redline = det.redline; else delete ds[hit].redline;
+      ds[hit].total = det.total; ds[hit].grade = det.grade;
+      localStorage.setItem('grading_detail_v1', JSON.stringify(ds));
+      STATS.localOk++;
+      return true;
+    }catch(e){ STATS.err = 'localSave:' + ((e && e.message) || e); return false; }
+  }
+  // 摘要库（历史列表行显示的就是它）
+  function localSaveSummary(det){
+    try{
+      var lib = v4ReadLS('grading_history_v1', '[]'), hit = -1, i;
+      for(i=lib.length-1;i>=0;i--){
+        if(det.ts != null && String(lib[i].ts) === String(det.ts) && lib[i].host === det.host){ hit = i; break; }
+      }
+      if(hit < 0) for(i=lib.length-1;i>=0;i--){
+        if(lib[i].host === det.host && String(lib[i].date||'') === String(det.date||'')){ hit = i; break; }
+      }
+      if(hit < 0) return false;
+      lib[hit].total = det.total; lib[hit].grade = det.grade;
+      localStorage.setItem('grading_history_v1', JSON.stringify(lib));
+      return true;
+    }catch(e){ return false; }
+  }
+  function findTsFor(r){
+    try{
+      var lib = v4ReadLS('grading_history_v1', '[]');
+      for(var i=lib.length-1;i>=0;i--){
+        if(lib[i] && lib[i].host === r.host && String(lib[i].date||'') === String(r.date||'')) return lib[i].ts;
+      }
+    }catch(e){}
+    return null;
+  }
+
+  // ---------------- 当场报告：DOM 重绘 ----------------
+  function hostOf(root){
+    return root || document.getElementById('singleReport') || document.getElementById('result') || document.body;
+  }
+  function isAux(el){
+    if(!el || el.nodeType !== 1) return true;
+    if(el.id === 'redlineBanner') return true;
+    var c = String(el.className || '');
+    return c.indexOf('v4raw-result-box') >= 0 || c.indexOf('v4note-anchor') >= 0;
+  }
+  function mainCardOf(host){
+    for(var n = host.firstChild; n; n = n.nextSibling){ if(n.nodeType === 1 && !isAux(n)) return n; }
+    return null;
+  }
+  function paintScore(r){
+    try{
+      var ts = document.getElementById('totalScore'); if(ts) ts.textContent = r.total;
+      var gb = document.getElementById('gradeBadge');
+      if(gb){ gb.textContent = r.grade + ' 级'; gb.className = 'grade g' + r.grade; }
+    }catch(e){}
+  }
+  function syncRawCard(r, host){
+    if(!host) return;
+    var cur = host.querySelector ? host.querySelector('.v4raw-result-box') : null;
+    var want = !!(r.__redline && r.__redline.sessionZero) && v4RawOn();
+    if(want && !cur){
+      var blk = v4RawResultHTML(v4DetailSnapshot(r, Date.now()), 'daily');
+      if(blk){
+        var d = document.createElement('div');
+        d.className = 'v4raw-result-box';
+        d.innerHTML = blk;
+        var main = mainCardOf(host);
+        try{ host.insertBefore(d, main ? main.nextSibling : null); }catch(e){}
+      }
+    } else if(!want && cur && cur.parentNode){
+      cur.parentNode.removeChild(cur);
+    }
+  }
+  function repaintRuntime(r, root){
+    if(!r || !r.__redline) return;
+    var host = hostOf(root), n = normRel(r.__redline, null);
+    var want = n.sess || n.revN > 0;
+    var box = document.getElementById('redlineBanner');
+    if(box && box.parentNode && !want){ box.parentNode.removeChild(box); box = null; }
+    if(!want){ syncRawCard(r, host); paintScore(r); return; }
+    if(!box){
+      box = document.createElement('div');
+      box.id = 'redlineBanner';
+      try{ host.insertBefore(box, host.firstChild); }catch(e){ return; }
+    }
+    box.style.cssText = boxStyleOf(n, '10px 0');
+    box.innerHTML = innerHTMLOf(n, null);
+    syncRawCard(r, host);
+    paintScore(r);
+  }
+
+  // ---------------- 历史详情：只重渲染该条详情容器（展开是纯 CSS checkbox，整表重渲染会收起） ----------------
+  function historyBlock(det){
+    var rel = det && det.redline, rb = det && det.rlRevoked;
+    if(!rel && !(rb && rb.list && rb.list.length)) return '';
+    var n = normRel(rel, rb);
+    if(!n.list.length && !n.revN && !n.sess) return '';
+    return '<div class="v4rl-his" style="' + boxStyleOf(n, '0 0 10px') + '">'
+         + innerHTMLOf(n, { ts: det.ts, host: det.host }) + '</div>';
+  }
+  function syncSummary(sumEl, det){
+    if(!sumEl) return;
+    try{
+      var sp = sumEl.querySelector('span[style*="min-width:52px"]');
+      var b = sp ? sp.querySelector('b') : null;
+      if(b) b.textContent = det.total;
+      var gs = sumEl.querySelector('span[style*="font-size:10.5px"]');
+      if(gs) gs.textContent = det.grade || '';
+    }catch(e){}
+  }
+  function repaintHistory(anchorEl, det){
+    try{
+      var detEl = anchorEl && anchorEl.parentNode;
+      if(detEl && detEl.className && String(detEl.className).indexOf('v4his-det') >= 0){
+        detEl.innerHTML = v4DetailHTML(det);
+        syncSummary(detEl.previousElementSibling, det);
+        return true;
+      }
+    }catch(e){ STATS.err = 'repaintHistory:' + ((e && e.message) || e); }
+    try{ if(typeof window.v4ArchRender === 'function') window.v4ArchRender('history'); }catch(e2){}
+    return false;
+  }
+
+  // ---------------- 切换 ----------------
+  function toggleOne(rel, idx){
+    var x = (rel.reasons || [])[idx];
+    if(!x) return { ok:false, why:'该条命中已不存在（记录可能已刷新），未做任何改动' };
+    var f = fp(x);
+    rel.revoked = rel.revoked || [];
+    var found = -1, i;
+    for(i=0;i<rel.revoked.length;i++){ if(String((rel.revoked[i]||{}).fp || '') === f){ found = i; break; } }
+    if(found >= 0){ rel.revoked.splice(found, 1); STATS.restore++; }
+    else {
+      rel.revoked.push({ fp:f, code:x.code||'', cat:x.cat||'', term:x.term||'', src:x.src||'',
+                         ts:x.ts||'', action:x.action||'', quote:String(x.quote||'').slice(0,120),
+                         at:nowStr(), note:'' });
+      STATS.revoke++;
+    }
+    recountRel(rel); STATS.toggle++;
+    return { ok:true, action: (found >= 0 ? 'restore' : 'revoke') };
+  }
+  function toggleAll(rel, toRevoke){
+    var rs = rel.reasons || [], i, k;
+    rel.revoked = rel.revoked || [];
+    for(i=0;i<rs.length;i++){
+      var x = rs[i] || {}, f = fp(x), found = -1;
+      for(k=0;k<rel.revoked.length;k++){ if(String((rel.revoked[k]||{}).fp || '') === f){ found = k; break; } }
+      if(toRevoke && found < 0){
+        rel.revoked.push({ fp:f, code:x.code||'', cat:x.cat||'', term:x.term||'', src:x.src||'',
+                           ts:x.ts||'', action:x.action||'', quote:String(x.quote||'').slice(0,120),
+                           at:nowStr(), note:'' });
+      } else if(!toRevoke && found >= 0){ rel.revoked.splice(found, 1); }
+    }
+    recountRel(rel); STATS.toggle++;
+    return { ok:true, action: (toRevoke ? 'revoke' : 'restore') };
+  }
+
+  // ---------------- 提示条 ----------------
+  function toast(msg, bad){
+    try{
+      var el = document.getElementById('v4rev-toast');
+      if(!el){
+        el = document.createElement('div');
+        el.id = 'v4rev-toast';
+        el.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:9999;max-width:420px;'
+          + 'padding:10px 14px;border-radius:8px;font-size:12.5px;line-height:1.6;pointer-events:none';
+        document.body.appendChild(el);
+      }
+      el.style.background = bad ? BG_RED : BG_GOLD;
+      el.style.border = '1px solid ' + (bad ? ACC_RED : ACC_GOLD);
+      el.style.color = bad ? ACC_RED : GOLD_TXT;
+      el.innerHTML = msg;
+      el.style.display = 'block';
+      clearTimeout(el.__t);
+      el.__t = setTimeout(function(){ try{ el.style.display = 'none'; }catch(e){} }, 6000);
+    }catch(e){}
+  }
+
+  // ---------------- 点击（事件委托：重渲染后按钮依然有效） ----------------
+  function findBtn(el){
+    for(var n = el; n && n !== document; n = n.parentNode){
+      if(n.nodeType === 1 && n.getAttribute && n.getAttribute('data-v4rev')) return n;
+    }
+    return null;
+  }
+  function commitRuntime(r, act){
+    var rel = r.__redline, host = hostOf(null);
+    repaintRuntime(r, null);
+    var det = null;
+    try{ det = v4DetailSnapshot(r, findTsFor(r) || Date.now()); }catch(e){}
+    if(det){ localSave(det); localSaveSummary(det); }
+    toast('已' + (act === 'restore' ? '恢复' : '撤销') + '本条判罚 —— 本场综合评分 '
+          + (rel.sessionZero ? '仍为 0（还剩未撤销命中）' : '回填为 ' + r.total) + '，正在同步飞书…', false);
+    if(!det) return;
+    fbWrite(det, r.total, function(res){
+      toast('已' + (act === 'restore' ? '恢复' : '撤销') + '本条判罚 —— 本场综合评分 '
+            + (rel.sessionZero ? '仍为 <b>0</b>（还剩未撤销命中）' : '回填为 <b>' + r.total + '</b>')
+            + (res && res.ok ? '　已同步飞书「综合评分」' + (res.warn || '')
+                             : '　⚠️ 飞书未同步：' + ((res && res.why) || '未知原因') + '（本机已生效）'), false);
+    });
+  }
+  function commitHistory(det, rel, anchorEl, act){
+    var rawT = rawOf(det, rel);
+    det.total = rel.sessionZero ? 0 : (typeof rawT === 'number' ? rawT : det.total);
+    det.grade = v4RawGrade(det.total);
+    // 存档不变式（与 v4.11.41 快照包装同一口径，负对照要求逐字节相同）：
+    //   `rlRevoked` / `revV` 存在 ⟺ 至少有一条撤销留痕；全部恢复后回到"从未撤销"的形状，不留空壳字段。
+    var s2 = sinkOf(rel);
+    if(s2){ det.rlRevoked = s2; det.revV = '4.11.41'; }
+    else { delete det.rlRevoked; delete det.revV; }
+    if(rel.sessionZero){
+      // ⚠️ 必须换回**存档形状**（v4.11.32 的契约），不能把运行时 rel 原样塞进去；
+      //   同时保住 v4.11.33 的标注明细（notes / notesN / noteV），否则一次撤销会把它抹掉。
+      var keep = det.redline || {};
+      var ar = archiveRel(rel);
+      if(keep.notes){ ar.notes = keep.notes; ar.notesN = keep.notesN; ar.noteV = keep.noteV; }
+      det.redline = ar;
+    }
+    else { delete det.redline; }
+    localSave(det); localSaveSummary(det);
+    repaintHistory(anchorEl, det);
+    toast('历史记录已' + (act === 'restore' ? '恢复' : '撤销') + ' —— 综合评分 <b>' + det.total
+          + '</b>，正在同步飞书…', false);
+    fbWrite(det, det.total, function(res){
+      toast('历史记录已' + (act === 'restore' ? '恢复' : '撤销') + ' —— 综合评分 <b>' + det.total + '</b>'
+            + (res && res.ok ? '　已同步飞书。' + (res.warn || '')
+                             : '　⚠️ 飞书未同步：' + ((res && res.why) || '未知原因') + '（本机已更新）'), false);
+    });
+  }
+
+  function onClick(ev){
+    var b = findBtn(ev.target);
+    if(!b || !on()) return;
+    try{ ev.preventDefault(); ev.stopPropagation(); }catch(e){}
+    var act = String(b.getAttribute('data-v4rev') || '');
+    var rid = parseInt(b.getAttribute('data-v4rid'), 10);
+    var ts = b.getAttribute('data-v4ts'), hs = b.getAttribute('data-v4host');
+    var isAll = (act === 'allrev' || act === 'allunrev');
+    var toRev = (act === 'rev' || act === 'allrev');
+    var anchorEl = b.parentNode;
+    while(anchorEl && anchorEl !== document.body && !(anchorEl.className && String(anchorEl.className).indexOf('v4rl-his') >= 0)) anchorEl = anchorEl.parentNode;
+    if(anchorEl === document.body) anchorEl = null;
+
+    // ---- 历史详情路径（按钮带 ts/host） ----
+    if(ts){
+      var det = null;
+      try{ det = v4DetailByTs(ts, hs); }catch(e){}
+      if(!det){ toast('找不到该条历史记录（可能已被清理），未做任何改动。', true); return; }
+      var rel = det.redline;
+      if(!rel){
+        var rb0 = det.rlRevoked;
+        if(!(rb0 && rb0.list && rb0.list.length)){ toast('该记录未沉淀红线数据，无法撤销。', true); return; }
+        rel = { sessionZero: !!rb0.zero, moduleZero: false, zeroBase: !!rb0.zero,
+                rawTotal: (typeof det.rawTotal === 'number' ? det.rawTotal : null),
+                reasons: rb0.list.map(function(v){ return { code:v.code, cat:v.cat, term:v.term, src:v.src,
+                         ts:v.ts, action:v.action, quote:v.quote }; }),
+                revoked: rb0.list.map(function(v){ return { fp:v.fp, at:v.at, note:v.note }; }) };
+      } else {
+        // 存档里的 sessionZero 就是「本次处置前的原始判定」（撤销只改这个字段）⇒ 直接当基线
+        if(rel.zeroBase === undefined) rel.zeroBase = !!rel.sessionZero;
+      }
+      var rawH = rawOf(det, rel);
+      var can2 = canRevoke(rel, rawH);
+      if(!can2.ok){ toast(can2.why, true); return; }
+      var res2 = isAll ? toggleAll(rel, toRev) : toggleOne(rel, rid);
+      if(!res2.ok){ toast(res2.why, true); return; }
+      commitHistory(det, rel, anchorEl, res2.action);
+      return;
+    }
+
+    // ---- 当场报告路径 ----
+    var r = LAST_R;
+    if(!r || !r.__redline){ toast('未找到本场结果（请刷新后重试），未做任何改动。', true); return; }
+    var can = canRevoke(r.__redline, rawOf(r, r.__redline));
+    if(!can.ok){ toast(can.why, true); return; }
+    var res = isAll ? toggleAll(r.__redline, toRev) : toggleOne(r.__redline, rid);
+    if(!res.ok){ toast(res.why, true); return; }
+    if(!recomputeRev(r)){ toast('重算失败：取不到本场原分，已放弃本次撤销。', true); return; }
+    commitRuntime(r, res.action);
+  }
+
+  // ---------------- 装载 ----------------
+  var LAST_R = null, swapped = 0;
+
+  // ① 当场报告：包 v4AttachSemanticEvidence（批量也走这里；批量只有汇总横幅，不挂按钮）
+  try{
+    if(typeof window.v4AttachSemanticEvidence === 'function'){
+      var _att = window.v4AttachSemanticEvidence;
+      window.v4AttachSemanticEvidence = function(x){
+        var ret = _att.apply(this, arguments);
+        try{
+          if(on() && x && !Array.isArray(x) && x.__redline){ LAST_R = x; repaintRuntime(x, null); }
+        }catch(e){ STATS.err = 'attach:' + ((e && e.message) || e); LOG(STATS.err); }
+        return ret;
+      };
+      swapped++;
+    }
+  }catch(e){}
+
+  // ② 历史详情：替换那段红色横幅 + 隐去与总分重复的「不计违规项」卡
+  try{
+    if(typeof v4DetailHTML === 'function'){
+      var _html = v4DetailHTML;
+      v4DetailHTML = function(det){
+        var h = _html.apply(this, arguments);
+        try{
+          if(!on() || !det) return h;
+          var mine = historyBlock(det);
+          if(!mine) return h;
+          var old = '';
+          try{
+            if(det.redline && window.V4RLH && typeof window.V4RLH.render === 'function') old = String(window.V4RLH.render(det.redline));
+          }catch(e1){}
+          if(old && h.indexOf(old) >= 0) h = h.replace(old, function(){ return mine; });
+          else h = mine + h;
+          // 本场已不再判 0 ⇒「不计违规项」卡与总分是同一个数，隐去以免看着像 bug。
+          //   ⚠️ 隐去的只是**这份重复展示**；飞书那一列的值一个字都没动（老大明确要求不变）。
+          var n2 = normRel(det.redline, det.rlRevoked);
+          if(!n2.sess && n2.revN > 0 && typeof det.rawTotal === 'number'){
+            var rw = '';
+            try{ rw = v4RawResultHTML(det, 'history'); }catch(e2){}
+            if(rw && h.indexOf(rw) >= 0) h = h.replace(rw, function(){ return ''; });
+          }
+        }catch(e3){ STATS.err = 'html:' + ((e3 && e3.message) || e3); LOG(STATS.err); }
+        return h;
+      };
+      swapped++;
+    }
+  }catch(e){}
+
+  // ③ 存档：把撤销表沉淀成 det.rlRevoked（不以 __ 开头 ⇒ 能进存档与飞书）
+  try{
+    if(typeof v4DetailSnapshot === 'function'){
+      var _snap = v4DetailSnapshot;
+      v4DetailSnapshot = function(r, ts){
+        var det = _snap.apply(this, arguments);
+        try{
+          if(!on() || !det || !r) return det;
+          var s = sinkOf(r.__redline);
+          if(s){ det.rlRevoked = s; det.revV = '4.11.41'; }   // revV = **存档格式标记**，不跟 V4_VERSION 走
+          else if(det.rlRevoked) delete det.rlRevoked;
+        }catch(e1){ STATS.err = 'snap:' + ((e1 && e1.message) || e1); LOG(STATS.err); }
+        return det;
+      };
+      swapped++;
+    }
+  }catch(e){}
+
+  // ④ 重新评分：把该主播该日期的历史撤销结论回灌到新结果（同一场次的人工复核应当沿用）
+  try{
+    if(typeof window.v4Evaluate === 'function'){
+      var _ev = window.v4Evaluate;
+      window.v4Evaluate = async function(segs, productKey, job){
+        var r = await _ev.apply(this, arguments);
+        try{
+          if(on() && r && r.__redline && r.host){
+            var det0 = null;
+            try{
+              var ds = v4ReadLS('grading_detail_v1', '[]');
+              for(var i=ds.length-1;i>=0;i--){
+                if(ds[i] && ds[i].host === r.host && String(ds[i].date||'') === String(r.date||'') && ds[i].rlRevoked){ det0 = ds[i]; break; }
+              }
+            }catch(e1){}
+            if(det0 && det0.rlRevoked && det0.rlRevoked.list && det0.rlRevoked.list.length){
+              r.__redline.revoked = det0.rlRevoked.list.map(function(v){ return { fp:v.fp, at:v.at, note:v.note }; });
+              recomputeRev(r);
+              LOG('回灌历史撤销 ' + r.__redline.revoked.length + ' 条 → ' + r.host + ' ' + r.date
+                  + '，总分 ' + r.total + (r.__redline.sessionZero ? '（仍判 0）' : '（已按原分）'));
+            }
+          }
+        }catch(e2){ STATS.err = 'revive:' + ((e2 && e2.message) || e2); LOG(STATS.err); }
+        return r;
+      };
+      swapped++;
+    }
+  }catch(e){}
+
+  try{ document.addEventListener('click', onClick, true); }catch(e){}
+
+  window.V4RLREV = {
+    __installed: true,
+    version: (typeof V4_VERSION === 'string') ? V4_VERSION.replace(/^v/, '') : '',
+    on:  function(){ try{ localStorage.removeItem(LS_OFF); }catch(e){} return 'on'; },
+    off: function(){ try{ localStorage.setItem(LS_OFF, '0'); }catch(e){} return 'off'; },
+    onQ: on,
+    swapped: swapped,
+    fp: fp,
+    rawOf: rawOf,
+    norm: function(rel, rb){ return normRel(rel || {}, rb || null); },
+    sink: sinkOf,
+    archive: archiveRel,
+    // 纯函数入口（沙箱验证用：不碰 DOM、不发网络请求）
+    recount: recountRel,
+    recompute: recomputeRev,
+    canRevoke: function(rel, rawT){ return canRevoke(rel, (rawT === undefined ? (rel && rel.rawTotal) : rawT)); },
+    toggle: toggleOne,
+    toggleAll: toggleAll,
+    build: function(rel, rb, scope){ return innerHTMLOf(normRel(rel, rb), scope || null); },
+    // 载荷层接缝：返回**将要发往飞书的 body**（不发请求）⇒ 验证脚本可断言
+    //   「未记录 违规-综合评分」列不被触碰、c1–c8 齐全（缺一即 ok:false，宁可不写）
+    payload: function(det, total){ return buildBody(det, total); },
+    modsForWrite: modsForWrite,
+    probe: function(r){
+      var rel = r && r.__redline;
+      return { has: !!rel, can: canRevoke(rel, rawOf(r, rel)), total: r && r.total, grade: r && r.grade,
+               sessionZero: !!(rel && rel.sessionZero), zeroBase: !!(rel && rel.zeroBase),
+               revoked: rel ? ((rel.revoked||[]).length) : 0, active: rel ? (rel.activeN || 0) : 0,
+               listed: rel ? ((rel.reasons||[]).map(function(x){ return { code:x.code, revoked: !!x.revoked }; })) : [] };
+    },
+    debug: function(){ return { on: on(), swapped: swapped, stats: STATS, shellV: V4_VERSION, fillUrl: fbReady() }; }
+  };
+  LOG('已装载：红线判罚可人工撤销（留痕可恢复）｜接管 ' + swapped + '/4 个公开入口；判定口径未动，原分取 rel.rawTotal 或精确复算');
 })();
