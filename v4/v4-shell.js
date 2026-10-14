@@ -12,7 +12,11 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.35';
+var V4_VERSION = 'v4.11.36';
+// v4.11.36：存档格式版本 ≠ 壳层版本。rawV 只在「rawTotal/rawPen/rawBlk 这套字段的形态真变」时才动，
+//   **不跟 V4_VERSION 走**（否则每次改样式/改文案都要假装改了存档格式，溯源反而失真）。
+//   ⚠️ 渲染侧从不读 rawV（write-only 溯源标记）；断言请读本常量，别跟 V4_VERSION 比。
+var V4RAW_FMT = '4.11.35';
 (function(){
   function paint(){
     ['pageBadge', 'brandVer', 'footVer'].forEach(function(id){
@@ -648,8 +652,12 @@ function v4RawResultHTML(src, ctx){
       + '<div style="font-weight:600;color:#a8873f;margin-bottom:8px;overflow:hidden">'
       + '不计违规项综合评分结果'
       + '<span style="font-weight:400;color:#9a927f;font-size:12px"> —— 完全不做平台红线处置时的综合评分</span>'
-      + '<span style="float:right;font-weight:400;font-size:11px;color:#9a927f;border:1px solid #e6ddc8;border-radius:3px;padding:0 5px">'
-      + (q.exact ? '精确值' : '反推上限值') + '</span></div>'
+      + (q.exact
+          ? '<span style="float:right;font-weight:700;font-size:12px;color:#fff;background:#c9a962;'
+            + 'border:1px solid #c9a962;border-radius:10px;padding:1px 9px;white-space:nowrap">精确值</span>'
+          : '<span style="float:right;font-weight:700;font-size:12px;color:#b0524c;background:#fbf3f2;'
+            + 'border:1px solid #b0524c;border-radius:10px;padding:1px 9px;white-space:nowrap">反推上限值</span>')
+      + '</div>'
       + '<div style="display:flex;gap:14px;align-items:flex-start">'
       + '<div style="text-align:center;flex:none">'
       + '<div style="font-size:34px;font-weight:800;color:' + gCl + ';line-height:1">' + q.total + '</div>'
@@ -755,7 +763,7 @@ function v4DetailSnapshot(r, ts){
           rawTotal: _raw ? _raw.total : null,
           rawGrade: _raw ? _raw.grade : null,
           rawSrc:   _raw ? (_raw.exact ? 'exact' : 'derived') : null,
-          rawV:     _raw ? '4.11.35' : null,
+          rawV:     _raw ? V4RAW_FMT : null,
           rawPen:   _rawPen,
           rawBlk:   (_raw && _raw.exact) ? _blErr : null,
           fullDaily:r.fullDaily ? JSON.parse(JSON.stringify(r.fullDaily,function(k,v){return k==='repB64'?undefined:v;})) : null};
@@ -1789,10 +1797,19 @@ document.addEventListener('DOMContentLoaded', function(){
     h += '</div>';
     if(sess) h += '<div style="color:#8b857c;font-size:12px;margin-top:6px">模块明细仅供参考复盘，不计入总分。依据《抖音直播客观违规规则》。</div>';
     box.innerHTML = h;
+    // v4.11.36：插横幅**之前**先记住主结论卡（= 0 分总分卡）——下方「不计违规项卡」要挂到它**之后**，
+    //   而不是横幅之后（否则补充视角会跑到主结论前面）。⚠️ 必须在 insertBefore 之前取，插完 firstChild 就变成本横幅了。
+    //   🔴 坑（真机实测出来的）：`#singleReport.firstChild` 往往是 index.html 缩进产生的**空白文本节点**，
+    //     不是元素 ⇒ 若拿 firstChild.nextSibling 当锚点，结果卡会落进「横幅与主结论卡之间」（正好是要避免的旧顺序）。
+    //     所以必须**跳过文本节点**，取第一个**元素**子节点。
+    var _mainEl = null;
+    for(var _n = host.firstChild; _n; _n = _n.nextSibling){ if(_n.nodeType === 1){ _mainEl = _n; break; } }
     try{ host.insertBefore(box, host.firstChild); }catch(e){ return 0; }
-    // ---- v4.11.35：紧随红线横幅之后挂**一整份**「不计违规项综合评分结果」（与历史详情同一份 builder）----
+    // ---- v4.11.35：挂**一整份**「不计违规项综合评分结果」（与历史详情同一份 builder）----
     //   只在**整场判 0** 时挂：模块归 0 不整场归 0 时总分本就是原分，再挂一份是重复。
     //   ⚠️ 老板 10-13 明确否掉 v4.11.34 的「横幅里一行小字」形态；这里保持独立成块、金边、与横幅分开。
+    //   v4.11.36 顺序变更：由「横幅之后」改为「0 分总分卡之后、模块明细之前」（老板 10-14 拍板）——
+    //     主结论（0 分/E）在前、补充视角（不计违规项分）在后，符合阅读顺序。
     if(sess && v4RawOn()){
       try{
         var _detB = v4DetailSnapshot(r, Date.now());
@@ -1801,7 +1818,10 @@ document.addEventListener('DOMContentLoaded', function(){
           var _rb = document.createElement('div');
           _rb.className = 'v4raw-result-box';
           _rb.innerHTML = _blk;
-          host.insertBefore(_rb, box.nextSibling);
+          // 锚点 = 主结论卡的下一个兄弟；为 null（主结论卡是最后一个）时 insertBefore 等价 appendChild。
+          // 下一个兄弟即使是空白文本节点也无妨：结果是「紧随主结论卡」。
+          var _anchor = _mainEl ? _mainEl.nextSibling : null;
+          host.insertBefore(_rb, _anchor);
         }
       }catch(e2){ console.error('[v4.11.35] raw result block:', e2); }
     }
@@ -4989,7 +5009,7 @@ document.addEventListener('DOMContentLoaded', function(){
   var LOG = function(m){ try{ console.log('[v4.11.35] ' + m); }catch(e){} };
   window.V4RAW = {
     __installed: true,
-    version: '4.11.35',
+    version: '4.11.36',
     on:   function(){ try{ localStorage.removeItem('v4raw_enabled'); }catch(e){} return 'on'; },
     off:  function(){ try{ localStorage.setItem('v4raw_enabled','0'); }catch(e){} return 'off'; },
     onQ:  v4RawOn,
