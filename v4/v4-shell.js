@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.39';
+var V4_VERSION = 'v4.11.40';
 // v4.11.36：存档格式版本 ≠ 壳层版本。rawV 只在「rawTotal/rawPen/rawBlk 这套字段的形态真变」时才动，
 //   **不跟 V4_VERSION 走**（否则每次改样式/改文案都要假装改了存档格式，溯源反而失真）。
 //   ⚠️ 渲染侧从不读 rawV（write-only 溯源标记）；断言请读本常量，别跟 V4_VERSION 比。
@@ -621,6 +621,23 @@ function v4RawScore(x){
     return { total: tot, exact: exact, grade: v4RawGrade(tot), via: via, blk: blk, pen: pen };
   }catch(e){ return null; }
 }
+// v4.11.40：「未记录 违规-综合评分」的**取值口径**（老大 2026-10-14 定稿）——
+//   「综合评分」= 含平台红线处置后的最终分（判 0 就是 0）；
+//   「未记录 违规-综合评分」= **完全不做红线处置**时的综合得分 ⇒ **任何场次都必须有值**：
+//     · 判 0 场次 ⇒ 撤掉「整场归零」后的原分（0 分的同时看得到"本该得多少"）
+//     · 非判 0 场次 ⇒ 与「综合评分」相同（红线没动分，app-core 原公式的结果就是它）
+//   ⚠️ v4.11.37 初版只在判 0 时给值（理由：非判 0 写了是重复噪音）—— 该取舍**已作废**：
+//      两列是**并列对照**关系，非判 0 留空会让看表的人误判成"漏填/没算"。
+//   ⚠️ 本函数在**顶层**（v4ScoreRow 也要用）；下面 v4.11.37 块里的 FMT_EXACT/FMT_DERIVED
+//      是同一个字面量但在 IIFE 内 ⇒ 改口径时两处必须同步（现已统一走本函数）。
+function v4RawCellText(x){
+  try{
+    if(!x || typeof v4RawScore !== 'function') return '';
+    var q = v4RawScore(x);
+    if(!q || typeof q.total !== 'number') return '';
+    return q.total + (q.exact ? '（精确）' : '（上限值）');
+  }catch(e){ return ''; }
+}
 // ---- v4.11.35：「不计违规项综合评分结果」= 一整份结果块（历史详情 / 当场报告共用同一份）----
 //  口径（老大 10-13 拍板）：**只撤「整场归零」这一步** —— 即 redlineApply 执行【之前】的 r.total，
 //    也就是 app-core.js:574-581 的原公式（一字未改）：
@@ -1070,7 +1087,7 @@ function v4MonthKey(dateStr){
   return v4NormDate(dateStr).m;
 }
 // 从评分结果构造标准行（各 tab 共用同一份 scoreEvent，避免列名漂移）
-function v4ScoreRow(r, extra){
+function v4ScoreRow(r, extra, withRaw){
   var ms = {};
   var mods = (r && r.modules) || [];
   for(var i=0;i<mods.length;i++){ if(mods[i] && mods[i].key) ms[mods[i].key] = mods[i].score; }
@@ -1090,6 +1107,13 @@ function v4ScoreRow(r, extra){
     '临场反应能力':           (typeof ms.c7 === 'number') ? ms.c7 : '',
     '转化引导能力':           (typeof ms.c8 === 'number') ? ms.c8 : ''
   };
+  // v4.11.40：本列与「综合评分」**并列写进日报本地行** ——
+  //   ① 本地快速通道（v4FeishuLoad）在飞书数据到位前先渲染 localCache ⇒ 本地行不带这一列的话，
+  //      首屏那一下这列是空的（要等 merge 完成才补上）；
+  //   ② v4.11.11 版的 mergeDaily 在「本地 5 分钟内刚评」时让本地行**整行胜出** ⇒ 行本身必须带全字段。
+  //   ⚠️ 只给**日报**加（withRaw=true）：周总结/月总结/明星主播三张表没有这一列，
+  //      无差别加会让那三个 tab 各多出一列空的（它们共用 V4_FS_DAILY_COLS，动不得）。
+  if(withRaw) row['未记录 违规-综合评分'] = v4RawCellText(r);
   // 改善建议（与后端 feishu-fill.js 同构：r.training ≤3 项聚合）
   if(r.training && r.training.length){
     var adv = r.training.slice(0,3).map(function(t){
@@ -1126,7 +1150,7 @@ function v4RouteScore(r){
   var dedup = ['主播', '日期'];
 
   // ① 主播日报（始终写）
-  v4FsUpsert(V4_FS_LOCAL_KEY.daily, v4ScoreRow(r), dedup);
+  v4FsUpsert(V4_FS_LOCAL_KEY.daily, v4ScoreRow(r, null, true), dedup);
   // ② 周总结（始终写，原始行 + ISO 周次列）
   v4FsUpsert(V4_FS_LOCAL_KEY.week, v4ScoreRow(r, {'周次': v4WeekKey(date)}), dedup);
   // ③ 月总结（始终写，原始行 + 月份列）
@@ -1634,6 +1658,12 @@ function mergeDaily(local, synced){
     // Undated snapshots cannot prove that they include this local revision.
     var remoteTime=old && Date.parse(old._updatedAt || '');
     var localTime=Date.parse(r._updatedAt || '');
+    // ⚠️ v4.11.40 更正（原改动已回退）：**本函数不是实际生效的那个** ——
+    //   v4.11.11 块（本文件靠后，`window.mergeDaily = function(...)`）在装载时把它整体覆盖，
+    //   且语义完全不同：那边是「**飞书优先**，只有 5 分钟内刚评的本地行才覆盖」。
+    //   因此这里**不需要**做"远端独有列补齐"：本地历史行的时间戳早已超出 grace ⇒ 飞书行胜出 ⇒
+    //   飞书侧回填的值天然不会被本地空值盖掉（实测 ⑤c/⑤f，见 verify_rawcol_localrow.js）。
+    //   保留本函数只为兜底（万一 v4.11.11 块没装载），故**与原实现逐字一致**，不做任何加工。
     if(!old || !remoteTime || !localTime || localTime >= remoteTime) map[key(r)]=r;
   });
   return Object.keys(map).map(function(k){return map[k];}).sort(dateDesc);
@@ -5107,11 +5137,12 @@ document.addEventListener('DOMContentLoaded', function(){
   function cellText(r){
     try{
       if(!on() || !r || typeof r !== 'object') return '';
-      if(!isZeroed(r)) return '';                        // 非判 0 ⇒ 留空
-      if(typeof v4RawScore !== 'function') return '';
-      var q = v4RawScore(r);
-      if(!q || typeof q.total !== 'number') return '';
-      return q.total + (q.exact ? FMT_EXACT : FMT_DERIVED);
+      // v4.11.40（老大 10-14 定稿）：**所有场次都要有值**。
+      //   原 v4.11.37 的「非判 0 就返回空串」那句短路判定已删除（见沿革）——
+      //   两列是并列对照关系，非判 0 留空会被看表的人误判成"漏填"。
+      //   ⚠️ 本注释刻意**不复写**那行被删掉的代码：复写会让"已删除"的静态断言自匹配（铁律 13）。
+      //   取值统一走顶层 v4RawCellText（与本地行 v4ScoreRow 同源，避免两处字面量漂移）。
+      return v4RawCellText(r);
     }catch(e){ return ''; }
   }
 

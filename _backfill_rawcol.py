@@ -4,12 +4,17 @@
 
 数据源：飞书该表自带的「完整主播报告」字段 = v4DetailSnapshot() 的 JSON
   ⇒ 不必去浏览器 localStorage 挖；飞书自己就存着算这个数所需的一切。
-覆盖口径（老大 2026-10-14 拍板）：
-  ① 只填「综合评分 = 0」的场次（其余留空 —— 非判 0 时该值恒等于综合评分，写了是噪音）
-  ② 有 rawTotal  → `xx（精确）`
-  ③ 无 rawTotal，但有红旗处数 → `xx（精确）`  ← v4.11.38 升级：Σ加权 − min(12,处数×4)，与原公式同式
-  ④ 无 rawTotal 且无红旗处数 → `xx（上限值）`（兜底，理论上不会走到）
-  ⑤ 两者都没有 → 跳过（不编数）
+覆盖口径（v4.11.40，老大 2026-10-14 定稿）：
+  **所有场次都要有值** —— 本列 = 完全不做平台红线处置时的综合得分：
+  A. 非判 0 场次 → 红线没动分 ⇒ 值 == 「综合评分」本身，标 `（精确）`
+     ⚠️ 但仍**逐条独立复算校验**（从「完整主播报告」跑 v4RawScore）；不一致的单列出来、**不硬写**
+  B. 判 0 场次   → 撤掉「整场归零」后的原分：
+       ② 有 rawTotal  → `xx（精确）`
+       ③ 无 rawTotal，但有红旗处数 → `xx（精确）`  ← v4.11.38 升级：Σ加权 − min(12,处数×4)，与原公式同式
+       ④ 无 rawTotal 且无红旗处数 → `xx（上限值）`（兜底，理论上不会走到）
+       ⑤ 两者都没有 → 跳过（不编数）
+  ⚠️ v4.11.37 初版只填判 0、非判 0 留空（理由：非判 0 写了是重复噪音）—— 该取舍**已作废**：
+     两列是并列对照关系，非判 0 留空会被看表的人误判成"漏填/没算"。
 
   ⚠️ ③ 的关键：红旗处数（信息准确性）自 extraV 4.11.22 起就存在 `det.extra.bl.errs`
      里，109/109 条报告都有 ⇒ 老记录也能**精确**算回原分，不再退化成「上限值」。
@@ -23,8 +28,10 @@
   - 逐条写、任何一条失败立刻停并报告（不静默跳过）
 
 用法:
-  python _backfill_rawcol.py            # 演练（默认）
-  python _backfill_rawcol.py --apply    # 真写
+  python _backfill_rawcol.py                     # 演练（默认，只补空列）
+  python _backfill_rawcol.py --apply             # 真写（只补空列）
+  python _backfill_rawcol.py --recalc            # 演练 + 核对已写值是否已过期
+  python _backfill_rawcol.py --recalc --apply    # 真写 + 覆盖"已写但已过期"的格（写前先备份）
 """
 import io
 import json
@@ -40,6 +47,9 @@ TABLE_ID = 'tblQC7Jfzmxp6QJI'          # 主播日报
 FIELD_ID = 'fldfcibJNi'                # 未记录 违规-综合评分（2026-10-14 探针实测）
 FIELD_NAME = '未记录 违规-综合评分'
 APPLY = '--apply' in sys.argv
+# v4.11.40：`--recalc` = 连「已有值」也重新核对。
+#   一致的自动跳过（不浪费配额）；**不一致的会被覆盖** ⇒ 演练里逐条列出「现值 → 新值」给人过目。
+RECALC = '--recalc' in sys.argv
 STAMP = time.strftime('%Y%m%d-%H%M%S')
 BACKUP_DIR = os.path.join(HERE, '_bak', 'rawcol-backfill-' + STAMP)
 PLAN_PATH = os.path.join(HERE, '_backfill_rawcol.plan.txt')
@@ -209,8 +219,10 @@ def main():
         json.dump(recs, f, ensure_ascii=False, indent=1)
     say('已备份 → %s（%d B）' % (bak, os.path.getsize(bak)))
 
-    # ---- ③ 计算计划 ----
-    plan, skip_filled, skip_notzero, skip_nodata = [], 0, 0, 0
+    # ---- ③ 计算计划（v4.11.40 口径：所有场次都写值）----
+    plan, skip_filled, skip_nodata = [], 0, 0
+    n_had, n_nz_checked, n_nz_nocheck, n_nz_mismatch, n_nz_nodata = 0, 0, 0, 0, 0
+    had_map = {}
     for rec in recs:
         f = rec.get('fields') or {}
         host = str(f.get('主播') or '')
@@ -218,55 +230,133 @@ def main():
         total = str(f.get('综合评分') or '').strip()
         cur = str(f.get('未记录 违规-综合评分') or '').strip()
         if cur:
-            skip_filled += 1
-            continue
+            if not RECALC:
+                skip_filled += 1
+                continue
+            n_had += 1
+            had_map[rec.get('record_id')] = cur
+
+        # ---- A. 非判 0：红线没有把分归零 ⇒ 不做红线处置的得分 == 「综合评分」本身 ----
+        #   能拿到报告的就**独立复算校验**一遍（不一致则不写）；拿不到报告的按**口径本身**照搬，单独计数。
         if total not in ('0', '0.0', '0.00'):
-            skip_notzero += 1
+            try:
+                t0 = float(total)
+            except Exception:
+                t0 = None
+            if t0 is None:
+                n_nz_nodata += 1
+                plan.append({'kind': 'nz', 'id': rec.get('record_id'), 'host': host, 'date': date,
+                             'total': total, 'text': None,
+                             'reason': '非判 0 但「综合评分」不可解析为数字：%r' % total})
+                continue
+            want0 = fmt_num(t0) + '（精确）'
+            rep0 = report_text(rec)
+            j0 = None
+            if rep0:
+                try:
+                    j0 = json.loads(rep0)
+                except Exception:
+                    j0 = None
+            rs0 = raw_score(j0) if j0 is not None else None
+            if rs0 is None:
+                # 无报告 / 报告不可解析 / 报告里无计权模块 ⇒ 无法独立复核。
+                #   仍照搬写入「综合评分」—— 依据是**口径本身**（非判 0 ⇒ 红线没动分 ⇒
+                #   不做红线处置的得分就是该场最终分），不是从报告推出来的经验值。
+                #   ⚠️ 单独计数，便于日后追查（这类格一旦失败，原因只能是这一列被人工改过）。
+                n_nz_nocheck += 1
+                plan.append({'kind': 'nz', 'id': rec.get('record_id'), 'host': host, 'date': date,
+                             'total': total, 'text': want0, 'note': '照搬（无报告可校验）', 'reason': ''})
+                continue
+            v0, _e0 = rs0
+            if abs(v0 - t0) > 0.05:
+                n_nz_mismatch += 1
+                plan.append({'kind': 'nz', 'id': rec.get('record_id'), 'host': host, 'date': date,
+                             'total': total, 'text': None,
+                             'reason': '🔴 独立复算 %s ≠ 综合评分 %s（差 %s）⇒ 未写，需人工核实'
+                                       % (fmt_num(v0), fmt_num(t0), round(v0 - t0, 2))})
+                continue
+            n_nz_checked += 1
+            plan.append({'kind': 'nz', 'id': rec.get('record_id'), 'host': host, 'date': date,
+                         'total': total, 'text': want0, 'note': '已独立校验', 'reason': ''})
             continue
+
+        # ---- B. 判 0：从报告精确复算「撤掉整场归零」后的原分 ----
         rep = report_text(rec)
         if not rep:
             skip_nodata += 1
-            plan.append({'id': rec.get('record_id'), 'host': host, 'date': date,
+            plan.append({'kind': 'zero', 'id': rec.get('record_id'), 'host': host, 'date': date,
                          'total': total, 'text': None, 'reason': '该场次无「完整主播报告」'})
             continue
         try:
             j = json.loads(rep)
         except Exception as e:
             skip_nodata += 1
-            plan.append({'id': rec.get('record_id'), 'host': host, 'date': date,
+            plan.append({'kind': 'zero', 'id': rec.get('record_id'), 'host': host, 'date': date,
                          'total': total, 'text': None, 'reason': '报告不是合法 JSON: %s' % e})
             continue
         rs = raw_score(j)
         if not rs:
             skip_nodata += 1
-            plan.append({'id': rec.get('record_id'), 'host': host, 'date': date,
+            plan.append({'kind': 'zero', 'id': rec.get('record_id'), 'host': host, 'date': date,
                          'total': total, 'text': None, 'reason': '无 rawTotal 且无可反推的计权模块'})
             continue
         val, exact = rs
         text = fmt_num(val) + ('（精确）' if exact else '（上限值）')
-        plan.append({'id': rec.get('record_id'), 'host': host, 'date': date,
+        plan.append({'kind': 'zero', 'id': rec.get('record_id'), 'host': host, 'date': date,
                      'total': total, 'text': text, 'reason': ''})
+
+    # ---- recalc：已写且与复算值**一致**的 ⇒ 不必重写（省配额，也避免无谓改动）----
+    n_same, keep = 0, []
+    for p in plan:
+        if p['text'] and p['id'] in had_map and p['text'] == had_map[p['id']]:
+            n_same += 1
+            continue
+        keep.append(p)
+    plan = keep
 
     writable = [p for p in plan if p['text']]
     unwritable = [p for p in plan if not p['text']]
-    n_exact = len([p for p in writable if p['text'].endswith('（精确）')])
-    n_der = len(writable) - n_exact
+    w_fixed = [p for p in writable if p['id'] in had_map]          # 覆盖过期值（仅 --recalc）
+    w_new_list = [p for p in writable if p['id'] not in had_map]   # 原本为空的
+    w_new_nz_ok = len([p for p in w_new_list if p.get('note') == '已独立校验'])
+    w_new_nz_borrow = len([p for p in w_new_list if p.get('kind') == 'nz' and p.get('note') != '已独立校验'])
+    w_new_zero = [p for p in w_new_list if p.get('kind') == 'zero']
+    n_zero_exact = len([p for p in w_new_zero if p['text'].endswith('（精确）')])
+    n_zero_der = len(w_new_zero) - n_zero_exact
 
     say()
-    say('===== 回填计划 =====')
-    say('  判 0 场次合计            ：%d 条' % (len(plan)))
-    say('  ① 可写 · 精确值          ：%d 条（含 v4.11.38 精确复算的老记录）' % n_exact)
-    say('  ② 可写 · 反推上限值      ：%d 条（兜底口径）' % n_der)
-    say('  ③ 跳过 · 无可用数据      ：%d 条' % len(unwritable))
-    say('  跳过 · 非判 0（留空）    ：%d 条' % skip_notzero)
-    say('  跳过 · 该列已有值        ：%d 条' % skip_filled)
+    say('===== 回填计划（v4.11.40：所有场次都写值）=====')
+    if RECALC:
+        say('  已有值 %d 条 ⇒ 核对后**一致、无需重写**：%d 条' % (n_had, n_same))
+        say('  ────────────────────────────────────────────')
+    say('  ① 新增（原为空）            ：%d 条' % len(w_new_list))
+    say('     ├ 非判 0 · 已独立复算校验：%d 条' % w_new_nz_ok)
+    say('     ├ 非判 0 · 照搬（无报告） ：%d 条' % w_new_nz_borrow)
+    say('     └ 判 0   · 复算原分       ：%d 条（精确 %d ＋ 上限值 %d）'
+        % (len(w_new_zero), n_zero_exact, n_zero_der))
+    say('  ② 修正（覆盖已过期值）      ：%d 条%s'
+        % (len(w_fixed), '' if RECALC else '（需 --recalc 才会核对）'))
+    say('  ────────────────────────────────────────────')
+    say('  合计待写                    ：%d 条' % len(writable))
+    say('  不可写 / 待核实             ：%d 条' % len(unwritable))
+    say('      ├ 🔴 非判 0 复算不符    ：%d 条（已跳过，需人工核实）' % n_nz_mismatch)
+    say('      ├ 非判 0 综合评分不可解析：%d 条' % n_nz_nodata)
+    say('      └ 判 0 无可用数据       ：%d 条' % skip_nodata)
+    if not RECALC:
+        say('  跳过 · 该列已有值           ：%d 条（加 --recalc 可核对是否已过期）' % skip_filled)
     say()
+    if w_fixed:
+        say('  —— 🔴 将被覆盖的过期值（现值 → 新值）——')
+        for i, p in enumerate(w_fixed, 1):
+            say('  %3d. %-6s %s  %-16s → %-16s （当前综合评分=%s）'
+                % (i, p['host'], p['date'], had_map[p['id']], p['text'], p['total']))
+        say()
     say('  —— 完整清单（%d 条待写）——' % len(writable))
     for i, p in enumerate(writable, 1):
         say('  %3d. %s / %s  综合评分=%s → %s' % (i, p['host'], p['date'], p['total'], p['text']))
     if unwritable:
         say()
-        say('  —— 无法回填（%d 条，保持空白，不编数）——' % len(unwritable))
+        say('  —— 不可写 / 待核实（%d 条，保持原样，不编数）——' % len(unwritable))
         for i, p in enumerate(unwritable, 1):
             say('  %3d. %s / %s  ← %s' % (i, p['host'], p['date'], p['reason']))
 
