@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.43';
+var V4_VERSION = 'v4.11.44';
 // v4.11.36：存档格式版本 ≠ 壳层版本。rawV 只在「rawTotal/rawPen/rawBlk 这套字段的形态真变」时才动，
 //   **不跟 V4_VERSION 走**（否则每次改样式/改文案都要假装改了存档格式，溯源反而失真）。
 //   ⚠️ 渲染侧从不读 rawV（write-only 溯源标记）；断言请读本常量，别跟 V4_VERSION 比。
@@ -5835,12 +5835,25 @@ document.addEventListener('DOMContentLoaded', function(){
     toast('已' + (act === 'restore' ? '恢复' : '撤销') + '本条判罚 —— 本场综合评分 '
           + (rel.sessionZero ? '仍为 0（还剩未撤销命中）' : '回填为 ' + r.total) + '，正在同步飞书…', false);
     if(!det) return;
-    fbWrite(det, r.total, function(res){
-      toast('已' + (act === 'restore' ? '恢复' : '撤销') + '本条判罚 —— 本场综合评分 '
-            + (rel.sessionZero ? '仍为 <b>0</b>（还剩未撤销命中）' : '回填为 <b>' + r.total + '</b>')
-            + (res && res.ok ? '　已同步飞书「综合评分」' + (res.warn || '')
-                             : '　⚠️ 飞书未同步：' + ((res && res.why) || '未知原因') + '（本机已生效）'), false);
-    });
+    /* v4.11.44：当场报告路径也要**双写** —— 与 commitHistory 同一口径。
+       v4.11.43 只改了历史详情那一支（commitHistory），当场这支仍是单写 ⇒
+       在当场报告点「误判」时，历史评分表里还是撤销前的旧报告
+       （同事从历史 tab 打开那条云端行，看到的仍是 0 分）。2026-10-14 线上探针实测抓出。 */
+    var pend = 2, r1 = null, r2 = null;
+    var fin2 = function(){
+      if(--pend > 0) return;
+      var ok1 = !!(r1 && r1.ok), ok2 = !!(r2 && r2.ok);
+      var t = '已' + (act === 'restore' ? '恢复' : '撤销') + '本条判罚 —— 本场综合评分 '
+            + (rel.sessionZero ? '仍为 <b>0</b>（还剩未撤销命中）' : '回填为 <b>' + r.total + '</b>');
+      t += ok1 ? '　已同步飞书「综合评分」' + ((r1 && r1.warn) || '')
+               : '　⚠️ 日报表未同步：' + ((r1 && r1.why) || '未知原因');
+      t += ok2 ? '　历史评分表已回写（全员可见）。'
+               : '　⚠️ 历史评分表未回写：' + ((r2 && r2.why) || '未知原因');
+      if(!(ok1 && ok2)) t += '（本机已生效）';
+      toast(t, false);
+    };
+    fbWrite(det, r.total, function(res){ r1 = res; fin2(); });
+    fbWriteLib(det, function(res){ r2 = res; fin2(); });
   }
   function commitHistory(det, rel, anchorEl, act){
     var rawT = rawOf(det, rel);
@@ -6076,5 +6089,5 @@ document.addEventListener('DOMContentLoaded', function(){
                                 fillUrl: fbReady(), libUrl: libReady(), libOn: libOn() }; }
   };
   LOG('已装载：红线判罚可人工撤销（留痕可恢复）｜接管 ' + swapped + '/4 个公开入口；判定口径未动，原分取 rel.rawTotal 或精确复算');
-  LOG('v4.11.43：撤销结论双写 —— 主播日报表(fill) + 历史评分表(sync)，云端行撤销后全员可见');
+  LOG('v4.11.44：当场报告路径也双写（与历史详情同口径）—— 主播日报表(fill) + 历史评分表(sync)');
 })();
