@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.37';
+var V4_VERSION = 'v4.11.38';
 // v4.11.36：存档格式版本 ≠ 壳层版本。rawV 只在「rawTotal/rawPen/rawBlk 这套字段的形态真变」时才动，
 //   **不跟 V4_VERSION 走**（否则每次改样式/改文案都要假装改了存档格式，溯源反而失真）。
 //   ⚠️ 渲染侧从不读 rawV（write-only 溯源标记）；断言请读本常量，别跟 V4_VERSION 比。
@@ -547,11 +547,18 @@ function v4SemPointName(stdId, subId){
 //   ⚠️ 它【不改变】本场 0 分判定：不写回 r.total / r.grade，不进摘要库、不写回任何**正式**评分字段。
 //   v4.11.37 起：本值会以「78.5（精确）／55.5（上限值）」的形式**另存**于飞书独立列
 //     「未记录 违规-综合评分」（见文件末尾 v4.11.37 块）；「综合评分」列仍为 0，判定不变。
-// 取数两条路（精确优先，绝不拿反推值冒充精确值）：
-//   ① 精确：`r.__redline.rawTotal`（v4.11.34 起在 redlineApply 入口捕获）→ 存档 det.rawTotal
+//   v4.11.38 起：老记录也能精确复算（见下 ② 路）⇒ 「（上限值）」标记实际几乎不再出现，
+//     仅在「既无原分留存、又取不到红旗处数」时兜底。
+// 取数三条路（v4.11.38 起；精确优先，绝不拿反推值冒充精确值）：
+//   ① 原始留存：`r.__redline.rawTotal`（v4.11.34 起在 redlineApply 入口捕获）→ 存档 det.rawTotal
 //      配套 det.rawPen / det.rawBlk（v4.11.35 起）＝ 那一笔信息准确性红旗，用于账目式拆解
-//   ② 反推：Σ det.mods[weight>0].weighted（用于 v4.11.34 之前的**存量记录**，无 rawTotal 可取）
-//      ⚠️ 反推值 = 原总分 + 信息准确性扣分（每处 −4、封顶 −12）⇒ 是**上限**，必须带「反推上限值」标记。
+//   ② 精确复算（v4.11.38 新增）：Σ mods[weight>0].weighted − min(12, 处数×4)，处数取 v4RawBlk()
+//      ⚠️ 关键：处数在 `det.extra.bl.errs` 里**自 extraV 4.11.22 起就一直在**（109/109 条实测都有）
+//         ⇒ v4.11.34 之前的老记录也能把原分**精确**算回来，不必退化成「上限值」。
+//         实测 45 条独立样本逐条闭合（38 条非判 0 的飞书「综合评分」＋ 7 条带 rawTotal 的判 0 场次），
+//         复现脚本 = 仓库根 `_probe_raw_exact.py`（只读本地备份，输出 `_probe_raw_exact.out.txt`）。
+//   ③ 反推上限（最后兜底）：Σ mods[weight>0].weighted —— 连处数都取不到时才用；
+//      ⚠️ 它 = 原总分 + 那笔 0～12 分 ⇒ 是**上限**，必须带「反推上限值」标记。
 // 渲染单一来源：`v4RawResultHTML(src, ctx)` —— 历史详情 / 当场报告 / GPT 完整日报三处**共用**，
 //   禁止任何一处再手写一遍（v4.11.34 就是吃了这个亏：横幅一行小字 vs 详情小方块，两套形态）。
 // 回退：localStorage `v4raw_enabled='0'`（或 V4RAW.off()）后刷新页面即恢复原状。
@@ -566,13 +573,37 @@ function v4RawGrade(t){
   for(var i=0;i<gs.length;i++){ if(t >= gs[i].min) return gs[i].name; }
   return 'E';
 }
+// ---- v4.11.38：「信息准确性红旗处数」取值 —— 把「反推上限」修正成「精确复算」的关键 ----
+//   三处来源**同源**（app-core.js:497 `bl.errors` → :665 `r.baseline.errors` → 存档 det.rawBlk /
+//   det.extra.bl.errs），按可信度排序取第一个拿到的：
+//     ① det.rawBlk        —— v4.11.35 起与 rawTotal 同批沉淀（最权威）
+//     ② r.baseline.errors —— 运行时结果对象上就有（当场报告走这条）
+//     ③ det.extra.bl.errs —— extraV 4.11.22 起就有，**老存档也能拿到**（本回升级的主角）
+//   ⚠️ 三者在同一场评分里是同一次计算的产物，已用 45 条独立样本逐条闭合验证（见 _probe_raw_exact.py）。
+function v4RawBlk(x){
+  try{
+    if(!x) return null;
+    if(typeof x.rawBlk === 'number') return x.rawBlk;
+    if(x.baseline && typeof x.baseline.errors === 'number') return x.baseline.errors;
+    var ex = x.extra;
+    if(ex && ex.bl && typeof ex.bl.errs === 'number') return ex.bl.errs;
+    return null;                     // 取不到 ⇒ 调用方退回「上限值」口径，绝不猜一个数
+  }catch(e){ return null; }
+}
+// 那笔扣分：每处 −4、封顶 −12（与 app-core.js:579 同式，一字不差）
+function v4RawPen(blk){ return (typeof blk === 'number') ? Math.min(12, blk * 4) : null; }
 // 入参可以是运行时结果 r，也可以是存档记录 det
+// 返回：{total, exact, grade, via, blk, pen}
+//   via = 'stored'  原分直接留存（rawTotal）
+//       | 'rebuilt' 用「模块加权 − 红旗扣分」精确复算（v4.11.38）
+//       | 'derived' 只有模块加权 ⇒ 上限值
 function v4RawScore(x){
   try{
     if(!x) return null;
-    var t = null, exact = false;
-    if(x.__redline && typeof x.__redline.rawTotal === 'number'){ t = x.__redline.rawTotal; exact = true; }
-    else if(typeof x.rawTotal === 'number'){ t = x.rawTotal; exact = true; }
+    var t = null, exact = false, via = null;
+    var blk = v4RawBlk(x), pen = v4RawPen(blk);
+    if(x.__redline && typeof x.__redline.rawTotal === 'number'){ t = x.__redline.rawTotal; exact = true; via = 'stored'; }
+    else if(typeof x.rawTotal === 'number'){ t = x.rawTotal; exact = true; via = 'stored'; }
     if(t == null){
       var mods = x.mods || x.modules || [], sum = 0, has = false;
       for(var i=0;i<mods.length;i++){
@@ -582,11 +613,12 @@ function v4RawScore(x){
         if((m.weight || 0) > 0 && typeof m.weighted === 'number'){ sum += m.weighted; has = true; }
       }
       if(!has) return null;          // 无计权模块 ⇒ 无从反推，宁可不显示
-      t = sum;
+      if(pen !== null){ t = sum - pen; exact = true; via = 'rebuilt'; }   // v4.11.38：精确复算
+      else            { t = sum;                      via = 'derived'; }   // 兜底：上限值
     }
     var tot = Math.round(t * 10) / 10;
-    if(tot < 0) tot = 0;
-    return { total: tot, exact: exact, grade: v4RawGrade(tot) };
+    if(tot < 0) tot = 0;             // 与 app-core `if(total < 0) total = 0` 同口径
+    return { total: tot, exact: exact, grade: v4RawGrade(tot), via: via, blk: blk, pen: pen };
   }catch(e){ return null; }
 }
 // ---- v4.11.35：「不计违规项综合评分结果」= 一整份结果块（历史详情 / 当场报告共用同一份）----
@@ -634,20 +666,25 @@ function v4RawResultHTML(src, ctx){
     var metaLine = metaParts.length
       ? '<div style="font-weight:700;color:#3f3a33;margin-bottom:4px">' + metaParts.join(' · ') + '</div>'
       : '';
-    var pen = (typeof src.rawPen === 'number') ? src.rawPen : null;
-    var blk = (typeof src.rawBlk === 'number') ? src.rawBlk : null;
+    // v4.11.38：q 里已带回 blk/pen（含从 det.extra.bl.errs 复算的那条路）⇒ 作为 src 字段的兜底
+    var pen = (typeof src.rawPen === 'number') ? src.rawPen : ((q && typeof q.pen === 'number') ? q.pen : null);
+    var blk = (typeof src.rawBlk === 'number') ? src.rawBlk : ((q && typeof q.blk === 'number') ? q.blk : null);
     var accLine = '';
     if(q.exact && pen !== null){
       accLine = '<div>账目：模块加权合计 <b>' + sumRaw + '</b>'
         + ' − 信息准确性红旗 <b>' + pen + '</b>'
         + (blk !== null ? '（<b>' + blk + '</b> 处 × −4，封顶 12）' : '')
         + ' = <b>' + q.total + '</b>'
-        + ((sumRaw - pen < 0) ? '（已触底截为 0）' : '') + '</div>';
+        + ((sumRaw - pen < 0) ? '（已触底截为 0）' : '') + '</div>'
+        + (q.via === 'rebuilt'
+            ? '<div>取值：<b>精确值</b>（原分未单独留存，按存档「模块加权合计 − 信息准确性红旗」'
+              + '精确复算 —— 与 app-core 原公式同式）</div>'
+            : '');
     }else if(q.exact){
       accLine = '<div>取值：<b>精确值</b>（本场评分时留存，未拆出信息准确性红旗明细）</div>';
     }else{
-      accLine = '<div>取值：<b>上限值</b>（本记录未留存原分，按存档模块加权反推 —— 未扣信息准确性红旗 0～12 分，'
-        + '所以真实值只会更低，不会更高）</div>';
+      accLine = '<div>取值：<b>上限值</b>（本记录既无原分留存、也取不到信息准确性红旗处数，'
+        + '只能按存档模块加权反推 —— 未扣那笔 0～12 分，所以真实值只会更低，不会更高）</div>';
     }
     return '<div class="v4raw-result" data-v4raw="1" style="border:1px solid #e6ddc8;border-left:4px solid #c9a962;'
       + 'background:#fdfbf4;border-radius:8px;padding:12px 14px;margin:10px 0;font-size:13px;line-height:1.7">'
@@ -5012,7 +5049,7 @@ document.addEventListener('DOMContentLoaded', function(){
   var LOG = function(m){ try{ console.log('[v4.11.35] ' + m); }catch(e){} };
   window.V4RAW = {
     __installed: true,
-    version: '4.11.37',
+    version: V4_VERSION.replace(/^v/, ''),
     on:   function(){ try{ localStorage.removeItem('v4raw_enabled'); }catch(e){} return 'on'; },
     off:  function(){ try{ localStorage.setItem('v4raw_enabled','0'); }catch(e){} return 'off'; },
     onQ:  v4RawOn,
@@ -5034,13 +5071,15 @@ document.addEventListener('DOMContentLoaded', function(){
 //   ⇒ 因此 v4.11.35 卡上原句「不写回任何评分字段、不进飞书」已同步改成准确表述。
 // 值与标记（老大选：带口径标记，便于日后分辨真假）：
 //   判 0 + 精确路径 → `78.5（精确）`；判 0 + 反推路径 → `55.5（上限值）`
+//   ⚠️ v4.11.38 起：反推路径已升级为「精确复算」（见 v4RawBlk），
+//      ⇒ `（上限值）` 只在「既无 rawTotal、又取不到红旗处数」时才会出现。
 //   ⚠️ 非判 0 场次**不写该字段**（留空）—— 那些场次该值恒等于「综合评分」，写了是噪音。
 // 挂载时机：必须早于 `publicResult(r)`（它只剔「__」前缀键 ⇒ 本字段能上飞书）。
 //   实测链路：autoFillFeishu(r) → V4Jobs.sync(r) → post(feishu-fill, {result: publicResult(r)})。
 // 回退：localStorage `v4rawcol_enabled='0'` 后刷新页面 ⇒ 不再挂字段（飞书已有值不受影响）。
 // =====================================================
 (function(){
-  var LOG = function(m){ try{ console.log('[v4.11.37] ' + m); }catch(e){} };
+  var LOG = function(m){ try{ console.log('[' + V4_VERSION + '] ' + m); }catch(e){} };
   var LS_OFF = 'v4rawcol_enabled';
   var FMT_EXACT = '（精确）', FMT_DERIVED = '（上限值）';
 
@@ -5109,7 +5148,7 @@ document.addEventListener('DOMContentLoaded', function(){
   function lateWrap(){
     try{ if(wrap(window.V4Jobs, 'sync')) n++; }catch(e){}
     try{ if(wrap(window.V4Jobs, 'syncLibs')) n++; }catch(e){}
-    try{ console.log('[v4.11.37] 延迟补包完成：累计接管 ' + n + '/4 个写入口'); }catch(e){}
+    try{ console.log('[' + V4_VERSION + '] 延迟补包完成：累计接管 ' + n + '/4 个写入口'); }catch(e){}
   }
   try{
     if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', lateWrap);
@@ -5118,7 +5157,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
   window.V4RAWCOL = {
     __installed: true,
-    version: '4.11.37',
+    version: V4_VERSION.replace(/^v/, ''),
     on:  function(){ try{ localStorage.removeItem(LS_OFF); }catch(e){} return 'on'; },
     off: function(){ try{ localStorage.setItem(LS_OFF, '0'); }catch(e){} return 'off'; },
     onQ: on,
