@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.42';
+var V4_VERSION = 'v4.11.43';
 // v4.11.36：存档格式版本 ≠ 壳层版本。rawV 只在「rawTotal/rawPen/rawBlk 这套字段的形态真变」时才动，
 //   **不跟 V4_VERSION 走**（否则每次改样式/改文案都要假装改了存档格式，溯源反而失真）。
 //   ⚠️ 渲染侧从不读 rawV（write-only 溯源标记）；断言请读本常量，别跟 V4_VERSION 比。
@@ -4427,6 +4427,22 @@ document.addEventListener('DOMContentLoaded', function(){
             //   无论本机行遮住云端行、还是日期格式再乱，展开时只需 ts+host 就能命中，不依赖任何反查。
             var hit = DET_MAP[dkey(x.host, x.date)];
             if(hit) TS_DET[kk] = hit;
+            /* 🔴 v4.11.43 修「云端行的撤销按钮必失效」—— 同一份报告要挂**两条键**。
+               事实（2026-10-14 线上真机实测）：这条 x.ts 是**按日期推导**出来的
+                 （见上方 x.ts == null 分支：Date.parse(日期 + ' 12:00:00')），
+                 而报告 det 内部另有一个 ts = 当年存报告那台机器的真实时刻，两者**不相等**；
+                 同一天的所有云端行，推导 ts 还完全相同。
+               而历史详情渲染时，按钮带的是 **det.ts**（historyBlock 传 { ts: det.ts, host: det.host }），
+                 点下去又用 det.ts 去查 ⇒ 只挂行 ts 的话必然查不到自己
+                 ⇒ 弹「找不到该条历史记录（可能已被清理），未做任何改动。」
+               ⇒ 这里把 det 自身 ts 也挂一份（IDX_MAP 同挂，供"按 ts 反查日期"的兜底路径用）。
+               ⚠️ 只挂第一份、不覆盖：同 ts 不同 host 各行互不干扰（键含 host）。 */
+            var dts = (hit && hit.ts != null) ? hit.ts : null;
+            if(dts != null && String(dts) !== String(x.ts)){
+              var kk2 = String(dts) + '|' + x.host;
+              if(!TS_DET[kk2]) TS_DET[kk2] = hit;
+              if(!IDX_MAP[kk2]) IDX_MAP[kk2] = ddate(x.date);
+            }
           }
         }catch(e){}
       });
@@ -5250,14 +5266,24 @@ document.addEventListener('DOMContentLoaded', function(){
 //      · modules **必带全 c1–c8**（feishu-fill 无条件写这 8 列，缺一个就会把那列写空 ⇒ 本块宁可不写）
 //      · 不传 rawScoreText ⇒「未记录 违规-综合评分」列不动 ✓
 //      · v4Report = 更新后的 det ⇒ 换人 / 换机器也看得到撤销结论
+//        ⚠️ 但这只到「主播日报」表 —— 而历史 tab 的云端行读的是「历史评分」表（下一层，v4.11.43 才补）
+//   ④ v4.11.43 增：**历史评分表**回写（这一条才让"云端行"真正持久化）
+//      · POST window.FEISHU_SYNC_URL → api/feishu-sync.js 的 upsertHistory()
+//      · 按 主播+日期 **先删旧行、再建 1 行** ⇒ 恒为该主播当日最新的那一条
+//      · 🔴 先删后建 ⇒ 三个"宁可不写"守卫（与 libBody 同一份实现）：
+//        缺产品/c1（会清空该两列）、报告 >95000（会丢报告）、日期格式非常规（会建畸形行）
+//      · 该表**没有**「未记录 违规-综合评分」列（2026-10-14 实测 309 行字段并集 0/309）⇒ 天然不碰
 //
 // 回退：localStorage `v4rev_enabled='0'` + 刷新 ⇒ 按钮与留痕消失，判定回到 v4.11.40 原状。
+//   另：`v4librev_enabled='0'`（v4.11.43）⇒ 只停「历史评分表回写」这一路，其余全照旧。
 // 诊断：V4RLREV.debug() / .off() / .on() / .probe(r)
 // 已知不做（如实登记）：
 //   · 批量（≥2 主播）只有汇总横幅、无逐条明细 ⇒ 不挂按钮；
 //   · `#/vision` 一键完整日报本就是红线盲区（裸调 runGrading、不走 redlineApply）⇒ 无横幅即无按钮；
-//   · 云端「历史评分」表（tblkN1e6yCtXl5bG）本块不写，只写「主播日报」表 + 本机存档 ⇒
-//     历史列表行的分数以本机存档为准，跨机看该表仍是旧值（待老大决定是否另开一轮补）。
+//   · v4.11.43 已补上原先这条缺口：撤销结论**同时回写云端「历史评分」表**
+//     （走 api/feishu-sync.js 的 upsertHistory，按 主播+日期 先删旧行再建 1 行）
+//     ⇒ 历史 tab 的**云端行**（别人评的 / 换台机器看到的）撤销后同样持久、全员可见。
+//     ⚠️ 仍不做：批量汇总横幅本就不挂按钮。
 // =====================================================
 (function(){
   if(typeof window === 'undefined' || typeof document === 'undefined') return;
@@ -5265,6 +5291,9 @@ document.addEventListener('DOMContentLoaded', function(){
 
   var LOG = function(m){ try{ console.log('[v4.11.41] ' + m); }catch(e){} };
   var LS_OFF = 'v4rev_enabled';
+  // v4.11.43：历史评分表回写的**独立**阀门。关掉它只停这一路，
+  //   按钮、留痕、主播日报表写回、本机存档全部照旧。
+  var LS_LIBOFF = 'v4librev_enabled';
   function on(){ try{ return localStorage.getItem(LS_OFF) !== '0'; }catch(e){ return true; } }
   // ⚠️ 必须自己挡 null/undefined：本文件里 `esc` 有多份实现（其中一份不挡 null），
   //   一旦漏挡，报告里就会出现字面 "undefined"（沙箱用例抓到过 data-v4host="undefined"）。
@@ -5278,6 +5307,8 @@ document.addEventListener('DOMContentLoaded', function(){
   var SHOWQ = 90, SHOWN = 8;
 
   var STATS = { toggle:0, revoke:0, restore:0, fbOk:0, fbFail:0, fbSkip:'', localOk:0, err:'' };
+  // v4.11.43：历史评分表回写这一路的独立计数（lib= 该表；fb= 主播日报表）
+  STATS.libOk = 0; STATS.libFail = 0; STATS.libSkip = '';
 
   // ---------------- 指纹：内容级主键 ----------------
   // 六元组 code/src/cat/term/ts/action。同场两条**完全一样**的命中会一起撤（实际极少，可接受）。
@@ -5534,6 +5565,71 @@ document.addEventListener('DOMContentLoaded', function(){
       })
       .catch(function(e){ STATS.fbFail++; cb && cb({ ok:false, why:((e && e.message) || '网络失败') + repWarn }); });
   }
+  // ---------------- v4.11.43：回写「历史评分」表（云端行撤销真正持久化的那一半） ----------------
+  // 缘由：v4.11.41 的撤销只写「主播日报」表 + 本机存档。而历史 tab 的**云端行**读的是
+  //   「历史评分」表（tblkN1e6yCtXl5bG）的「完整主播报告」列 ⇒ 结论没进这张表，别人
+  //   （或换台机器 / 换浏览器 / 换个 origin）展开历史记录看到的仍是老的 0 分报告。
+  // 通路：直发 window.FEISHU_SYNC_URL（api/feishu-sync.js）→ upsertHistory()：
+  //   按 主播+日期 **先删旧行、再建 1 行** ⇒ 撤销 / 恢复的结论恒为该主播当日最新一条。
+  // 🔴 正因为是「先删后建」，下面几条必须挡住 —— 这不是"不写"，而是"删了旧的又写不进"，比不写更糟：
+  //   ① 缺「产品」或「c1」⇒ 新行那两列是空的、旧行已删 ⇒ 列被清空。宁可不写。
+  //   ② 报告串 > 95000 ⇒ 服务端不写报告列（feishu-sync 的防御性校验），但旧行照样被删
+  //      ⇒ 整份报告丢失。同样宁可不写。
+  //   ③ 日期格式非常规 ⇒ 会在该表建出畸形新行。宁可不写。
+  // ✅ 不碰「未记录 违规-综合评分」：该列只在「主播日报」表里；历史评分表**没有**这一列
+  //   （2026-10-14 实测全表 309 行的字段并集 = 日期/主播/直播间/等级/c1产品理解/产品/
+  //    产品理解(数值)/历史总分(数值)/总分/标准日期/完整主播报告，该列 0/309）。
+  // 回退：localStorage `v4librev_enabled='0'` + 刷新 ⇒ 不回写该表（其余全照旧）。
+  function libReady(){ try{ return window.FEISHU_SYNC_URL || ''; }catch(e){ return ''; } }
+  function libOn(){ try{ return localStorage.getItem(LS_LIBOFF) !== '0'; }catch(e){ return true; } }
+
+  // 纯函数（不发请求）：构造要发往历史评分表的 body；任一守卫不过 ⇒ { ok:false, why }
+  // 抽成函数的目的是**可验证** —— 验证脚本与 V4RLREV.libPayload 直接取同一份实现，
+  //   不会出现"断言的那份"和"真正发出去的那份"漂移。
+  function libBody(det){
+    det = det || {};
+    var product = String(det.product == null ? '' : det.product).trim();
+    var c1 = (typeof det.c1Score === 'number') ? det.c1Score : null;
+    if(!product || c1 === null){
+      return { ok:false, why:'存档缺「产品」或「c1」分，已阻止回写（避免删旧行时清空飞书列；本机已生效）' };
+    }
+    if(!/^\d{4}-\d{1,2}-\d{1,2}/.test(String(det.date || ''))){
+      return { ok:false, why:'日期格式非常规，已阻止回写（避免在历史评分表建出畸形行）' };
+    }
+    var rep = '';
+    try{ rep = JSON.stringify(det); }catch(e){ rep = ''; }
+    if(!rep) return { ok:false, why:'存档无法序列化，已阻止回写' };
+    if(rep.length > 95000){
+      return { ok:false, why:'报告 ' + rep.length + ' 字符超上限（>95000），已阻止回写'
+                          + '（服务端超限不写报告列、旧行却已被删 ⇒ 会丢报告）' };
+    }
+    return { ok:true, body: { history: [{
+      host: det.host, date: String(det.date || ''), studio: String(det.studio || ''),
+      product: product, total: det.total, grade: String(det.grade || ''),
+      c1: c1, report: rep
+    }] } };
+  }
+
+  function fbWriteLib(det, cb){
+    var fin = function(o){ try{ if(cb) cb(o); }catch(e){} };
+    if(!libOn()){ STATS.libSkip = '历史评分表回写已关闭（' + LS_LIBOFF + '=0）';
+                  fin({ ok:false, why:STATS.libSkip, off:true }); return; }
+    var url = libReady();
+    if(!url){ STATS.libSkip = '未配置历史评分表写回端点（FEISHU_SYNC_URL）';
+              fin({ ok:false, why:STATS.libSkip }); return; }
+    var lb = libBody(det);
+    if(!lb.ok){ STATS.libSkip = lb.why; fin({ ok:false, why:lb.why }); return; }
+    fetch(url, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(lb.body) })
+      .then(function(res){ return res.json().catch(function(){ return {}; }); })
+      .then(function(j){
+        var h = (j && j.results && j.results[0] && j.results[0].r) || null;
+        if(j && j.ok && h && h.ok){ STATS.libOk++; fin({ ok:true }); }
+        else { STATS.libFail++;
+               fin({ ok:false, why:'写入被拒绝：' + ((h && h.reason) || (j && (j.error || j.reason)) || '未知原因') }); }
+      })
+      .catch(function(e){ STATS.libFail++; fin({ ok:false, why:'网络失败：' + ((e && e.message) || '') }); });
+  }
+
   // 本机存档：按 ts+host 就地更新（没有就按 host+日期 兜底找最近一条）
   function localSave(det){
     try{
@@ -5766,13 +5862,28 @@ document.addEventListener('DOMContentLoaded', function(){
     else { delete det.redline; }
     localSave(det); localSaveSummary(det);
     repaintHistory(anchorEl, det);
+    // v4.11.43：云端缓存里还留着旧的「完整主播报告」⇒ 清掉，下次重渲染 / 切 tab 会拉新值。
+    //   （本机有明细的行不受影响：本机明细优先，本机那条已就地更新过。）
+    try{ if(window.V4CLOUD && window.V4CLOUD.cache) delete window.V4CLOUD.cache['history']; }catch(e){}
     toast('历史记录已' + (act === 'restore' ? '恢复' : '撤销') + ' —— 综合评分 <b>' + det.total
           + '</b>，正在同步飞书…', false);
-    fbWrite(det, det.total, function(res){
-      toast('历史记录已' + (act === 'restore' ? '恢复' : '撤销') + ' —— 综合评分 <b>' + det.total + '</b>'
-            + (res && res.ok ? '　已同步飞书。' + (res.warn || '')
-                             : '　⚠️ 飞书未同步：' + ((res && res.why) || '未知原因') + '（本机已更新）'), false);
-    });
+    /* v4.11.43：**两路并行**，都回来才给最终结论 ——
+       ① 「主播日报」表（feishu-fill，v4.11.41 起就有）
+       ② 「历史评分」表（feishu-sync，本版新增）⇒ 这条才让历史 tab 的**云端行**真正持久化 */
+    var pend = 2, r1 = null, r2 = null;
+    var fin2 = function(){
+      if(--pend > 0) return;
+      var ok1 = !!(r1 && r1.ok), ok2 = !!(r2 && r2.ok);
+      var t = '历史记录已' + (act === 'restore' ? '恢复' : '撤销') + ' —— 综合评分 <b>' + det.total + '</b>';
+      t += ok1 ? '　已同步飞书。' + ((r1 && r1.warn) || '')
+               : '　⚠️ 日报表未同步：' + ((r1 && r1.why) || '未知原因');
+      t += ok2 ? '　历史评分表已回写（全员可见）。'
+               : '　⚠️ 历史评分表未回写：' + ((r2 && r2.why) || '未知原因');
+      if(!(ok1 && ok2)) t += '（本机已更新）';
+      toast(t, !(ok1 && ok2));
+    };
+    fbWrite(det, det.total, function(res){ r1 = res; fin2(); });
+    fbWriteLib(det, function(res){ r2 = res; fin2(); });
   }
 
   function onClick(ev){
@@ -5954,7 +6065,16 @@ document.addEventListener('DOMContentLoaded', function(){
                revoked: rel ? ((rel.revoked||[]).length) : 0, active: rel ? (rel.activeN || 0) : 0,
                listed: rel ? ((rel.reasons||[]).map(function(x){ return { code:x.code, revoked: !!x.revoked }; })) : [] };
     },
-    debug: function(){ return { on: on(), swapped: swapped, stats: STATS, shellV: V4_VERSION, fillUrl: fbReady() }; }
+    // v4.11.43：历史评分表回写的独立开关与接缝
+    libOnQ: libOn,
+    libOn:  function(){ try{ localStorage.removeItem(LS_LIBOFF); }catch(e){} return 'on'; },
+    libOff: function(){ try{ localStorage.setItem(LS_LIBOFF, '0'); }catch(e){} return 'off'; },
+    libUrl: libReady,
+    // 与 fbWriteLib 共用同一份 libBody ⇒ 断言的就是真正发出去的那份载荷
+    libPayload: libBody,
+    debug: function(){ return { on: on(), swapped: swapped, stats: STATS, shellV: V4_VERSION,
+                                fillUrl: fbReady(), libUrl: libReady(), libOn: libOn() }; }
   };
   LOG('已装载：红线判罚可人工撤销（留痕可恢复）｜接管 ' + swapped + '/4 个公开入口；判定口径未动，原分取 rel.rawTotal 或精确复算');
+  LOG('v4.11.43：撤销结论双写 —— 主播日报表(fill) + 历史评分表(sync)，云端行撤销后全员可见');
 })();
