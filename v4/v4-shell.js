@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.38';
+var V4_VERSION = 'v4.11.39';
 // v4.11.36：存档格式版本 ≠ 壳层版本。rawV 只在「rawTotal/rawPen/rawBlk 这套字段的形态真变」时才动，
 //   **不跟 V4_VERSION 走**（否则每次改样式/改文案都要假装改了存档格式，溯源反而失真）。
 //   ⚠️ 渲染侧从不读 rawV（write-only 溯源标记）；断言请读本常量，别跟 V4_VERSION 比。
@@ -1604,11 +1604,23 @@ function v4FsReload(){
 // ---- 日报专用工具 ----
 // 飞书「主播日报」标准列序（与截图/多维表格完全对齐）
 // 固定列在前，数据中多出的列追加在后（避免本地与飞书两侧列序漂移）
+// v4.11.39：个别额外列有**指定落位** —— 紧跟某个固定列之后，而不是被追加到最右侧。
+//   老大 2026-10-14 指定：「未记录 违规-综合评分」紧跟「综合评分」（两列要能并排对比）。
+//   ⚠️ 「综合评分」**不是首列**（前面还有日期/主播/直播间）⇒ 必须用 indexOf 求锚点下标，禁写死列号。
+//   ⚠️ 若将来有多列锚定同一锚点，后插入的会排到前面 ⇒ 需改倒序/分组插入（当前只有一条映射）。
+var V4_FS_AFTER = { '未记录 违规-综合评分': '综合评分' };
 function v4FsCols(rows, fixed){
   if(!rows || !rows.length) return fixed.slice();
   var extra = {};
   rows.forEach(function(r){ Object.keys(r).forEach(function(k){ if(k.charAt(0)!=='_' && fixed.indexOf(k) < 0) extra[k] = 1; }); });
-  return fixed.concat(Object.keys(extra));
+  var out = fixed.slice();
+  Object.keys(extra).forEach(function(k){
+    var anchor = V4_FS_AFTER[k];
+    var at = anchor ? out.indexOf(anchor) : -1;
+    if(at >= 0) out.splice(at + 1, 0, k);   // 指定落位：锚点后一位
+    else out.push(k);                       // 其余额外列仍追加到末尾
+  });
+  return out;
 }
 function dailyCols(rows){ return v4FsCols(rows, V4_FS_DAILY_COLS); }
 function dateDesc(a,b){ var da=String(a['日期']||''), db=String(b['日期']||''); return da>db?-1:da<db?1:0; }
