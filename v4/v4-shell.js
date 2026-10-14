@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.36';
+var V4_VERSION = 'v4.11.37';
 // v4.11.36：存档格式版本 ≠ 壳层版本。rawV 只在「rawTotal/rawPen/rawBlk 这套字段的形态真变」时才动，
 //   **不跟 V4_VERSION 走**（否则每次改样式/改文案都要假装改了存档格式，溯源反而失真）。
 //   ⚠️ 渲染侧从不读 rawV（write-only 溯源标记）；断言请读本常量，别跟 V4_VERSION 比。
@@ -544,7 +544,9 @@ function v4SemPointName(stdId, subId){
 //        总分 = Σ(模块能力分 × 权重%) − min(12, 信息准确性红旗处数 × 4)
 //   ⚠️ 注意「信息准确性（违规项）」那 −4/处 仍在分里（老大选的就是只撤归零）；
 //      因此块内**必须**把这一笔显式列出来，否则模块加权合计对不上总分（差 0～12）。
-//   ⚠️ 它【不改变】本场 0 分判定：不写回 r.total / r.grade，不进摘要库、不进飞书任何评分字段。
+//   ⚠️ 它【不改变】本场 0 分判定：不写回 r.total / r.grade，不进摘要库、不写回任何**正式**评分字段。
+//   v4.11.37 起：本值会以「78.5（精确）／55.5（上限值）」的形式**另存**于飞书独立列
+//     「未记录 违规-综合评分」（见文件末尾 v4.11.37 块）；「综合评分」列仍为 0，判定不变。
 // 取数两条路（精确优先，绝不拿反推值冒充精确值）：
 //   ① 精确：`r.__redline.rawTotal`（v4.11.34 起在 redlineApply 入口捕获）→ 存档 det.rawTotal
 //      配套 det.rawPen / det.rawBlk（v4.11.35 起）＝ 那一笔信息准确性红旗，用于账目式拆解
@@ -677,7 +679,8 @@ function v4RawResultHTML(src, ctx){
       + '<div>模块加权：' + modLine.join(' · ') + '</div>'
       + accLine
       + '<div>口径：＝ <b>完全不做平台红线处置</b>时的综合评分结果，仅用于复盘主播真实讲解水平，'
-      + '<b>不改变本场 0 分判定</b>，不写回任何评分字段、不进飞书。</div>'
+      + '<b>不改变本场 0 分判定</b>，不写回「综合评分」等正式评分字段；'
+      + '本值另存于飞书独立列「<b>未记录 违规-综合评分</b>」。</div>'
       + '</div></div>';
   }catch(e){ return ''; }
 }
@@ -5009,7 +5012,7 @@ document.addEventListener('DOMContentLoaded', function(){
   var LOG = function(m){ try{ console.log('[v4.11.35] ' + m); }catch(e){} };
   window.V4RAW = {
     __installed: true,
-    version: '4.11.36',
+    version: '4.11.37',
     on:   function(){ try{ localStorage.removeItem('v4raw_enabled'); }catch(e){} return 'on'; },
     off:  function(){ try{ localStorage.setItem('v4raw_enabled','0'); }catch(e){} return 'off'; },
     onQ:  v4RawOn,
@@ -5019,5 +5022,113 @@ document.addEventListener('DOMContentLoaded', function(){
     probe: function(x){ return v4RawScore(x); },
     debug: function(){ return { enabled: v4RawOn(), shellV: V4_VERSION }; }
   };
-  LOG('已装载：口径 = 红线处置【之前】的 r.total；形态 = 一整份结果卡（不改判定、不回写任何评分字段）');
+  LOG('已装载：口径 = 红线处置【之前】的 r.total；形态 = 一整份结果卡（判定逻辑未动）');
+})();
+
+// =====================================================
+// v4.11.37：「不计违规项综合评分」正式写入飞书**独立列**
+// 老大 10-14 拍板：该值不再只是工作台内部展示，而是回写飞书独立列
+//   「未记录 违规-综合评分」，便于在飞书侧直接看到「被判 0 分场次」的真实讲解水平。
+// ⚠️ 这是**口径扩展，不是改判定**：该列不参与任何评分 / 等级 / 归零逻辑，
+//   「综合评分」列仍为 0、「本场 0 分判定」一字未变。
+//   ⇒ 因此 v4.11.35 卡上原句「不写回任何评分字段、不进飞书」已同步改成准确表述。
+// 值与标记（老大选：带口径标记，便于日后分辨真假）：
+//   判 0 + 精确路径 → `78.5（精确）`；判 0 + 反推路径 → `55.5（上限值）`
+//   ⚠️ 非判 0 场次**不写该字段**（留空）—— 那些场次该值恒等于「综合评分」，写了是噪音。
+// 挂载时机：必须早于 `publicResult(r)`（它只剔「__」前缀键 ⇒ 本字段能上飞书）。
+//   实测链路：autoFillFeishu(r) → V4Jobs.sync(r) → post(feishu-fill, {result: publicResult(r)})。
+// 回退：localStorage `v4rawcol_enabled='0'` 后刷新页面 ⇒ 不再挂字段（飞书已有值不受影响）。
+// =====================================================
+(function(){
+  var LOG = function(m){ try{ console.log('[v4.11.37] ' + m); }catch(e){} };
+  var LS_OFF = 'v4rawcol_enabled';
+  var FMT_EXACT = '（精确）', FMT_DERIVED = '（上限值）';
+
+  function on(){ try{ return localStorage.getItem(LS_OFF) !== '0'; }catch(e){ return true; } }
+
+  // 与 v4DetailSnapshot 的沉淀口径严格一致：只看 sessionZero / moduleZero
+  function isZeroed(r){
+    var rl = (r && r.__redline) || null;
+    return !!(rl && (rl.sessionZero || rl.moduleZero));
+  }
+
+  // 计算要写入飞书单元格的文本；不适用则返回 ''
+  function cellText(r){
+    try{
+      if(!on() || !r || typeof r !== 'object') return '';
+      if(!isZeroed(r)) return '';                        // 非判 0 ⇒ 留空
+      if(typeof v4RawScore !== 'function') return '';
+      var q = v4RawScore(r);
+      if(!q || typeof q.total !== 'number') return '';
+      return q.total + (q.exact ? FMT_EXACT : FMT_DERIVED);
+    }catch(e){ return ''; }
+  }
+
+  // 幂等；**空值不挂键** —— 服务端 PUT 是部分更新，缺键不会清空既有值
+  function attach(r){
+    try{
+      if(!r || typeof r !== 'object') return r;
+      if(Object.prototype.hasOwnProperty.call(r, 'rawScoreText')) return r;
+      var t = cellText(r);
+      if(t) r.rawScoreText = t;
+    }catch(e){}
+    return r;
+  }
+
+  var STATS = { attached: 0, blank: 0, err: 0 };
+  function wrap(obj, name){
+    try{
+      if(!obj || typeof obj[name] !== 'function') return false;
+      var orig = obj[name];
+      if(orig.__v41137) return false;      // 已经包过 ⇒ 本次不算新增（供下面 lateWrap 复用）
+      var patched = function(r){
+        try{
+          var had = !!(r && r.rawScoreText);
+          attach(r);
+          if(r && r.rawScoreText){ if(!had) STATS.attached++; }
+          else STATS.blank++;
+        }catch(e){ STATS.err++; }
+        return orig.apply(this, arguments);
+      };
+      patched.__v41137 = true;
+      obj[name] = patched;
+      return true;
+    }catch(e){ return false; }
+  }
+
+  var n = 0;
+  if(wrap(window, 'autoFillFeishu')) n++;
+  if(wrap(window, 'addHistoryRecord')) n++;
+  try{ if(wrap(window.V4Jobs, 'sync')) n++; }catch(e){}
+  try{ if(wrap(window.V4Jobs, 'syncLibs')) n++; }catch(e){}
+
+  // ⚠️ 时序实况：workflow.js 排在 v4-shell.js **之后**加载（index.html 第 8 个），
+  //   所以上面那两行 V4Jobs.* 在本脚本装载时恒为 no-op ⇒ 实测「接管 2/4」。
+  //   功能上够用（飞书写回通路 A 的入口就是 app-core 的 autoFillFeishu，已包到），
+  //   但为防将来出现"直连 V4Jobs.sync"的新入口，加载完成后再补包一次（幂等：包过的不重复计）。
+  function lateWrap(){
+    try{ if(wrap(window.V4Jobs, 'sync')) n++; }catch(e){}
+    try{ if(wrap(window.V4Jobs, 'syncLibs')) n++; }catch(e){}
+    try{ console.log('[v4.11.37] 延迟补包完成：累计接管 ' + n + '/4 个写入口'); }catch(e){}
+  }
+  try{
+    if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', lateWrap);
+    else setTimeout(lateWrap, 0);
+  }catch(e){}
+
+  window.V4RAWCOL = {
+    __installed: true,
+    version: '4.11.37',
+    on:  function(){ try{ localStorage.removeItem(LS_OFF); }catch(e){} return 'on'; },
+    off: function(){ try{ localStorage.setItem(LS_OFF, '0'); }catch(e){} return 'off'; },
+    onQ: on,
+    field: '未记录 违规-综合评分',
+    zeroed: isZeroed,
+    cell: cellText,
+    attach: attach,
+    probe: function(r){ attach(r); return { zeroed: isZeroed(r), text: cellText(r),
+                                           attached: (r && r.rawScoreText) || '' }; },
+    debug: function(){ return { on: on(), wrapped: n, stats: STATS, shellV: V4_VERSION }; }
+  };
+  LOG('已装载：判 0 场次回写飞书独立列（带口径标记）；接管 ' + n + '/4 个写入口，判定逻辑未动');
 })();

@@ -172,6 +172,13 @@ module.exports = async function handler(req, res){
     if(golden) baseFields['黄金话术'] = golden;
     if(bad) baseFields['违规话术'] = bad;
     if(advice) baseFields['改善建议'] = advice;
+    // v4.11.37：被判 0 分场次的「不计违规项综合评分」回写独立列。
+    //   前端 v4.11.37 块在 publicResult 之前挂 result.rawScoreText（形如 `78.5（精确）` /
+    //   `55.5（上限值）`；非判 0 场次不挂该键）。
+    //   ⚠️ 列名必须与飞书逐字一致（2026-10-14 实测 field_id=fldfcibJNi，类型=多行文本）：
+    //      半角空格 1 个 + 半角连字符 1 个，改一个字就会静默写空。
+    //   ⚠️ 仅在非空时写入：PUT 是部分更新，缺键不会清空既有值（与「改善建议」同策略）。
+    if(r.rawScoreText) baseFields['未记录 违规-综合评分'] = String(r.rawScoreText);
     // v4.11.24：完整主播报告（多行文本，官方单格上限 100,000）
     // 前端 v4.11.24 块将 v4DetailSnapshot() 压缩快照挂到 result.v4Report 传出。
     // ⚠️ 仅在非空时写入：PUT 是部分更新，缺键不会清空既有报告（重评时若无快照则保留旧值）。
