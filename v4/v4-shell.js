@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.41';
+var V4_VERSION = 'v4.11.42';
 // v4.11.36：存档格式版本 ≠ 壳层版本。rawV 只在「rawTotal/rawPen/rawBlk 这套字段的形态真变」时才动，
 //   **不跟 V4_VERSION 走**（否则每次改样式/改文案都要假装改了存档格式，溯源反而失真）。
 //   ⚠️ 渲染侧从不读 rawV（write-only 溯源标记）；断言请读本常量，别跟 V4_VERSION 比。
@@ -5311,11 +5311,18 @@ document.addEventListener('DOMContentLoaded', function(){
     for(i=0;i<raw.length;i++){
       var x = raw[i] || {};
       var f = x.fp || fp(x);
-      var rv = x.revoked ? { at:x.revAt || '', note:x.revNote || '' } : null;
-      if(!rv) for(k=0;k<revs.length;k++){ if(String((revs[k]||{}).fp || '') === f){ rv = { at:(revs[k]||{}).at || '', note:(revs[k]||{}).note || '' }; break; } }
-      if(!rv && rb && rb.list) for(k=0;k<rb.list.length;k++){
-        if(String((rb.list[k]||{}).fp || '') === f){ rv = { at:(rb.list[k]||{}).at || '', note:(rb.list[k]||{}).note || '' }; break; }
+      /* 🔴 v4.11.42 修：留痕的「撤销时间/理由」只记在**留痕记录**里（rel.revoked / rb.list），
+         `recountRel` 只把 x.revoked 置 true、**从不写 x.revAt/x.revNote**。
+         旧写法 `x.revoked ? {at:x.revAt||''} : null` 会先构造出一个"真值但空时间"的 rv，
+         导致下面那句 `if(!rv)` 的兜底查询**永远不执行** ⇒ 当场报告里留痕只有「理由：未填写」、
+         时间戳（明明存在 rel.revoked[0].at）被吞掉；而历史详情走的是另一条路径（rb.list 命中）反而有时间。
+         ⇒ 改成：**先按指纹找留痕记录（运行时 → 存档），拿到 at/note 后再决定 rv 是否成立**。 */
+      var rec = null;
+      for(k=0;k<revs.length;k++){ if(String((revs[k]||{}).fp || '') === f){ rec = revs[k]; break; } }
+      if(!rec && rb && rb.list) for(k=0;k<rb.list.length;k++){
+        if(String((rb.list[k]||{}).fp || '') === f){ rec = rb.list[k]; break; }
       }
+      var rv = (x.revoked || rec) ? { at:(rec && rec.at) || x.revAt || '', note:(rec && rec.note) || x.revNote || '' } : null;
       list.push({ x:x, fp:f, rid:i, rev:rv });
       if(rv) revN++; else actN++;
     }
