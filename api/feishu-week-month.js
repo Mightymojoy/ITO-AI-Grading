@@ -103,6 +103,14 @@ function inRange(d, start, end){
   return normDate(d) >= start && normDate(d) <= end;
 }
 
+// v4.11.46：读「未记录 违规-综合评分」的数值。该列是文本，形如 `78.5（精确）` / `55.5（上限值）`
+//   ⇒ 取开头数字（与本地回填脚本 numOf 同口径）；取不到数字返回 null（**不猜、不当 0**）。
+function rawNum(v){
+  if(v == null) return null;
+  const m = String(v).match(/-?\d+(\.\d+)?/);
+  return m ? parseFloat(m[0]) : null;
+}
+
 // 计算 ISO 周次（YYYY-Www）
 function weekLabel(dateStr){
   const d = new Date(dateStr);
@@ -145,13 +153,16 @@ module.exports = async function handler(req, res){
     inWin.forEach(r => {
       const f = r.fields || {};
       const host = f['主播'];
-      if(!byHost[host]) byHost[host] = {host, studio: f['直播间']||'', dates: [], totals: [], c1s: [], best: null};
+      if(!byHost[host]) byHost[host] = {host, studio: f['直播间']||'', dates: [], totals: [], c1s: [], raws: [], best: null};
       const b = byHost[host];
       b.dates.push(normDate(f['日期']));
       const t = parseFloat(f['总分']);
       if(!isNaN(t)) b.totals.push(t);
       const c1 = parseFloat(f['c1产品理解']);
       if(!isNaN(c1)) b.c1s.push(c1);
+      // v4.11.46：「不计红线处置的原分」逐场收集（供周期均值）
+      const rw = rawNum(f['未记录 违规-综合评分']);
+      if(rw != null) b.raws.push(rw);
       if(!b.best || t > b.best.total) b.best = {date: normDate(f['日期']), total: t, grade: f['等级']||''};
     });
     const hosts = Object.keys(byHost).sort();
@@ -161,7 +172,14 @@ module.exports = async function handler(req, res){
       const avgC1 = b.c1s.length ? Math.round(b.c1s.reduce((a,x)=>a+x,0)/b.c1s.length*10)/10 : 0;
       const firstT = b.totals.length ? b.totals[0] : 0;
       const lastT = b.totals.length ? b.totals[b.totals.length-1] : 0;
-      return {host:h, studio:b.studio, count:b.totals.length, avg, avgC1, trend: lastT - firstT, best:b.best, dates:b.dates};
+      // v4.11.46：周期均值 —— **窗口内该主播所有场次都有该值**才算（老大 2026-10-15 拍板口径：
+      //   「周期内所有场次的均值」，与同表「综合评分(周均)/(月均)」并排对照）。
+      //   分母取 b.dates.length（该主播窗口内**全部**场次）而不是 b.raws.length：
+      //   两者不等 ⇒ 有的场次没这个值 ⇒ 均值分母与旁边的「周均」不一致，并排看会被读成
+      //   「这周红线扣了 N 分」的错误结论 ⇒ **宁可不写**（与本地回填脚本同一策略）。
+      const avgRaw = (b.raws.length && b.raws.length === b.dates.length)
+        ? Math.round(b.raws.reduce((a,x)=>a+x,0)/b.raws.length*10)/10 : null;
+      return {host:h, studio:b.studio, count:b.totals.length, avg, avgC1, avgRaw, trend: lastT - firstT, best:b.best, dates:b.dates};
     }).sort((a,b)=>b.avg-a.avg);
     const top1 = agg.length ? agg.reduce((a,b)=> (b.best && (!a.best || b.best.total > a.best.total)) ? b : a, agg[0]) : null;
 
@@ -219,6 +237,10 @@ module.exports = async function handler(req, res){
         '待改进': topProblems,
         '周TOP1': isTop ? (a.best ? a.best.total + '分 ' + (a.best.grade||'') : '') : ''
       };
+      // v4.11.46：「未记录 违规-综合评分」（该列两表里**早已存在**：周总结 fldVlLXGLK / 月总结 fld74sFWr5，
+      //   但本端点一直没写 ⇒ 0/111 与 0/68，2026-10-15 实测）。**算不出来就不挂这个键** ——
+      //   update 走 PUT 部分更新（缺键不清既有值），create 也只是该列为空，都不会破坏数据。
+      if(a.avgRaw != null) fields['未记录 违规-综合评分'] = String(a.avgRaw);
       const key = (range === 'month' ? start.slice(0,7) : start) + '_' + a.host;
       if(existMap[key]){
         const up = await updateRecord(token, tableId, existMap[key], fields);

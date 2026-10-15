@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.45';
+var V4_VERSION = 'v4.11.46';
 // v4.11.36：存档格式版本 ≠ 壳层版本。rawV 只在「rawTotal/rawPen/rawBlk 这套字段的形态真变」时才动，
 //   **不跟 V4_VERSION 走**（否则每次改样式/改文案都要假装改了存档格式，溯源反而失真）。
 //   ⚠️ 渲染侧从不读 rawV（write-only 溯源标记）；断言请读本常量，别跟 V4_VERSION 比。
@@ -4676,9 +4676,13 @@ document.addEventListener('DOMContentLoaded', function(){
     return h;
   }
 
-  // 早于 v4.11.30 的记录：存档里没有 redlineV 标记 ⇒ 给一行灰字说明，免得以为又坏了
+  // 早于 REDLINE_DATA_SINCE 的记录：存档里没有 redlineV 标记 ⇒ 给一行灰字说明，免得以为又坏了
+  // 🔴 v4.11.46 更正：此处原文与注释都写死「v4.11.30」，但真正的能力标记是 redlineV = '4.11.31'
+  //    ⇒ 文案差一个版本（v4.11.30 产生的记录**同样**没有 redlineV）。改为与下方 apply() 共用同一常量，
+  //    防止以后再次写歪（自检：verify_hist_field.js 从源码提取本常量做断言，不硬编码）。
+  var REDLINE_DATA_SINCE = '4.11.31';   // ⚠️ 必须与下方 `det.redlineV = REDLINE_DATA_SINCE` 同值
   function legacyHint(){
-    return '<div class="v4his-none" style="margin:0 0 8px">该记录产生于 v4.11.30 之前，未沉淀红线判罚数据；重新评分一次即可看到（与每日报告同款横幅）</div>';
+    return '<div class="v4his-none" style="margin:0 0 8px">该记录产生于 v' + REDLINE_DATA_SINCE + ' 之前，未沉淀红线判罚数据；重新评分一次即可看到（与每日报告同款横幅）</div>';
   }
 
   /* ---------- ③ 接管两个顶层函数（壳层包装；调用点是运行时查找 ⇒ patch 生效） ---------- */
@@ -4693,7 +4697,7 @@ document.addEventListener('DOMContentLoaded', function(){
             var rl = pick(r);
             if(rl){ det.redline = rl; STATS.snap++; }
             else   { STATS.clean++; }
-            det.redlineV = '4.11.31';     // 标记「这一版能沉淀红线数据（含规则编号）」——用于区分新旧记录
+            det.redlineV = REDLINE_DATA_SINCE;     // 标记「这一版能沉淀红线数据（含规则编号）」——用于区分新旧记录
           }
         }catch(e1){ STATS.err = 'snap:' + ((e1 && e1.message) || e1); LOG('红线快照异常：' + STATS.err); }
         return det;
@@ -5581,9 +5585,12 @@ document.addEventListener('DOMContentLoaded', function(){
   //   ② 报告串 > 95000 ⇒ 服务端不写报告列（feishu-sync 的防御性校验），但旧行照样被删
   //      ⇒ 整份报告丢失。同样宁可不写。
   //   ③ 日期格式非常规 ⇒ 会在该表建出畸形新行。宁可不写。
-  // ✅ 不碰「未记录 违规-综合评分」：该列只在「主播日报」表里；历史评分表**没有**这一列
-  //   （2026-10-14 实测全表 309 行的字段并集 = 日期/主播/直播间/等级/c1产品理解/产品/
-  //    产品理解(数值)/历史总分(数值)/总分/标准日期/完整主播报告，该列 0/309）。
+  // ⚠️ **v4.11.46 更正本块原先的一条错注**：这里曾写「历史评分表**没有**『未记录 违规-综合评分』列
+  //   （2026-10-14 实测全表 309 行字段并集 …，该列 0/309）」——那是**看 records 的 keys 并集**得出的假象：
+  //   整列为空的字段**根本不会出现在 keys 里**。2026-10-15 走 `GET /fields` 实测该表 13 字段、
+  //   **确有这一列**（field_id `fldqUEk0jk`，当时 0/330 覆盖），只是没人写过。
+  //   ⇒ 已接通：本块 libBody 挂 `raw` → 服务端 upsertHistory 写入该列。
+  //   🔴 铁律：判「字段是否存在」**必须走 `GET /fields`**，看 records 会得出相反结论。
   // 回退：localStorage `v4librev_enabled='0'` + 刷新 ⇒ 不回写该表（其余全照旧）。
   function libReady(){ try{ return window.FEISHU_SYNC_URL || ''; }catch(e){ return ''; } }
   function libOn(){ try{ return localStorage.getItem(LS_LIBOFF) !== '0'; }catch(e){ return true; } }
@@ -5608,10 +5615,17 @@ document.addEventListener('DOMContentLoaded', function(){
       return { ok:false, why:'报告 ' + rep.length + ' 字符超上限（>95000），已阻止回写'
                           + '（服务端超限不写报告列、旧行却已被删 ⇒ 会丢报告）' };
     }
+    // v4.11.46：带上「未记录 违规-综合评分」（历史评分表的这一列也接上）。
+    //   值口径 = **不做红线处置的原分**（`78.5（精确）` 形态）⇒ ⚠️ **撤销不改变它**：
+    //     撤销撤的是「处置」，而这个口径本来就是「没有处置时的分数」，两者同值。
+    //   算不出 ⇒ 空串（不传数字、不猜）；服务端判据是 `!== undefined` ⇒ 空串也会如实写入。
+    //   ⚠️ 服务端是「先删同主播同日期旧行、再建 1 行」⇒ 空串与不挂键在新行上等效，不会残留旧值。
+    var rawTxt = '';
+    try{ rawTxt = v4RawCellText(det); }catch(e){ rawTxt = ''; }
     return { ok:true, body: { history: [{
       host: det.host, date: String(det.date || ''), studio: String(det.studio || ''),
       product: product, total: det.total, grade: String(det.grade || ''),
-      c1: c1, report: rep
+      c1: c1, report: rep, raw: rawTxt
     }] } };
   }
 
