@@ -102,6 +102,24 @@ async function createRecord(token, fields){
   }, body);
 }
 
+// v4.11.45（2026-10-15）：**附属列降级**（主数据优先）
+//   实测结论（2026-10-15 · 真实记录 · 写入值 = 该字段当前值 ⇒ 对数据零影响）：
+//   PUT 的 fields 里只要有一个字段名在表里不存在，飞书返回 code **1254045 FieldNameNotFound**
+//   并**整条拒绝** —— 同一个请求里合法的「综合评分」「c1–c8」「完整主播报告」也一起写不进去。
+//   （官方文档同口径：1254045「字段名称不存在…根据表格页面的 UI 名称可能会忽略空格、换行或特殊符号等差异」）
+//   ⚠️ 而本版新增的两列是业务方**手工建**的，随时可能被改名 / 删除 ⇒ 绝不能让它把主数据拖下水。
+//   策略：整条被拒且确实带了附属列时，**去掉附属列重试一次**，主数据优先，
+//        并在响应里如实回报被丢掉的列（前端 toast 会看到原因，不会静默降级）。
+const OPT_COLS = ['命中平台红线 —— 本场总分按 0 计', '已标注（不判 0 分）'];
+function optColsIn(fields){
+  return OPT_COLS.filter(function(k){ return Object.prototype.hasOwnProperty.call(fields, k); });
+}
+function dropOptCols(fields){
+  const o = Object.assign({}, fields);
+  OPT_COLS.forEach(function(k){ delete o[k]; });
+  return o;
+}
+
 module.exports = async function handler(req, res){
   // CORS（GitHub Pages 跨域调用）
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -180,6 +198,17 @@ module.exports = async function handler(req, res){
     //      半角空格 1 个 + 半角连字符 1 个，改一个字就会静默写空。
     //   ⚠️ 仅在非空时写入：PUT 是部分更新，缺键不会清空既有值（与「改善建议」同策略）。
     if(r.rawScoreText) baseFields['未记录 违规-综合评分'] = String(r.rawScoreText);
+
+    // v4.11.45（2026-10-15）：飞书日报表两列同步 ——「命中平台红线 —— 本场总分按 0 计」/「已标注（不判 0 分）」。
+    //   前端 v4.11.45 块生成纯文本并挂 result.redlineText / result.annotText（与页面横幅同一份口径）。
+    //   🔴 列名必须与飞书**逐字一致**（2026-10-15 实测：日报表第 27 / 28 个字段，类型均为多行文本）：
+    //      「命中平台红线 —— 本场总分按 0 计」是「**按** 0 计」；「已标注（不判 0 分）」**没有 AI 前缀**。
+    //      多行文本按列名匹配 ⇒ 写错一个字就是静默写空（与「未记录 违规-综合评分」同一个坑）。
+    //   ⚠️ 判据用 `!== undefined` 而**不是**真值判断：前端会刻意传**空串**来清列
+    //      （该场确知无命中 / 无标注时），用真值判断会让旧值永远清不掉；而老记录前端根本不挂键，
+    //      PUT 是部分更新 ⇒ 缺键不会误清既有值。
+    if(r.redlineText !== undefined) baseFields['命中平台红线 —— 本场总分按 0 计'] = String(r.redlineText);
+    if(r.annotText  !== undefined) baseFields['已标注（不判 0 分）'] = String(r.annotText);
     // v4.11.24：完整主播报告（多行文本，官方单格上限 100,000）
     // 前端 v4.11.24 块将 v4DetailSnapshot() 压缩快照挂到 result.v4Report 传出。
     // ⚠️ 仅在非空时写入：PUT 是部分更新，缺键不会清空既有报告（重评时若无快照则保留旧值）。
@@ -203,22 +232,40 @@ module.exports = async function handler(req, res){
         '日期': String(date).slice(0,10)
       });
       if(data.studio) createFields['直播间'] = data.studio;
-      const cr = await createRecord(token, createFields);
+      let finalCreate = createFields, optDroppedC = [];
+      let cr = await createRecord(token, finalCreate);
+      if(cr.code === 1254045 && optColsIn(finalCreate).length){
+        // v4.11.45：附属列在表里不存在 ⇒ 丢列重试。否则**新记录根本建不出来**，比丢一列严重得多。
+        optDroppedC = optColsIn(finalCreate);
+        finalCreate = dropOptCols(finalCreate);
+        cr = await createRecord(token, finalCreate);
+      }
       if(cr.code !== 0){
         return res.status(200).json({ok:false, reason:'飞书自动建记录失败: '+(cr.msg||'')+' code='+cr.code});
       }
       const newRec = cr.data && cr.data.record;
-      return res.status(200).json(Object.assign({ok:true, created:true, recordId: newRec ? newRec.record_id : '', host, date, total: r.total, fieldsWritten: Object.keys(createFields).length, removedDup}, repSkip ? {reportSkipped: repSkip} : {}));
+      const createOut = {ok:true, created:true, recordId: newRec ? newRec.record_id : '', host, date, total: r.total, fieldsWritten: Object.keys(finalCreate).length, removedDup};
+      if(optDroppedC.length) createOut.optColsDropped = optDroppedC;
+      return res.status(200).json(Object.assign(createOut, repSkip ? {reportSkipped: repSkip} : {}));
     }
 
     const fields = Object.assign({}, baseFields);
     if(data.studio && !rec.fields['直播间']) fields['直播间'] = data.studio;
 
-    const up = await updateRecord(token, rec.record_id, fields);
+    let finalFields = fields, optDropped = [];
+    let up = await updateRecord(token, rec.record_id, finalFields);
+    if(up.code === 1254045 && optColsIn(finalFields).length){
+      // v4.11.45：附属列被改名/删除 ⇒ 丢列重试一次，保证综合评分等主数据仍然写得进去。
+      optDropped = optColsIn(finalFields);
+      finalFields = dropOptCols(finalFields);
+      up = await updateRecord(token, rec.record_id, finalFields);
+    }
     if(up.code !== 0){
       return res.status(200).json({ok:false, reason:'飞书写入失败: '+(up.msg||'')+' code='+up.code, recordId: rec.record_id});
     }
-    return res.status(200).json(Object.assign({ok:true, recordId: rec.record_id, host, date, total: r.total, fieldsWritten: Object.keys(fields).length, removedDup}, repSkip ? {reportSkipped: repSkip} : {}));
+    const upOut = {ok:true, recordId: rec.record_id, host, date, total: r.total, fieldsWritten: Object.keys(finalFields).length, removedDup};
+    if(optDropped.length) upOut.optColsDropped = optDropped;
+    return res.status(200).json(Object.assign(upOut, repSkip ? {reportSkipped: repSkip} : {}));
   }catch(e){
     return res.status(500).json({ok:false, error: e.message});
   }

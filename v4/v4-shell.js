@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.44';
+var V4_VERSION = 'v4.11.45';
 // v4.11.36：存档格式版本 ≠ 壳层版本。rawV 只在「rawTotal/rawPen/rawBlk 这套字段的形态真变」时才动，
 //   **不跟 V4_VERSION 走**（否则每次改样式/改文案都要假装改了存档格式，溯源反而失真）。
 //   ⚠️ 渲染侧从不读 rawV（write-only 溯源标记）；断言请读本常量，别跟 V4_VERSION 比。
@@ -5545,6 +5545,11 @@ document.addEventListener('DOMContentLoaded', function(){
       if(rep.length <= 95000) body.result.v4Report = rep;
       else warn = '（报告 ' + rep.length + ' 字符超上限，本次未写报告列，综合评分照写）';
     }catch(e){}
+    // v4.11.45：这两列（红线命中 / 已标注）的注入点 —— 见文件末尾同名块。
+    //   挂在这里（而不是只包那 4 个写入口）是因为**撤销 / 恢复**走的是 fbWrite 直调本函数，
+    //   不经过那些入口 ⇒ 只有这里能保证撤销后重写时这两列跟着刷新成撤销后的口径。
+    //   语义：null = 不挂键（老记录，不动该列）；'' = 写空串清列（确知本场无命中）。
+    try{ if(window.V4RLCOL && window.V4RLCOL.fill) window.V4RLCOL.fill(det, body.result); }catch(e){}
     return { ok:true, body: body, warn: warn };
   }
   function fbWrite(det, total, cb){
@@ -6090,4 +6095,224 @@ document.addEventListener('DOMContentLoaded', function(){
   };
   LOG('已装载：红线判罚可人工撤销（留痕可恢复）｜接管 ' + swapped + '/4 个公开入口；判定口径未动，原分取 rel.rawTotal 或精确复算');
   LOG('v4.11.44：当场报告路径也双写（与历史详情同口径）—— 主播日报表(fill) + 历史评分表(sync)');
+})();
+
+// =====================================================
+// v4.11.45（2026-10-15）：飞书日报表两列同步
+//   「命中平台红线 —— 本场总分按 0 计」 + 「已标注（不判 0 分）」
+// -----------------------------------------------------
+// 需求原文（老大 2026-10-15）：「飞书在线表上面并未记录 评分结果中这2项，需要同步的」
+//   ⇒ 把工作台评分结果页面上那两块（红色判罚横幅 / 金色标注区）的**明细清单**写进飞书两列。
+//
+// 三处落点（缺任何一处，这两列恒为空 —— 2026-10-15 实测坐实）：
+//   ① 飞书「主播日报」tblQC7Jfzmxp6QJI **已有**这两列：老大手工建的，实测第 27 / 28 个字段，
+//      类型均为多行文本；全表 177 行 0 覆盖。
+//      🔴 列名逐字（多行文本按列名匹配，错一个字就是静默写空）：
+//         「命中平台红线 —— 本场总分按 0 计」—— 是「**按** 0 计」，不是「0 分计」
+//         「已标注（不判 0 分）」—— **没有 AI 前缀**
+//   ② api/feishu-fill.js —— 加两行列名映射（服务端，必须 push 才生效）
+//   ③ 本块 —— 生成纯文本并挂到载荷对象上
+//
+// 挂点（**两个**，一条通路都不能漏）：
+//   A. buildBody(det,total) 里留一行 hook —— 覆盖 v4-shell 自己的写回（撤销 / 恢复，v4.11.41+）。
+//      ⚠️ buildBody / fbWrite 同在一个 IIFE 闭包内 ⇒ 从外面 patch 不透（铁律）⇒ 只能在源码里加一行。
+//   B. 包装 4 个公开写入口（同 v4.11.37 的做法）—— 覆盖 app-core / workflow 自己构造载荷的通路
+//      （autoFillFeishu / addHistoryRecord / V4Jobs.sync / V4Jobs.syncLibs）。
+//      ⚠️ workflow.js 排在 v4-shell.js 之后加载 ⇒ 装载时 V4Jobs.* 恒为 no-op，故配 lateWrap 补包。
+//
+// 数据源（只读，判定逻辑一行未动）：
+//   · 红线命中  rel.reasons —— {cat,code,term,src,action,ts,quote}
+//               ⚠️ code / term / ts 可能是空串：**语义通道命中**就是全空（实测王菲 2026-10-14）
+//   · 撤销留痕  运行时 rel.revoked[] / 存档 det.rlRevoked.list —— 按 fp() 指纹匹配
+//               ⚠️ archiveRel() **不保留** revoked 标记 ⇒ 必须靠指纹反查，不能读 reasons[].revoked
+//   · 标注明细  rel.scan.annotateHits（运行时）/ det.redline.notes（存档，v4.11.33 沉淀）
+//
+// 口径（严格对齐页面渲染，避免「表里一套、屏上一套」）：
+//   · 标题随撤销状态走：仍判 0 / 部分撤销 / 全部撤销（留痕不真删，逐条标「已撤销（误判）」+ 时间 + 理由）
+//   · 未命中 / 未标注 ⇒ 内容为空（老大 2026-10-15 选定「明细清单，未命中留空」）
+//   · 🔴 三种返回语义必须分清（本块最容易写错的地方）：
+//       null  ⇒ **不挂键**（PUT 部分更新，缺键不清空既有值）—— 用于「本场数据不可知」的老记录
+//       ''    ⇒ **显式写空串清列** —— 用于「确知本场无命中」（有 redline 数据却无明细）
+//       非空  ⇒ 正常写入明细
+//   · 🔴 全撤后存档契约会 delete det.redline（v4.11.41「不留空壳」）⇒ 此时只能从 det.rlRevoked.list
+//     还原命中清单，否则会把「已撤销」的场次写成空，等于把留痕抹掉。
+// 导出 window.V4RLCOL 供**存量回填脚本**复用同一份文本口径（绝不另写一套模板，防两处漂移）。
+// =====================================================
+(function(){
+  var LS_OFF   = 'v4rlcol_enabled';
+  var MAX_ITEM = 30;      // 单列最多渲染条数（超出走「…另有 N 条」）
+  var MAX_LEN  = 9000;    // 单格文本上限保护（飞书多行文本单格官方上限 100000，留足余量）
+  var QMAX     = 120;     // 单条引文截断
+  var SEP      = String.fromCharCode(1);   // 必须与 v4.11.41 的 fp() 一致
+  var STATS = { hit:0, note:0, blank:0, skip:0, wrapped:0, err:'' };
+  var LOG = function(m){ try{ console.log('[v4.11.45] ' + m); }catch(e){} };
+
+  function on(){ try{ return localStorage.getItem(LS_OFF) !== '0'; }catch(e){ return true; } }
+  function S(v){ return String(v == null ? '' : v); }
+  function one(v, n){
+    var s = S(v).replace(/\s+/g, ' ').trim();
+    return (n && s.length > n) ? (s.slice(0, n) + '…') : s;
+  }
+  // 与 v4.11.41 的 fp() 逐字符同口径（撤销留痕就是按它索引的）
+  function fp(x){
+    x = x || {};
+    return [x.code||'', x.src||'', x.cat||'', x.term||'', x.ts||'', x.action||''].join(SEP);
+  }
+  // 运行时对象与存档快照统一成一份视图（两条通路的字段名不一样，必须归一）
+  function norm(det){
+    det = det || {};
+    var rl = det.redline || det.__redline || null;
+    var list = [];
+    if(det.rlRevoked && det.rlRevoked.list && det.rlRevoked.list.length) list = det.rlRevoked.list;
+    else if(rl && rl.revoked && rl.revoked.length) list = rl.revoked;
+    return { rl: rl,
+             // 「本场红线数据是否可知」：存档看 redlineV（v4.11.31+ 才写），运行时看 __redline 在不在
+             known: !!(det.redlineV || det.__redline || det.redline),
+             notes: (rl && rl.notes) || (rl && rl.scan && rl.scan.annotateHits) || [],
+             notesN: (rl && rl.notesN) || (rl && rl.scan && rl.scan.annotateGroups) || 0,
+             reasons: (rl && rl.reasons) || [], rev: list };
+  }
+  function revMap(view){
+    var m = {}, i;
+    for(i=0;i<view.rev.length;i++){ var x = view.rev[i] || {}; if(x.fp) m[S(x.fp)] = x; }
+    return m;
+  }
+  // 逐条明细（字段顺序刻意与页面横幅一致：编号、分类、触发词、来源、时间）
+  function item(x, rv, withAct){
+    var s = S(x.cat);
+    if(x.code) s = '[' + S(x.code) + '] ' + s;
+    if(x.term) s += '　触发词「' + S(x.term) + '」';
+    if(x.count && x.count > 1) s += ' ×' + x.count;
+    if(x.src) s += '　[' + S(x.src) + (withAct ? '（' + (x.action === 'MODULE_ZERO' ? '模块归0' : '整场归0') + '）' : '') + ']';
+    if(x.ts) s += ' ' + S(x.ts);
+    if(rv) s += '　✗ 已撤销（误判）' + (rv.at ? ' · ' + S(rv.at) : '') + (rv.note ? '　理由：' + S(rv.note) : '');
+    return s;
+  }
+  function render(title, rows){
+    var out = title, i, n = 0;
+    for(i=0;i<rows.length && i<MAX_ITEM;i++){
+      out += '\n' + (i+1) + '. ' + rows[i].line;
+      if(rows[i].quote) out += '\n　　「' + rows[i].quote + '」';
+      n++;
+    }
+    if(rows.length > n) out += '\n…另有 ' + (rows.length - n) + ' 条';
+    if(out.length > MAX_LEN) out = out.slice(0, MAX_LEN) + '\n…（明细超长已截断，完整内容见评分系统）';
+    return out;
+  }
+
+  /* ---------- 第一列：命中平台红线 —— 本场总分按 0 计 ---------- */
+  function redlineText(det){
+    var view = norm(det), rl = view.rl, rb = revMap(view), rows = [], i, x, rv;
+    if(view.reasons.length){
+      for(i=0;i<view.reasons.length;i++){
+        x = view.reasons[i] || {}; rv = rb[fp(x)] || null;
+        rows.push({ line: item(x, rv, true), quote: one(x.quote, QMAX) });
+      }
+    } else if(view.rev.length){
+      // 全撤后 det.redline 已被 delete ⇒ 从留痕还原（否则等于把留痕抹掉）
+      for(i=0;i<view.rev.length;i++){ x = view.rev[i] || {};
+        rows.push({ line: item(x, x, true), quote: one(x.quote, QMAX) });
+      }
+    } else {
+      // 确知无命中 ⇒ 空串清列；数据不可知（老记录）⇒ 不挂键、不误清
+      return view.known ? '' : null;
+    }
+    var revN = 0;
+    for(i=0;i<rows.length;i++){ if(rows[i].line.indexOf('已撤销（误判）') >= 0) revN++; }
+    var sess = !!(rl && rl.sessionZero);
+    var title;
+    if(revN && revN === rows.length) title = '全部命中已撤销（误判）—— 本场按原分计（共 ' + rows.length + ' 处）';
+    else if(sess) title = '本场总分按 0 计（共 ' + rows.length + ' 处命中' + (revN ? '，其中 ' + revN + ' 处已撤销为误判' : '') + '）';
+    else if(rl && rl.moduleZero) title = '对应能力模块按 0 计（共 ' + rows.length + ' 处命中）';
+    else title = '共 ' + rows.length + ' 处命中';
+    return render(title, rows);
+  }
+
+  /* ---------- 第二列：已标注（不判 0 分） ---------- */
+  function annotText(det){
+    var view = norm(det), ns = view.notes, rows = [], i, x;
+    if(!ns.length){
+      // 🔴 判据是「**标注数据可知吗**」，不是「有没有红线」：
+      //   v4.11.33 之前的存档 det.redline 只有 reasons、**根本没有 notes 字段**
+      //   ⇒ 那时压根没沉淀标注，写空串会把别人已经填好的值误清。
+      //   （2026-10-15 沙箱断言抓到过：原先写成 view.rl ? '' : null 会把这种记录判成"确知无标注"。）
+      var rl0 = view.rl;
+      var known = !!(rl0 && (rl0.notes || (rl0.scan && rl0.scan.annotateHits)));
+      return known ? '' : null;
+    }
+    for(i=0;i<ns.length;i++){ x = ns[i] || {};
+      rows.push({ line: item(x, null, false), quote: one(x.quote, QMAX) });
+    }
+    var n = view.notesN || ns.length;
+    return render('已标注 ' + n + ' 处（不判 0 分，不影响总分与等级）', rows);
+  }
+
+  /* ---------- 挂点 A：buildBody 的注入点（唯一被 fbWrite 覆盖的地方） ---------- */
+  function fill(det, result){
+    try{
+      if(!on() || !result || typeof result !== 'object') return 0;
+      var t1 = redlineText(det), t2 = annotText(det);
+      if(t1 !== null){ result.redlineText = t1; if(t1) STATS.hit++; else STATS.blank++; } else STATS.skip++;
+      if(t2 !== null){ result.annotText  = t2; if(t2) STATS.note++; else STATS.blank++; } else STATS.skip++;
+      return 1;
+    }catch(e){ STATS.err = 'fill:' + ((e && e.message) || e); LOG(STATS.err); return 0; }
+  }
+
+  /* ---------- 挂点 B：4 个公开写入口（app-core / workflow 自己构造载荷的通路） ---------- */
+  function wrap(obj, name){
+    try{
+      if(!obj || typeof obj[name] !== 'function') return false;
+      var orig = obj[name];
+      if(orig.__v41145) return false;              // 幂等：包过的本次不重复计
+      var patched = function(x){
+        try{
+          var arr = Array.isArray(x) ? x : [x], i;
+          for(i=0;i<arr.length;i++){ var r = arr[i]; if(r && typeof r === 'object') fill(r, r); }
+        }catch(e){ STATS.err = 'wrap:' + ((e && e.message) || e); LOG(STATS.err); }
+        return orig.apply(this, arguments);
+      };
+      patched.__v41145 = true;
+      obj[name] = patched;
+      return true;
+    }catch(e){ return false; }
+  }
+  function mount(){
+    var n = 0;
+    if(wrap(window, 'autoFillFeishu')) n++;
+    if(wrap(window, 'addHistoryRecord')) n++;
+    try{ if(wrap(window.V4Jobs, 'sync')) n++; }catch(e){}
+    try{ if(wrap(window.V4Jobs, 'syncLibs')) n++; }catch(e){}
+    return n;
+  }
+  STATS.wrapped = mount();
+  function lateWrap(){
+    var t = mount();
+    if(t > STATS.wrapped) STATS.wrapped = t;
+    LOG('写入口接管（含延迟补包）：累计 ' + STATS.wrapped + '/4');
+  }
+  try{
+    if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', lateWrap);
+    else setTimeout(lateWrap, 0);
+  }catch(e){}
+
+  window.V4RLCOL = {
+    __installed: true,
+    version: V4_VERSION.replace(/^v/, ''),
+    fieldHit:  '命中平台红线 —— 本场总分按 0 计',
+    fieldNote: '已标注（不判 0 分）',
+    onQ: on,
+    on:  function(){ try{ localStorage.removeItem(LS_OFF); }catch(e){} return 'on'; },
+    off: function(){ try{ localStorage.setItem(LS_OFF, '0'); }catch(e){} return 'off'; },
+    fill: fill,
+    // 供存量回填脚本复用同一份文本口径；null = 不写该列，'' = 写空串清列
+    text:  function(det){ return { redlineText: redlineText(det), annotText: annotText(det) }; },
+    probe: function(det){
+      var t = this.text(det);
+      return { redlineText: t.redlineText, annotText: t.annotText,
+               hit:  t.redlineText === null ? 'skip' : (t.redlineText ? 'write' : 'blank'),
+               note: t.annotText  === null ? 'skip' : (t.annotText  ? 'write' : 'blank') };
+    },
+    debug: function(){ return { on: on(), stats: STATS, shellV: V4_VERSION }; }
+  };
+  LOG('已装载：飞书日报表两列同步（红线命中 / 已标注）｜写入口接管 ' + STATS.wrapped + '/4，判定逻辑未动');
 })();
