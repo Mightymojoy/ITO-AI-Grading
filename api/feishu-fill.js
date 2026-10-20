@@ -42,24 +42,82 @@ async function getToken(){
   return tokenCache;
 }
 
+// v4.11.47（2026-10-20）：改为**全量分页拉取**。
+//   🔴 原实现写死 `page_size=200` 且不翻页 ⇒ 表内记录一旦超过 200 条，
+//      尾部记录**永远匹配不到** ⇒ 那些场次每次重评都会被当成新场次 create ⇒ 重复行。
+//      实测 2026-10-20 日报表已 221 条 ⇒ 已有 21 条处于盲区（这条与日期 bug 无关，独立隐患）。
+//   顺带把 page_size 提到 500（飞书单页上限），往返次数最少。
 async function listRecords(token){
-  const r = await httpsJson({
-    hostname:'open.feishu.cn',
-    path:'/open-apis/bitable/v1/apps/'+BASE_TOKEN+'/tables/'+TABLE_ID+'/records?page_size=200',
-    method:'GET', headers:{'Authorization':'Bearer '+token}
-  });
-  if(r.code !== 0) throw new Error('拉取记录失败: ' + (r.msg||''));
-  return r.data.items || [];
+  const all = [];
+  let pageToken = '';
+  for(let guard = 0; guard < 40; guard++){          // 40×500=2 万条，足够且防死循环
+    const q = '/open-apis/bitable/v1/apps/'+BASE_TOKEN+'/tables/'+TABLE_ID
+            + '/records?page_size=500' + (pageToken ? '&page_token='+encodeURIComponent(pageToken) : '');
+    const r = await httpsJson({
+      hostname:'open.feishu.cn', path:q, method:'GET', headers:{'Authorization':'Bearer '+token}
+    });
+    if(r.code !== 0) throw new Error('拉取记录失败: ' + (r.msg||''));
+    const d = r.data || {};
+    if(Array.isArray(d.items)) for(const it of d.items) all.push(it);
+    if(!d.has_more) break;
+    pageToken = d.page_token || '';
+    if(!pageToken) break;
+  }
+  return all;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * 飞书 DateTime 字段读写适配（v4.11.47 / 2026-10-20）
+ *
+ * 🔴 根因（2026-10-20 实测：只读勘察 + 假主键探针，表内记录数全程 221 条未变）：
+ *    日报表「日期」= fldIf6huKp，type=5 DateTime，**读出来是毫秒 int、写进去必须是毫秒 int**。
+ *      · POST {'日期':'2026-10-20'}        ⇒ code=1254064 DatetimeFieldConvFail（整条拒绝）
+ *      · POST {'日期':1792425600000}       ⇒ code=0 成功
+ *      · GET  返回 1792252800000（北京时间 0 点毫秒）
+ *        ⇒ 旧代码 `String(v).slice(0,10)` 得到 '1792252800'，与 '2026-10-18' **永不相等**
+ *        ⇒ matchAllRecords / matchRecord **恒返回空** ⇒ 每次评分都误判「记录不存在」
+ *        ⇒ 走 create ⇒ 再撞 1254064 ⇒ 日报写入静默全挂（界面报「飞书自动建记录失败」）。
+ *
+ * ⚠️ 两个方向必须同时修，缺一不可：
+ *    只修写入 ⇒ 匹配仍然失败 ⇒ 每次评分都**新建出一条重复记录**（比报错更糟）；
+ *    只修匹配 ⇒ 匹配到了会走 PUT 救回来，但新场次建记录仍然 1254064。
+ *
+ * ⚠️ 时区口径：存量 221 条一律存「北京时间 0 点」的毫秒。读写都按 +08:00 折算，
+ *    与存量形态完全一致（交叉核对：221/221 与飞书自算的「标准日期」公式字段相符）。
+ *
+ * ⚠️ 数据现状（2026-10-20 核查）：221 条 / 221 组（主播+日期），**0 重复**
+ *    —— 因为匹配失败后 create 也失败，两条路同时堵死，所以没产生脏数据。
+ *    最后一条成功记录是 2026-10-18；10-19、10-20 的评价全部写不进去。
+ * ──────────────────────────────────────────────────────────────────────────── */
+const CN_TZ_MS = 8 * 3600 * 1000;
+
+// 'yyyy-MM-dd' / 'yyyy/MM/dd' / 'yyyy.MM.dd' → 北京时间当天 0 点的毫秒；非法返回 null
+function dateToMs(s){
+  const m = String(s == null ? '' : s).trim().match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if(!m) return null;
+  const y = +m[1], mo = +m[2], d = +m[3];
+  if(!(y >= 2000 && y <= 2100 && mo >= 1 && mo <= 12 && d >= 1 && d <= 31)) return null;
+  return Date.UTC(y, mo - 1, d) - CN_TZ_MS;
+}
+
+// 毫秒（数字）→ 'yyyy-MM-dd'；字符串 → 截前 10 位（兼容万一回退成字符串的旧形态）
+function msToDateStr(v){
+  if(typeof v === 'number' && isFinite(v)){
+    const d = new Date(v + CN_TZ_MS);
+    return d.getUTCFullYear() + '-' + String(d.getUTCMonth()+1).padStart(2,'0') + '-' + String(d.getUTCDate()).padStart(2,'0');
+  }
+  return String(v == null ? '' : v).trim().slice(0,10);
 }
 
 // v4.11.8：同 host+date 可能滞留多条（历史 bug），全部找出
 function matchAllRecords(records, host, date){
   if(!host || !date) return [];
-  const target = String(date).slice(0,10);
+  const target = msToDateStr(date);
+  if(!target) return [];
   const out = [];
   for(const rec of records){
     const f = rec.fields || {};
-    if(f['主播'] === host && String(f['日期']||'').slice(0,10) === target) out.push(rec);
+    if(f['主播'] === host && msToDateStr(f['日期']) === target) out.push(rec);
   }
   return out;
 }
@@ -74,10 +132,11 @@ async function deleteRecord(token, recordId){
 
 function matchRecord(records, host, date){
   if(!host || !date) return null;
-  const target = String(date).slice(0,10);
+  const target = msToDateStr(date);
+  if(!target) return null;
   for(const rec of records){
     const f = rec.fields || {};
-    if(f['主播'] === host && String(f['日期']||'').slice(0,10) === target) return rec;
+    if(f['主播'] === host && msToDateStr(f['日期']) === target) return rec;
   }
   return null;
 }
@@ -227,9 +286,18 @@ module.exports = async function handler(req, res){
 
     // 匹配不到 → 自动创建记录（评分结果自动写入飞书的完整闭环）
     if(!rec){
+      // v4.11.47：日期必须写**毫秒**（字符串 ⇒ 1254064 整条拒绝，见文件前部根因注释）。
+      //   转不出毫秒 ⇒ **拒绝创建**而不是闷头建一条「日期为空」的记录：
+      //   那样的记录下次仍然匹配不到 ⇒ 每次评分都会再新建一条 ⇒ 重复数据比报错更糟
+      //   （「宁可不动」：宁可这条写不进去、把原因报给前端，也不制造脏行）。
+      const dMs = dateToMs(date);
+      if(dMs == null){
+        return res.status(200).json({ok:false, skipped:true,
+          reason:'日期无法解析为有效日期（' + String(date) + '），本条未创建飞书记录'});
+      }
       const createFields = Object.assign({}, baseFields, {
         '主播': host,
-        '日期': String(date).slice(0,10)
+        '日期': dMs
       });
       if(data.studio) createFields['直播间'] = data.studio;
       let finalCreate = createFields, optDroppedC = [];
