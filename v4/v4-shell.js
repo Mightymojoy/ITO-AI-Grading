@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.46';
+var V4_VERSION = 'v4.11.48';
 // v4.11.36：存档格式版本 ≠ 壳层版本。rawV 只在「rawTotal/rawPen/rawBlk 这套字段的形态真变」时才动，
 //   **不跟 V4_VERSION 走**（否则每次改样式/改文案都要假装改了存档格式，溯源反而失真）。
 //   ⚠️ 渲染侧从不读 rawV（write-only 溯源标记）；断言请读本常量，别跟 V4_VERSION 比。
@@ -1060,8 +1060,30 @@ var V4_FS_LOCAL_KEY = {
 };
 // 日报表固定列（与飞书多维表格「主播日报」逐字对齐）；日报/周总结/月总结/明星主播 共用
 var V4_FS_DAILY_COLS = ['日期','主播','直播间','综合评分','产品知识能力','逻辑组织能力(流畅度)','场景化表达能力(延展性)','可视化道具运用','情绪感染能力','需求识别能力','临场反应能力','转化引导能力','改善建议'];
+// =====================================================
+// ---------- v4.11.48（2026-10-20）直播数据三列进「主播日报」 ----------
+// 老大诉求：飞书「主播日报」新增 单小时GSV / 观看成交率 / 时均UV 三列，工作台要同步显示。
+// 数据来源：飞书本身（sync_feishu.js 同步产物 v4/data/daily.js）—— 工作台不自己算，
+//   与飞书同一份真相；这三列由 live-dashboard 侧回填（脚本 sync_live_metrics.py）。
+// 口径（与 live-dashboard/trend.html 一致，写在这里备查）：
+//   单小时GSV = (销售额 − 退款) / (时长分钟/60)   ← **净**销售/小时，不是 GMV
+//   观看成交率 = 成交人数 / 观看人数              ← 一天多场先加总再算比率，不取平均
+//   时均UV    = 观看人数 / (时长分钟/60)
+// ⚠️ 绝不能加进共用的 V4_FS_DAILY_COLS —— 周总结/月总结/明星主播三张表没有这三列，
+//   加进去会让它们各自多出三列空白（v4.11.40 已有同类注释）。
+//   所以这里只给 daily 单开一份，且用 splice 插在「直播间」之后（不重抄整份数组，
+//   V4_FS_DAILY_COLS 将来增列时日报会自动跟随）。
+// 回退：删掉 V4_FS_BASE_COLS.daily 这一项即恢复原状（其余代码无需改动）。
+// =====================================================
+var V4_FS_LIVE_COLS = ['单小时GSV', '观看成交率', '时均UV'];
 // 各 tab 的自定义固定列（未列出的 tab 一律用 V4_FS_DAILY_COLS）
 var V4_FS_BASE_COLS = {
+  daily: (function(){
+    var a = V4_FS_DAILY_COLS.slice();
+    var at = a.indexOf('直播间');
+    a.splice(at + 1, 0, V4_FS_LIVE_COLS[0], V4_FS_LIVE_COLS[1], V4_FS_LIVE_COLS[2]);
+    return a;
+  })(),
   top1: ['日期','主播','直播间','综合评分','等级','推荐标准','第二名','领先分差','参评人数','是否明星主播']
 };
 
@@ -1456,6 +1478,14 @@ function v4FeishuRender(){
   box.innerHTML = h;
 }
 // 飞书风格表格：粘性表头 + 首列冻结 + 斑马纹 + 数值右对齐 + 等级徽章
+// v4.11.48：数值判定加白名单 —— 直播三列存的是文本（`6,912` / `1.08%`），
+//   只认纯数字的正则会把它们当文本左对齐，与旁边的 `355` 参差不齐。
+//   只对**白名单列**放宽（千分位 + 百分号），其余列仍按纯数字判定，避免把 `A/B`、`1-2` 之类误判成数字。
+var V4_FS_NUM_COLS = { '单小时GSV': 1, '观看成交率': 1, '时均UV': 1 };
+function v4IsNumCell(col, v){
+  if(V4_FS_NUM_COLS[col]) return /^[+-]?[\d,]+(\.\d+)?%?$/.test(v);
+  return /^[+-]?\d+(\.\d+)?$/.test(v);
+}
 function v4FeishuTable(rows, cols, dateCol){
   if(!rows.length) return '<div class="fs-empty">无记录</div>';
   var h = '<div class="fs-wrap"><table class="fs-tbl"><thead><tr>';
@@ -1468,7 +1498,7 @@ function v4FeishuTable(rows, cols, dateCol){
       var v = (raw === undefined || raw === null) ? '' : String(raw);
       var isDate = (cols[c2] === dateCol);
       if(isDate && v.length > 10) v = v.slice(0,10);
-      var cls = (!isDate && /^[+-]?\d+(\.\d+)?$/.test(v)) ? ' class="num"' : '';
+      var cls = (!isDate && v4IsNumCell(cols[c2], v)) ? ' class="num"' : '';
       var gm = v.match(/^\s*([A-E])级?\s*$/);
       var cell;
       if(gm) cell = '<span class="fs-g g' + gm[1] + '">' + gm[1] + '</span>';

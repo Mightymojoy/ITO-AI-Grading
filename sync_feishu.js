@@ -23,6 +23,28 @@ const https = require('https');
 const ROOT = __dirname;
 const OUT = path.join(ROOT, 'v4', 'data');
 
+// ---------- v4.11.48 体积控制：「完整主播报告」一律只留前 400 字 ----------
+// 起因（2026-10-20）：该多行文本列存的是完整评分 JSON，单条平均 **2.6 万字符**；
+//   主播日报 226 条 ⇒ daily.js 从 17KB 涨到 5.4MB（占比 94.9%），历史评分表 7.4MB。
+//
+// 🔴 10-20 二次修订 —— 上一版「历史评分表必须保留全文」的判定**是错的**，已实测推翻：
+//   ① `v4FsEnsure` 已被 v4.11.11 块接管为 `cloudEnsure()`（`fetchCloud` 走**飞书 API 实时拉取**），
+//      历史 tab 展开详情用的 DET_MAP 来自那里，**与本地 data 快照无关**；
+//   ② 本地快照里这一列**没有任何代码读取**（`window.V4FS['tbl_…']` 只在
+//      「表浏览器」里按 `v4ExpandCell(v, 80)` 截断展示，无信息价值）。
+//   ③ 保留全文的真实代价：7.4MB 文件 ⇒ base64 请求体 9.87MB，本机限速代理（≈24KB/s）
+//      必然 `Errno 10054 远程主机强迫关闭` ⇒ **推送直接失败**（10-20 实测连挂两轮）。
+//   ⇒ 现在所有表一律截断到 400 字，既保留"有没有报告 + 开头可读"的浏览价值，
+//      又让历史表从 7.4MB 降到 ~0.5MB（推送可完成、线上加载快）。
+const REPORT_FIELD = '完整主播报告';
+const REPORT_KEEP_CHARS = 400;
+const REPORT_CUT_TAIL = ' …（本地快照已截断，完整报告见飞书该列或「历史评分」页展开）';
+
+function capReport(v){
+  if(typeof v !== 'string' || v.length <= REPORT_KEEP_CHARS) return v;
+  return v.slice(0, REPORT_KEEP_CHARS) + REPORT_CUT_TAIL;
+}
+
 // ---------- 读取 .env ----------
 function loadEnv(){
   const p = path.join(ROOT, '.env');
@@ -64,12 +86,19 @@ function arg(name, dflt){
 const LIMIT = Math.min(parseInt(arg('limit', '1000'), 10) || 1000, 5000);
 
 // ---------- HTTPS ----------
+// 🔴 v4.11.48 修正（2026-10-20）：原来 `d += c` 把每个 chunk 单独 toString ⇒ 多字节中文
+//   一旦跨 chunk 边界就被切成两半、还原成 U+FFFD，**列名/正文出现 `产品���识(数值)` 这类乱码**
+//   （226 条 × 18 表的响应必然跨界；旧版 29 条时恰好没命中，所以一直没暴露）。
+//   正确姿势：收 Buffer，全部到齐后**一次性**解码。禁止回退成字符串累加。
 function httpsJson(opts, body){
   return new Promise((resolve, reject) => {
     const req = https.request(opts, res => {
-      let d = '';
-      res.on('data', c => d += c);
-      res.on('end', () => { try{ resolve(JSON.parse(d)); }catch(e){ reject(new Error('JSON 解析失败: ' + d.slice(0, 300))); } });
+      const chunks = [];
+      res.on('data', c => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)));
+      res.on('end', () => {
+        const txt = Buffer.concat(chunks).toString('utf8');
+        try{ resolve(JSON.parse(txt)); }catch(e){ reject(new Error('JSON 解析失败: ' + txt.slice(0, 300))); }
+      });
     });
     req.on('error', reject);
     if(body) req.write(body);
@@ -126,14 +155,53 @@ function norm(v){
   return String(v);
 }
 
+// ---------- v4.11.48 新增：DateTime 字段毫秒 → YYYY-MM-DD ----------
+// 起因（2026-10-20）：飞书「主播日报」的「日期」已改为 DateTime 类型，records 接口返回的是
+//   **毫秒时间戳**（如 1760889600000）。norm() 会把它 String() 成 "1760889600000"，
+//   工作台 v4NormDate 解析失败 ⇒ 月份/日期归档全部落进「未填」分组，整页看似没数据。
+// 判定口径：**只按字段元数据**（GET /fields 的 type===5）精确匹配字段名，绝不靠"13 位数字"猜——
+//   公式列/其他数值列将来也可能返回大整数，猜错会把分数变成日期。
+function pad2(n){ return n < 10 ? '0' + n : String(n); }
+function msToDate(ms){
+  const n = Number(ms);
+  if(!isFinite(n) || n <= 0) return String(ms);
+  const d = new Date(n + 8 * 3600 * 1000);   // 统一按北京时间取日期（与 feishu-fill.js 写入口径一致）
+  if(isNaN(d.getTime())) return String(ms);
+  return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate());
+}
+async function dateFieldsOf(token, tableId){
+  try{
+    const r = await httpsJson({
+      hostname: 'open.feishu.cn',
+      path: '/open-apis/bitable/v1/apps/' + BASE_TOKEN + '/tables/' + tableId + '/fields?page_size=100',
+      method: 'GET', headers: {'Authorization': 'Bearer ' + token}
+    });
+    if(r.code !== 0) throw new Error(r.msg || ('code=' + r.code));
+    const set = {};
+    ((r.data && r.data.items) || []).forEach(function(f){ if(f.type === 5) set[f.field_name] = 1; });
+    return set;
+  }catch(e){
+    // 取不到字段元数据 ⇒ 退回原样（宁可日期丑，也不要静默把数值字段改成日期）
+    console.log('   ! 字段元数据读取失败（' + tableId + '）：' + e.message + ' ⇒ 日期列按原值输出');
+    return {};
+  }
+}
+
 async function fetchTable(token, tableId){
+  const dtf = await dateFieldsOf(token, tableId);
   let rows = [], pageToken = '', guard = 0;
   do{
     const d = await listRecordsPage(token, tableId, Math.min(LIMIT - rows.length, 500), pageToken);
     rows = rows.concat((d.items || []).map(function(rec){
       const out = {};
       const f = rec.fields || {};
-      for(const k in f) out[k] = norm(f[k]);
+      for(const k in f){
+        if(k === REPORT_FIELD){                       // 体积控制，见文件头说明
+          out[k] = capReport(norm(f[k]));
+          continue;
+        }
+        out[k] = (dtf[k] && f[k] !== null && f[k] !== undefined) ? msToDate(f[k]) : norm(f[k]);
+      }
       return out;
     }));
     pageToken = d.has_more ? (d.page_token || '') : '';
@@ -143,7 +211,8 @@ async function fetchTable(token, tableId){
 }
 
 // 列并集（常用列优先靠前）
-const PRIO = ['日期','主播','直播间','考核产品','综合评分','等级','产品知识能力','黄金话术','问题','激励','惩罚','周','月'];
+// v4.11.48：直播数据三列紧跟「直播间」（与飞书表列序一致，便于横向对照）
+const PRIO = ['日期','主播','直播间','单小时GSV','观看成交率','时均UV','考核产品','综合评分','等级','产品知识能力','黄金话术','问题','激励','惩罚','周','月'];
 function columnsOf(rows){
   const set = {};
   rows.forEach(r => Object.keys(r).forEach(k => { set[k] = 1; }));
