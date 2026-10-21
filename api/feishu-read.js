@@ -10,6 +10,10 @@
  *   {action:'records', table_id:'tblXXX'}   → 按表 ID 直接取记录
  *   可选：view_id（指定视图）、limit（默认 300，上限 1000）
  * 返回：{ok:true, table:{table_id,name}, fields:['日期','主播',...], rows:[{日期:'…', …}], total:n}
+ *
+ * v4.11.49（2026-10-21）：补齐 DateTime(type=5) 字段的毫秒 → 'YYYY-MM-DD' 转换。
+ * 在此之前该字段原样 String() 输出，导致工作台「日期」列显示裸时间戳、月份分组全部落「未填」。
+ * 判定按 GET /fields 的 type===5（不猜位数），口径与 sync_feishu.js / feishu-fill.js 一致。
  */
 const https = require('https');
 
@@ -111,10 +115,56 @@ function norm(v){
   return String(v);
 }
 
-function normalizeRecord(rec){
+// ---------- v4.11.49：DateTime 字段统一转日期 ----------
+// 起因（2026-10-21）：飞书「主播日报」等表的日期字段已被改成 **DateTime 类型**，
+//   接口返回毫秒整数（例：1792425600000）。本文件原先一律走 norm() → String()，
+//   于是工作台「日期」列显示裸时间戳，且 v4NormDate() 解析失败 ⇒ 月份/日期分组全部落入「未填」。
+// 判定方式：`GET /fields` 取 `type===5` 的字段名后按**字段名精确匹配**，
+//   **不猜"13 位数字"** —— 公式字段（type=20）同样可能返回整数，按位数猜会误伤。
+// 转换口径与 sync_feishu.js / feishu-fill.js 完全一致：按北京时间（UTC+8）取 Y-M-D。
+function pad2(n){ return n < 10 ? '0' + n : '' + n; }
+function msToDate(ms){
+  const n = Number(ms);
+  if(!isFinite(n)) return String(ms);
+  const d = new Date(n + 8 * 3600 * 1000);           // 固定 +08:00，避免服务端时区（Vercel 为 UTC）漂移一天
+  if(isNaN(d.getTime())) return String(ms);
+  return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate());
+}
+
+// 字段元数据缓存（同一 serverless 实例内复用，避免每次取记录都多打一次 /fields）
+const DATE_FIELD_CACHE = Object.create(null);
+const DATE_FIELD_TTL = 10 * 60 * 1000;
+
+async function dateFieldsOf(token, tableId){
+  const c = DATE_FIELD_CACHE[tableId];
+  if(c && Date.now() < c.exp) return c.set;
+  try{
+    const r = await httpsJson({
+      hostname: 'open.feishu.cn',
+      path: '/open-apis/bitable/v1/apps/' + BASE_TOKEN + '/tables/' + tableId + '/fields?page_size=100',
+      method: 'GET', headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if(r.code !== 0) throw new Error(r.msg || ('code=' + r.code));
+    const set = Object.create(null);
+    ((r.data && r.data.items) || []).forEach(function(f){ if(f.type === 5) set[f.field_name] = 1; });
+    DATE_FIELD_CACHE[tableId] = { set: set, exp: Date.now() + DATE_FIELD_TTL };
+    return set;
+  }catch(e){
+    // 取不到元数据时**保留原值**：宁可日期显示丑，也不能把数值字段误改成日期
+    console.log('[feishu-read] 字段元数据读取失败（' + tableId + '）：' + ((e && e.message) || e) + ' ⇒ 日期列按原值输出');
+    return Object.create(null);
+  }
+}
+
+function normalizeRecord(rec, dtf){
   const out = {};
   const f = rec.fields || {};
-  for(const k in f) out[k] = norm(f[k]);
+  const dset = dtf || {};
+  for(const k in f){
+    out[k] = (dset[k] && f[k] !== null && f[k] !== undefined && f[k] !== '')
+      ? msToDate(f[k])
+      : norm(f[k]);
+  }
   out.__record_id = rec.record_id || '';
   return out;
 }
@@ -165,10 +215,11 @@ module.exports = async function handler(req, res){
     if(!tableId) return res.status(200).json({ok:false, reason:'缺少 table_id 或 key'});
 
     const limit = Math.min(parseInt(data.limit || '300', 10) || 300, 1000);
+    const dtf = await dateFieldsOf(token, tableId);   // type===5 字段名集合，见上方 msToDate 说明
     let rows = [], pageToken = '', guard = 0;
     do{
       const d = await listRecordsPage(token, tableId, Math.min(limit - rows.length, 500), pageToken, data.view_id || '');
-      rows = rows.concat((d.items || []).map(normalizeRecord));
+      rows = rows.concat((d.items || []).map(function(rec){ return normalizeRecord(rec, dtf); }));
       pageToken = d.has_more ? (d.page_token || '') : '';
       guard++;
     }while(pageToken && rows.length < limit && guard < 10);
