@@ -235,6 +235,14 @@ const byHost = {};
 cClear.forEach(r => { byHost[r.host] = (byHost[r.host] || 0) + 1; });
 Object.keys(byHost).sort((x, y) => byHost[y] - byHost[x]).forEach(k => W('     ' + pad(k, 8) + byHost[k]));
 W('');
+W('  --- C2. 逐场明细（这些场次在本轮新规则下不再归零，可补分；尚未复核，需人工定调）---');
+W('  ' + pad('日期', 12) + pad('主播', 8) + pad('原命中', 8) + pad('重判后', 8) + pad('补分真值', 11) + '来源');
+cClear.forEach(r => {
+  W('  ' + pad(r.date, 12) + pad(r.host, 8) + pad(r.beforeZero + '→S0', 8) + pad(r.afterZero + '→S0', 8)
+    + pad((r.rawTotal != null ? r.rawTotal : r.raw), 11)
+    + (r.rawTotal != null ? '存档 rawTotal（精确）' : '公式复算'));
+});
+W('');
 
 // ---------- 全局命中归因 ----------
 W('=== D. 全 374 条命中的重判归因（哪些规则真的少判了）===');
