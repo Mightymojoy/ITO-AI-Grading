@@ -521,11 +521,13 @@
 <script src="../v3/standard.js?v=4.10.3"></script>
 <script src="../v3/outfit.js?v=4.10.3"></script>
 <script src="app-core.js?v=4.11.48"></script>
-<script src="semantic-core.js?v=4.11.48"></script>
+<script src="semantic-core.js?v=4.10.2"></script>
 <!-- 平台红线字面通道（v4.11.17 引入 · v4.11.18 口径收紧为紧邻判定）：确定性、零 token。须在 v4-shell.js 之前加载
      ⚠️ 缓存戳约定：规则库用**自身的独立版本号**（violation-rules.js 内的 `_v`）当自己的戳，不跟工作台版本号 ——
-     这样只改规则库时改这一处即可，不必为了刷缓存而虚增工作台版本。v3.1.1 = 2026-10-09 V5 表 C 列口径。 -->
-<script src="violation-rules.js?v=3.1.1"></script>
+     这样只改规则库时改这一处即可，不必为了刷缓存而虚增工作台版本。v3.1.1 = 2026-10-09 V5 表 C 列口径；
+     v3.1.2 = 2026-10-26 飞书人工复核误判样本反哺（EXEMPT 4→17；同一批还改了 semantic-core.js 的
+     n1/n2 判据与安全阀，故它的戳同步改用自身 `_v`=4.10.2，未动 V4_VERSION 与徽标）。 -->
+<script src="violation-rules.js?v=3.1.2"></script>
 <script src="violation-scan.js?v=4.11.48"></script>
 <script src="v4-shell.js?v=4.11.48"></script>
 <script src="workflow.js?v=4.11.48"></script>
