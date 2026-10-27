@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.48';
+var V4_VERSION = 'v4.11.50';
 // v4.11.36：存档格式版本 ≠ 壳层版本。rawV 只在「rawTotal/rawPen/rawBlk 这套字段的形态真变」时才动，
 //   **不跟 V4_VERSION 走**（否则每次改样式/改文案都要假装改了存档格式，溯源反而失真）。
 //   ⚠️ 渲染侧从不读 rawV（write-only 溯源标记）；断言请读本常量，别跟 V4_VERSION 比。
@@ -1974,10 +1974,45 @@ document.addEventListener('DOMContentLoaded', function(){
   };
   window.v4AttachSemanticEvidence=attachSemEvidence;
 
+  // ---- v4.11.50 品类作用域（2026-10-27）----
+  // 问题：语义判定卡里的 neg（判错依据）原本**全部无差别下发**，而 1.1-c 结构部件那条整条是行李箱口径
+  //   （「闭合拉链说成 SAB 即说错，本品为 YKK」）—— 而包袋正品拉链本来就是 SAB ⇒ 包袋场次讲对反被判错。
+  // 修法（只在壳层；semantic-core.js 只新增 negScope 字段，判定逻辑本身未动）：
+  //   按本场 productKey 的品类，把不属于该品类的 neg 从下发判据里去掉，**保留子点本身**
+  //   （子点仍要判"有没有讲到"，只是不再拿别的品类的对错口径去判）。
+  // 回滚阀：localStorage 置 v4cat3_enabled='0' 后刷新即恢复旧行为。
+  function catScopeOn(){ try{ return localStorage.getItem('v4cat3_enabled') !== '0'; }catch(e){ return true; } }
+  function catOfPk(productKey){
+    try{
+      var P = (typeof GRADING_STANDARD !== 'undefined' && GRADING_STANDARD.products) || {};
+      return (P[productKey] && P[productKey].cat) || '';
+    }catch(e){ return ''; }
+  }
+  function scopeJudges(judges, cat){
+    if(!cat || !judges) return judges;
+    var out = [];
+    for(var i=0;i<judges.length;i++){
+      var j = judges[i];
+      if(!j || !j.points){ out.push(j); continue; }
+      var pts = [];
+      for(var k=0;k<j.points.length;k++){
+        var p = j.points[k];
+        var sc = p && p.negScope;
+        if(!sc || sc === 'both' || sc === cat){ pts.push(p); continue; }
+        var cp = {};
+        for(var kk in p){ if(kk !== 'neg' && kk !== 'negScope') cp[kk] = p[kk]; }
+        pts.push(cp);
+      }
+      out.push({ mod: j.mod, id: j.id, name: j.name, points: pts });
+    }
+    return out;
+  }
+
   // ---- 组装云端请求 ----
   function semPayload(segs, productKey){
     var judges = [];
     try{ judges = V4S.buildJudges(); }catch(e){}
+    try{ if(catScopeOn()) judges = scopeJudges(judges, catOfPk(productKey)); }catch(e){}
     var text = '';
     try{ text = V4S.truncate(segs || []); }catch(e){}
     var prodName = '';
@@ -1988,6 +2023,10 @@ document.addEventListener('DOMContentLoaded', function(){
     }catch(e){}
     return { product: prodName, judges: judges, text: text, _v: '4.9.0' };
   }
+  // 诊断入口（不参与判定）：浏览器 console 可查"某品类实际下发哪些 neg 判据"
+  window.v4CatScopeJudges = scopeJudges;
+  window.v4CatOfPk = catOfPk;
+  window.v4CatScopeOn = catScopeOn;
 
   // ---- 异步升级（防重入；超时/失败 → 降级保留关键词版） ----
   async function semUpgrade(r,job){
@@ -6359,4 +6398,246 @@ document.addEventListener('DOMContentLoaded', function(){
     debug: function(){ return { on: on(), stats: STATS, shellV: V4_VERSION }; }
   };
   LOG('已装载：飞书日报表两列同步（红线命中 / 已标注）｜写入口接管 ' + STATS.wrapped + '/4，判定逻辑未动');
+})();
+
+// ============================================================================
+// v4.11.50：品类门控（行李箱 / 包袋 分开识别）——  2026-10-27
+// 背景（老大报障）：双肩包的评判规则混进行李箱场次，行李箱主场被判成双肩包。
+// 根因（已实测复现）：整场品类原先由「段归属字符长度」决胜 —— 谁那段字多谁赢，
+//   不看证据强度。一句包袋对比话术就能把行李箱主场判给双肩包；
+//   反过来双肩包场次里一句行李箱术语也会把整场判给行李箱。
+// 修法（只在壳层，不改任何权重 / 公式 / 扣分口径 / 既有词表）：
+//   ① 品类预判：行李箱迹象分 vs 包袋迹象分（只用不可混淆的品类词，禁单字「包」）
+//   ② 包型预判：包袋内再分 双肩包型 / 托特包型（治 tote 抢 backpack）
+//   ③ 品类内选品：强信号（品名全名 / 括号内中文名 / 别名 / 专属词）优先，
+//      「字数额度」只作兜底 —— 原逻辑用它决胜，正是 C6 回归的元凶
+//   ④ 安全阀：迹象不足、或品类内零命中 → 返回空，交回原有 auto 逻辑，绝不硬猜
+// 数据依赖：GRADING_STANDARD.products[*].cat（luggage|bag）与 .sub（backpack|tote），
+//   由 standard.js v2.2 新增；产品若无 cat 标签则**永不被排除**（防新增产品被误挡）。
+// 退路：localStorage 置 v4cat_enabled='0' 后刷新即恢复原状。
+// 自检：V4CAT.debug([{text:'这一款双肩包…'}]) / V4CAT.off() / V4CAT.on()
+// ============================================================================
+(function(){
+  if(window.V4CAT && window.V4CAT.__installed) return;
+
+  var ON_KEY = 'v4cat_enabled';
+  function on(){ try{ return localStorage.getItem(ON_KEY) !== '0'; }catch(e){ return true; } }
+  function LOG(m){ try{ if(window.__V4CAT_VERBOSE) console.log('[cat-gate] ' + m); }catch(e){} }
+  var LAST = null;
+
+  // 品类迹象词（权重 3=品类名词，2=形态/结构；**禁单字「包」**，避免包邮/包裹/包含误命中）
+  var CAT_SIG = {
+    luggage: [['行李箱',3],['拉杆箱',3],['登机箱',3],['托运箱',3],['硬箱',3],['箱体',2],['箱壳',2],
+              ['万向轮',2],['静音轮',2],['滚轮',2],['拉杆',2],['海关锁',2],['tsa',2],['铝框',2],
+              ['前开盖',2],['顶开盖',2],['20寸',2],['24寸',2],['26寸',2],['28寸',2],['30寸',2]],
+    bag:      [['双肩包',3],['背包',3],['托特包',3],['通勤包',3],['手提包',3],['斜挎包',3],['单肩包',3],
+              ['双肩',2],['单肩',2],['斜挎',2],['肩带',2],['背带',2],['背负',2],['腋下',2],['手提',2]]
+  };
+  // 包袋二级包型迹象词
+  var SUB_SIG = {
+    backpack: [['双肩包',3],['背包',3],['双肩',3]],
+    tote:     [['托特包',3],['托特',3],['单肩',2],['手提包',2],['手提',2],['腋下',2]]
+  };
+
+  // 段内打分：每词每段只计一次；若短词是某已命中长词的子串则不计（「双肩包」命中则不再算「背包」「双肩」）
+  function scoreSeg(t, table){
+    var matched = [], i;
+    for(i=0;i<table.length;i++){
+      if(t.indexOf(table[i][0]) >= 0) matched.push({w:table[i][0], wt:table[i][1]});
+    }
+    var total = 0, hits = [];
+    for(i=0;i<matched.length;i++){
+      var m = matched[i], shadowed = false;
+      for(var k=0;k<matched.length;k++){
+        if(k === i) continue;
+        var n = matched[k];
+        if(n.w.length > m.w.length && n.w.indexOf(m.w) >= 0){ shadowed = true; break; }
+      }
+      if(!shadowed){ total += m.wt; hits.push(m.w + '+' + m.wt); }
+    }
+    return {total:total, hits:hits};
+  }
+
+  // 专属词池：与 v4-shell.js 内 v4BuildExclPool 等价（该函数是 IIFE 私有，此处独立实现并缓存）
+  var POOL_CACHE = null, POOL_FOR = null;
+  function buildPool(){
+    var STD = GRADING_STANDARD;
+    if(POOL_CACHE && POOL_FOR === STD) return POOL_CACHE;
+    var keys = Object.keys(STD.products || {});
+    var exclMap = {}, i;
+    for(i=0;i<keys.length;i++) exclMap[keys[i]] = (STD.productExclusive && STD.productExclusive[keys[i]]) || [];
+    function usedBy(w){
+      var owners = 0;
+      for(var a=0;a<keys.length;a++){
+        var k2 = keys[a], hit = false;
+        if((exclMap[k2]||[]).indexOf(w) >= 0) hit = true;
+        if(!hit && STD.sellpoints && STD.sellpoints[k2] && STD.sellpoints[k2].list){
+          var L = STD.sellpoints[k2].list;
+          for(var b=0;b<L.length;b++){ if((L[b].keywords||[]).indexOf(w) >= 0){ hit = true; break; } }
+        }
+        if(!hit && STD.products[k2]){
+          var al = STD.products[k2].aliases || [];
+          if(al.indexOf(w) >= 0 || STD.products[k2].name === w) hit = true;
+        }
+        if(hit) owners++;
+      }
+      return owners;
+    }
+    var pool = {}, c, d;
+    for(c=0;c<keys.length;c++){
+      var k3 = keys[c]; pool[k3] = [];
+      var ex = exclMap[k3];
+      for(d=0;d<ex.length;d++){
+        var w = ex[d]; if(!w) continue;
+        if(usedBy(w) <= 1) pool[k3].push(String(w).toLowerCase());
+      }
+    }
+    POOL_CACHE = pool; POOL_FOR = STD;
+    return pool;
+  }
+
+  // 强信号分数：品名 100 / 括号内中文名 200 / 别名 50 / 专属词 10。
+  // **刻意不含卖点词（原逻辑的 ×1）** —— 卖点词同品类几乎通用，会把真品名信号淹没。
+  function strongScore(t, pk, pool){
+    var STD = GRADING_STANDARD, sc = 0;
+    var p = STD.products[pk] || {};
+    var name = p.name ? String(p.name).toLowerCase() : '';
+    if(name && t.indexOf(name) >= 0) sc += 100;
+    var inner = '';
+    if(name){
+      var nm = name.match(/[（(]([^）)]+)[）)]/);
+      if(nm) inner = nm[1].toLowerCase();
+    }
+    if(inner && t.indexOf(inner) >= 0) sc += 200;
+    var al = p.aliases || [], i;
+    for(i=0;i<al.length;i++){
+      var aw = String(al[i] || '').toLowerCase();
+      if(aw && t.indexOf(aw) >= 0) sc += 50;
+    }
+    var ex = pool[pk] || [];
+    for(i=0;i<ex.length;i++){ if(ex[i] && t.indexOf(ex[i]) >= 0) sc += 10; }
+    return sc;
+  }
+
+  function pickScoped(segs){
+    var STD = GRADING_STANDARD;
+    var keys = Object.keys(STD.products || {});
+    var pool = buildPool();
+    var sL = 0, sB = 0, subB = 0, subT = 0;
+    var trace = [], s;
+    for(s=0;s<segs.length;s++){
+      var t = String((segs[s] && segs[s].text) || '').toLowerCase();
+      if(!t){ trace.push({lug:0, bag:0, hits:[]}); continue; }
+      var a = scoreSeg(t, CAT_SIG.luggage);
+      var b = scoreSeg(t, CAT_SIG.bag);
+      sL += a.total; sB += b.total;
+      subB += scoreSeg(t, SUB_SIG.backpack).total;
+      subT += scoreSeg(t, SUB_SIG.tote).total;
+      trace.push({lug:a.total, bag:b.total, hits:a.hits.concat(b.hits)});
+    }
+    var cat = 'unknown';
+    if(sL > sB) cat = 'luggage'; else if(sB > sL) cat = 'bag';
+    var sub = 'unknown';
+    if(cat === 'bag'){
+      if(subB > subT) sub = 'backpack'; else if(subT > subB) sub = 'tote';
+    }
+    var info = {cat:cat, sub:sub, sL:sL, sB:sB, subBackpack:subB, subTote:subT};
+    if(cat === 'unknown'){
+      info.reason = '品类迹象不足，交回原 auto 逻辑';
+      return {pk:'', info:info, trace:trace};
+    }
+    // 候选集：品类不符则排除；无 cat 标签的产品**永不被排除**；包袋再按包型收窄
+    var allowed = [], i;
+    for(i=0;i<keys.length;i++){
+      var k = keys[i], p = STD.products[k] || {};
+      var pc = p.cat || '';
+      if(!pc){ allowed.push(k); continue; }
+      if(pc !== cat) continue;
+      if(cat === 'bag' && sub !== 'unknown'){
+        var ps = p.sub || '';
+        if(ps && ps !== sub) continue;
+      }
+      allowed.push(k);
+    }
+    var strong = {}, chars = {};
+    for(i=0;i<allowed.length;i++){ strong[allowed[i]] = 0; chars[allowed[i]] = 0; }
+    for(s=0;s<segs.length;s++){
+      var tt = String((segs[s] && segs[s].text) || '').toLowerCase();
+      if(!tt) continue;
+      var bestK = '', bestSc = 0;
+      for(i=0;i<allowed.length;i++){
+        var pk = allowed[i];
+        var sc = strongScore(tt, pk, pool);
+        if(sc > 0) strong[pk] += sc;
+        if(sc > bestSc){ bestSc = sc; bestK = pk; }
+      }
+      if(bestK && bestSc > 0) chars[bestK] += tt.length;
+    }
+    info.candidates = allowed;
+    info.strong = strong;
+    var top = '', topS = 0;
+    for(i=0;i<allowed.length;i++){
+      if(strong[allowed[i]] > topS){ topS = strong[allowed[i]]; top = allowed[i]; }
+    }
+    if(topS > 0){
+      info.reason = '强信号选品';
+      return {pk:top, info:info, trace:trace};
+    }
+    var top2 = '', tc = 0;
+    for(i=0;i<allowed.length;i++){
+      if(chars[allowed[i]] > tc){ tc = chars[allowed[i]]; top2 = allowed[i]; }
+    }
+    if(tc > 0){
+      info.reason = '字数额度兜底（强信号全无）';
+      return {pk:top2, info:info, trace:trace};
+    }
+    info.reason = '品类内零命中，交回原 auto 逻辑';
+    return {pk:'', info:info, trace:trace};
+  }
+
+  // ---- 挂载：包 window.runGrading，先定品类再交给原有链路 ----
+  var _origRun = window.runGrading;
+  if(typeof _origRun === 'function'){
+    window.runGrading = function(segs, productKey, options){
+      var pk = productKey;
+      var isAuto = (pk === 'auto' || pk === '' || pk === null || typeof pk === 'undefined');
+      if(isAuto && segs && segs.length && on()){
+        var r = pickScoped(segs);
+        LAST = r;
+        if(r.pk){
+          pk = r.pk;
+          LOG('品类门控 → ' + r.info.cat + (r.info.sub !== 'unknown' ? '/' + r.info.sub : '') + ' ⇒ ' + r.pk + '（' + r.info.reason + '）');
+        } else {
+          LOG('品类门控未定 → 交回原 auto（' + r.info.reason + '）');
+        }
+      }
+      return _origRun(segs, pk, options);
+    };
+  }
+
+  window.V4CAT = {
+    __installed: true,
+    __v: '4.11.50',
+    on: on,
+    off: function(){ try{ localStorage.setItem(ON_KEY, '0'); }catch(e){} return 'off'; },
+    enable: function(){ try{ localStorage.removeItem(ON_KEY); }catch(e){} return 'on'; },
+    catOf: function(pk){ return ((GRADING_STANDARD.products || {})[pk] || {}).cat || ''; },
+    subOf: function(pk){ return ((GRADING_STANDARD.products || {})[pk] || {}).sub || ''; },
+    curCat: function(){ return LAST && LAST.info ? LAST.info.cat : ''; },
+    last: function(){ return LAST; },
+    pick: function(segs){ return pickScoped(segs); },
+    debug: function(segs){
+      var r = pickScoped(segs || []);
+      var out = {
+        cat: r.info.cat, sub: r.info.sub, picked: r.pk || '(交回原逻辑)', reason: r.info.reason,
+        score: {luggage: r.info.sL, bag: r.info.sB, backpack: r.info.subBackpack, tote: r.info.subTote},
+        candidates: r.info.candidates || null,
+        strong: r.info.strong || null,
+        segScore: r.trace
+      };
+      try{ console.log('[cat-gate] 判定详情', out); }catch(e){}
+      return out;
+    }
+  };
+  LOG('品类门控已装载（开关 v4cat_enabled）');
 })();

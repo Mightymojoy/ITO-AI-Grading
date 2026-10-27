@@ -10,7 +10,7 @@
 // =====================================================
 
 const GRADING_STANDARD = {
-  version: 'v2.1',
+  version: 'v2.2',
   meta: {
     name: '主播能力矩阵（V2 日报标准）',
     scoring: '完成度(0/0.5/1) × 质量(1-5) × 20 = 单项分；能力分 = 子项平均；总分 = Σ(能力分×权重%)',
@@ -516,19 +516,22 @@ const GRADING_STANDARD = {
   },
 
   // ============ 产品识别表（多品识别/讲品次数用，别名含直播间叫法） ============
+  // v2.2（2026-10-27）：新增 cat（品类归属 luggage=行李箱 / bag=包袋）与 sub（包袋二级包型 backpack=双肩包型 / tote=托特包型）
+  // 用途：产品识别按品类门控 —— 行李箱场次不会被包袋对比话术抢走，包袋场次也不会被判成行李箱。
+  // 铁律：纯新增字段，不修改任何既有 name / sellKey / aliases 取值，未启用门控时行为与 v2.1 完全一致。
   products: {
-    pistachio_2: { name: '开心果2（TRUNK/五五开）', sellKey: 'pistachio_2', aliases: ['开心果二代', '开心果2', '开心果二', 'pistachio 2', 'pistachio2', 'p2', '二代', 'P 2 Trunk', 'P2 Trunk', 'P 2', 'P2', 'Trunk', 'TRUNK', 'trunk', '五五开'] },
-    pistachio_plus: { name: 'PISTACHIO Plus', sellKey: 'pistachio_plus', aliases: ['pistachio plus', '开心果plus', '开心果plus 20', 'plus 20', 'plus 25', 'plus 29', 'P Plus', 'P', 'Plus', 'plus', '前开盖'] },
-    pistachio_1: { name: '开心果一代（P1）', sellKey: 'pistachio_1', aliases: ['开心果一代', '开心果1', 'pistachio 1', 'pistachio1', 'p1', '一代'] },
-    ginkgo4: { name: 'GINKGO 4（银杏4）', sellKey: 'ginkgo4', aliases: ['ginkgo4', 'ginkgo 4', '银杏4', '银杏四代', 'ginkgo'] },
-    wedding: { name: '开运红婚箱', sellKey: 'wedding', aliases: ['开运红', '婚箱', '好运箱', '开运红二代'] },
-    wave: { name: 'WAVE', sellKey: 'wave', aliases: ['wave', '波浪'] },
-    truffle_2: { name: 'truffle二代 空气双肩包（轻熟质享客）', sellKey: 'truffle_2', aliases: ['空气双肩包', 'truffle二代', 'truffle 二代', 'truffle2', 'truffle 2', '松露2', '双肩包二代'] },
-    truffle_pro_tote: { name: 'TRUFFLE PRO TOTE（托特包）', sellKey: 'truffle_pro_tote', aliases: ['truffle pro tote', 'truffle pro 托特', 'pro tote', 'truffle pro'] },
-    truffle_pro_backpack: { name: 'TRUFFLE PRO BACKPACK（双肩包）', sellKey: 'truffle_pro_backpack', aliases: ['truffle pro backpack', 'truffle pro 双肩包', 'pro backpack', 'truffle pro', 'PACK', 'pack'] },
-    mycena_tote: { name: 'MYCENA TOTE（托特包）', sellKey: 'mycena_tote', aliases: ['mycena tote', 'mycena托特', 'mycena tote 托特'] },
-    porcini_tote: { name: 'porcini 托特包（云端商务家）', sellKey: 'porcini_tote', aliases: ['porcini托特', 'porcini 托特', 'porcini tote'] },
-    porcini_backpack: { name: 'porcini 双肩包（云端商务家）', sellKey: 'porcini_backpack', aliases: ['porcini双肩', 'porcini 双肩包', 'porcini backpack', 'porcini双肩包'] }
+    pistachio_2: { name: '开心果2（TRUNK/五五开）', sellKey: 'pistachio_2', cat: 'luggage', sub: 'trunk', aliases: ['开心果二代', '开心果2', '开心果二', 'pistachio 2', 'pistachio2', 'p2', '二代', 'P 2 Trunk', 'P2 Trunk', 'P 2', 'P2', 'Trunk', 'TRUNK', 'trunk', '五五开'] },
+    pistachio_plus: { name: 'PISTACHIO Plus', sellKey: 'pistachio_plus', cat: 'luggage', sub: 'trunk', aliases: ['pistachio plus', '开心果plus', '开心果plus 20', 'plus 20', 'plus 25', 'plus 29', 'P Plus', 'P', 'Plus', 'plus', '前开盖'] },
+    pistachio_1: { name: '开心果一代（P1）', sellKey: 'pistachio_1', cat: 'luggage', sub: 'trunk', aliases: ['开心果一代', '开心果1', 'pistachio 1', 'pistachio1', 'p1', '一代'] },
+    ginkgo4: { name: 'GINKGO 4（银杏4）', sellKey: 'ginkgo4', cat: 'luggage', sub: 'trunk', aliases: ['ginkgo4', 'ginkgo 4', '银杏4', '银杏四代', 'ginkgo'] },
+    wedding: { name: '开运红婚箱', sellKey: 'wedding', cat: 'luggage', sub: 'trunk', aliases: ['开运红', '婚箱', '好运箱', '开运红二代'] },
+    wave: { name: 'WAVE', sellKey: 'wave', cat: 'luggage', sub: 'trunk', aliases: ['wave', '波浪'] },
+    truffle_2: { name: 'truffle二代 空气双肩包（轻熟质享客）', sellKey: 'truffle_2', cat: 'bag', sub: 'backpack', aliases: ['空气双肩包', 'truffle二代', 'truffle 二代', 'truffle2', 'truffle 2', '松露2', '双肩包二代'] },
+    truffle_pro_tote: { name: 'TRUFFLE PRO TOTE（托特包）', sellKey: 'truffle_pro_tote', cat: 'bag', sub: 'tote', aliases: ['truffle pro tote', 'truffle pro 托特', 'pro tote', 'truffle pro'] },
+    truffle_pro_backpack: { name: 'TRUFFLE PRO BACKPACK（双肩包）', sellKey: 'truffle_pro_backpack', cat: 'bag', sub: 'backpack', aliases: ['truffle pro backpack', 'truffle pro 双肩包', 'pro backpack', 'truffle pro', 'PACK', 'pack'] },
+    mycena_tote: { name: 'MYCENA TOTE（托特包）', sellKey: 'mycena_tote', cat: 'bag', sub: 'tote', aliases: ['mycena tote', 'mycena托特', 'mycena tote 托特'] },
+    porcini_tote: { name: 'porcini 托特包（云端商务家）', sellKey: 'porcini_tote', cat: 'bag', sub: 'tote', aliases: ['porcini托特', 'porcini 托特', 'porcini tote'] },
+    porcini_backpack: { name: 'porcini 双肩包（云端商务家）', sellKey: 'porcini_backpack', cat: 'bag', sub: 'backpack', aliases: ['porcini双肩', 'porcini 双肩包', 'porcini backpack', 'porcini双肩包'] }
   },
 
   // ============ 产品专属词集（产品匹配度 1.5 用，去除两产品共有通用词） ============

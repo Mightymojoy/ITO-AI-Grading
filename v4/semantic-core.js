@@ -43,6 +43,10 @@
       { id: 'a', name: '硬参数',   q: '是否讲出具体数值（容量/自重/尺寸/升数）？' },
       { id: 'b', name: '材质用料', q: '是否讲清材质（PC/抗菌/工艺）及为什么好（含同源类比）？' },
       { id: 'c', name: '结构部件', q: '轮/拉杆/锁/收纳分区等部件是否讲到（含功能等价说法）？',
+        // v2.2 品类作用域（2026-10-27）：整条判据都是**行李箱 PISTACHIO 口径**（YKK 防爆拉链 / 5 系铝拉杆 /
+        //   PC 提手 / 翻盖密码锁）。包袋正品拉链本来就是 SAB（standard.js truffle 系列 knowledge 含 SAB/Duraflex）
+        //   ⇒ 旧版无品类门控时，包袋场次"说对 SAB"反被判成说错。scope=luggage 后包袋场次不下发这条判据。
+        negScope: 'luggage',
         neg: '部件品牌或型号说错：行李箱闭合拉链说成 SAB（本品为 YKK 防爆拉链）；内里隔层拉链说成 YKK（本品为 SAB）；拉杆说成 6 系铝合金（本品 5 系，壁厚 1mm）；提手说成 PC/复合 PC（本品为尼农复合软胶）；密码锁说成外置拉链头式（本品为翻盖式）' },
       { id: 'd', name: '售后权益', q: '售后两条权益（360天换新 / 5年免费维修）是否都讲到（可分散两处）？',
         neg: '把售后年限讲错：说成"终身质保"（业务侧明确实际没有终身质保）；或把本品 360天换新＋五年维修 说成 GINKGO 4 才有的 720天换新＋十年维修' }
@@ -56,6 +60,9 @@
     '1.3': { name: '产品差异化表达', points: [
       { id: 'a', name: '对比对象',   q: '是否有明确对比对象（代际/尺寸/系列）？' },
       { id: 'b', name: '差异维度',   q: '差异是否落到具体维度（布局/重量/价格/功能）？',
+        // v2.2 品类作用域（2026-10-27）：「一代二代五五开、容量逐档相同」是 PISTACHIO 行李箱口径，
+        //   包袋（truffle 二代 vs 新款）不存在这层代际容量关系 ⇒ 包袋场次不下发这条判据。
+        negScope: 'luggage',
         neg: '把一代二代的差别说成"尺寸不同"或"容量不同"（实际二代与一代"五五开"容量逐档相同：20/24/28 寸均为 37/62/99L，业务侧明确核心差别是颜色与内里）' },
       { id: 'c', name: '落到选择',   q: '差异后是否给"什么情况选什么"的建议？' }
     ]},
@@ -242,9 +249,24 @@
     return parts.join('\n');
   }
 
+  // v2.2 品类作用域（2026-10-27）：从评分结果的讲品产品反查品类（luggage｜bag｜''）。
+  //   语义层原先**完全不感知品类**（全文件 0 处 productKey）⇒ 行李箱专属判据对包袋无差别生效。
+  //   取值来源用 r.sellpoints.product（= 评分真正按它算的那个产品），不依赖任何运行时全局变量。
+  function catOfResult(r){
+    try{
+      var pn = r && r.sellpoints && r.sellpoints.product;
+      if(!pn || !STD) return '';
+      var SP = STD.sellpoints || {}, P = STD.products || {}, k;
+      for(k in SP){ if(SP[k] && SP[k].name === pn) return (P[k] && P[k].cat) || ''; }
+      for(k in P){ if(P[k] && P[k].name === pn) return P[k].cat || ''; }
+    }catch(e){}
+    return '';
+  }
+
   // ============ ④ 证据 → 档位 ============
   // evList：该子标准下的证据数组；返回 {level, passed, total, flags:[{point,quote,reason}]}
-  function levelFromEvs(def, evList){
+  // scopeCat：v2.2 新增，本场品类；用于拦住"别的品类的判错依据"（缺省 '' = 不拦，行为同旧版）
+  function levelFromEvs(def, evList, scopeCat){
     var passed = 0, flags = [], states = {};
     var pts = def.points || [];
     for(var i=0;i<pts.length;i++){
@@ -256,7 +278,16 @@
       if(!ev){ states[p.id] = 'MISS'; continue; }
       states[p.id] = ev.state;
       if(ev.state === 'HIT' || ev.state === 'EQUIV') passed++;
-      else if(ev.state === 'NEGATE' && /flag_error/i.test(String(ev.reason||''))) flags.push({point:p.name, quote:ev.quote||'', reason:ev.reason||''});
+      else if(ev.state === 'NEGATE' && /flag_error/i.test(String(ev.reason||''))){
+        // v2.2 品类作用域：判据属于别的品类（如行李箱专属的结构部件口径）⇒ 本场不记红旗、不扣分。
+        //   只拦「扣分」，不改档位算法：该子点仍按未通过计（保守 —— 宁可少给分，也不张冠李戴扣分）。
+        var nsc = p.negScope || 'both';
+        if(nsc === 'both' || !scopeCat || nsc === scopeCat){
+          flags.push({point:p.name, quote:ev.quote||'', reason:ev.reason||''});
+        } else {
+          states[p.id] = 'SCOPE_SKIP';
+        }
+      }
       else if(ev.state === 'UNCLEAR'){ /* 存疑不计分，转人工 */ }
     }
     var total = pts.length;
@@ -284,6 +315,7 @@
   function apply(r, verdict){
     if(!r || !r.modules || !verdict || !verdict.evidences) return {applied:0, flags:[]};
     var evsAll = verdict.evidences || [];
+    var scopeCat = catOfResult(r);   // v2.2：本场品类（luggage｜bag｜''），供 neg 判据按品类生效
     var applied = 0;
     var semFlags = [];          // NEGATE+flag_error → 信息准确性红旗
     var byStd = {};
@@ -347,7 +379,7 @@
           continue;
         }
 
-        var lr = levelFromEvs(def, evList);
+        var lr = levelFromEvs(def, evList, scopeCat);
         // 语义红旗收集（并入 r.baseline，与现行"信息准确性红旗 -4/处 封顶 -12"同口径）
         for(var f=0; f<lr.flags.length; f++){
           var fl = lr.flags[f];
@@ -502,6 +534,7 @@
     NEG_POINTS: NEG_POINTS,
     NEG_JUDGE: NEG_JUDGE,
     buildJudges: buildJudges,
+    catOfResult: catOfResult,   // v2.2：供壳层按品类裁剪 neg 判据 / 诊断用
     truncate: truncate,
     levelFromEvs: levelFromEvs,
     quality22: quality22,
@@ -510,6 +543,6 @@
     // v3.1.2：把 n1/n2 安全阀正则导出，供离线单测直接断言（纯加法，不参与任何判定）
     SAFETY: { N1_EXEMPT_RE: N1_EXEMPT_RE, N1_STRICT_RE: N1_STRICT_RE,
               N2_EXEMPT_RE: N2_EXEMPT_RE, N2_STRICT_RE: N2_STRICT_RE },
-    _v: '4.10.3'
+    _v: '4.10.4'   // 4.10.4（2026-10-27）：neg 判据新增 negScope 品类作用域字段 + catOfResult；判定逻辑未变
   };
 });

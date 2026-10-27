@@ -526,8 +526,17 @@ function runGrading(segs, productKey){
     bl.items.push({field:f.field, standard:f.standard, wrong:f.wrong, error:isError, ev:(errInfo&&errInfo.ev)||null, numErr: !!numEv});
   }
   // 先查全局（行李箱口径）——防止选错品时该品的错误词被忽略
+  // v2.2 品类门控（2026-10-27）：全局 facts 是**行李箱口径**（PC箱体/科思创/拉杆/万向轮/尺寸天数），
+  //   包袋场次套用它有两重害处：①永远查不到错（包袋没有这些件）；②因下面按 field 去重，
+  //   把包袋自己的「设计师姓名」「售后权益」直接挡掉 —— 6 品 × 2 条 = 12 条永久失效，
+  //   「30天换新/一年保修/只修不换/磨坏/划伤」这类错词一次都抓不到。
+  // 故：包袋场次跳过全局 facts，只用本品 baselineFacts。
+  // 回滚阀：localStorage 置 v4cat2_enabled='0' 后刷新即恢复旧行为。
+  var __v4pcat = (STD.products && STD.products[productKey] && STD.products[productKey].cat) || '';
+  var __v4skipGlobal = false;
+  try{ __v4skipGlobal = (__v4pcat === 'bag' && localStorage.getItem('v4cat2_enabled') !== '0'); }catch(e){}
   var globalFacts = (STD.baseline && STD.baseline.facts) || [];
-  for(var i=0;i<globalFacts.length;i++) pushFact(globalFacts[i]);
+  if(!__v4skipGlobal){ for(var i=0;i<globalFacts.length;i++) pushFact(globalFacts[i]); }
   // 再叠加当前品的 baselineFacts（包袋品专属）
   var ownFacts = (STD.sellpoints[productKey] && STD.sellpoints[productKey].baselineFacts) || [];
   for(var j=0;j<ownFacts.length;j++) pushFact(ownFacts[j]);
