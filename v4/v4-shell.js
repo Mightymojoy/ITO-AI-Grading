@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.50';
+var V4_VERSION = 'v4.11.51';
 // v4.11.36：存档格式版本 ≠ 壳层版本。rawV 只在「rawTotal/rawPen/rawBlk 这套字段的形态真变」时才动，
 //   **不跟 V4_VERSION 走**（否则每次改样式/改文案都要假装改了存档格式，溯源反而失真）。
 //   ⚠️ 渲染侧从不读 rawV（write-only 溯源标记）；断言请读本常量，别跟 V4_VERSION 比。
@@ -6416,6 +6416,21 @@ document.addEventListener('DOMContentLoaded', function(){
 //   由 standard.js v2.2 新增；产品若无 cat 标签则**永不被排除**（防新增产品被误挡）。
 // 退路：localStorage 置 v4cat_enabled='0' 后刷新即恢复原状。
 // 自检：V4CAT.debug([{text:'这一款双肩包…'}]) / V4CAT.off() / V4CAT.on()
+// ----------------------------------------------------------------------------
+// v4.11.51（2026-10-28 老大拍板：**文件名与话术冲突时一律以文件名为准**）
+// 背景（老大提问：「品类区分是根据上传视频的名称做第一次筛选，这个不行么？」）：
+//   本来就行 —— v4.11.32 的 A 路径注释写明业务口径「主播整场不念品名时以文件名为准」。
+//   但 v4.11.50 的门控把 productKey 从 'auto' 先改成了具体产品，导致内层 A 路径的
+//   条件 key==='auto' 不成立 ⇒ 文件名彻底失去发言权。实测（_vfy_filename_priority.mjs）
+//   文件名/话术冲突 3 个用例 F1/F2/F3 **全部判错**，A 路径 autoFixed 计数不动。
+// 修法：门控入口先问文件名。文件名能定品 ⇒ **不覆盖 pk**，放手交内层 A 路径用同一文件名
+//   定品（这样 A 的 forcedKey 会带上考核品 ⇒ B 的 ④ 模块对齐一并生效，报告上下同一产品名，
+//   不会退回 10-08 那个「顶部双肩包 / ④ 行李箱」打架的老毛病）；
+//   仅当 A 路径不可用（V4PFX 被关 / 未装载）时才由门控自己定 pk 兜底。
+//   文件名缺失或识别不出（48 份历史语料有 24 份文件名压根没产品段）⇒ 照旧走话术门控。
+// 退路（两级）：localStorage 置 v4fnfirst_enabled='0' 恢复「文件名只兜底真歧义」；
+//   置 v4cat_enabled='0' 连同门控一起恢复 10-27 之前。
+// 自检：V4CAT.debug([{text:'…'}])（会先报文件名优先结果）/ V4CAT.fnPick([{text:'…'}])
 // ============================================================================
 (function(){
   if(window.V4CAT && window.V4CAT.__installed) return;
@@ -6595,20 +6610,84 @@ document.addEventListener('DOMContentLoaded', function(){
     return {pk:'', info:info, trace:trace};
   }
 
+  // ---------- v4.11.51：文件名优先（冲突时以文件名为准） ----------
+  var FN_KEY = 'v4fnfirst_enabled';
+  function fnOn(){ try{ return localStorage.getItem(FN_KEY) !== '0'; }catch(e){ return true; } }
+  function joinTxt(segs){
+    var o = [], i;
+    for(i=0;i<(segs||[]).length;i++) o.push(String((segs[i]||{}).text || ''));
+    return o.join('\n');
+  }
+  // 只认「正在跑的任务」的文件名，不读 DOM —— 与 v4.11.32 同口径（防跑批时误取另一页签选中的文件）
+  function runningFile(){
+    try{
+      var J = window.V4Jobs;
+      if(!J || !J.getJob) return '';
+      var order = ['vision','daily','batch'], i;
+      for(i=0;i<order.length;i++){
+        var jb = J.getJob(order[i]);
+        if(jb && jb.state === 'running' && jb.file && jb.file.name) return jb.file.name;
+      }
+    }catch(e){}
+    return '';
+  }
+  // 文件名 → 产品 key；识别不出 / 不在标准库 ⇒ null（回落话术门控）
+  function fnPick(segs){
+    if(!fnOn()) return null;
+    var fn = runningFile();
+    if(!fn) return null;
+    var inf = null;
+    try{
+      if(typeof window.detectProductFromName === 'function') inf = window.detectProductFromName(fn, joinTxt(segs));
+    }catch(e){ LOG('文件名推断异常：' + ((e && e.message) || e)); return null; }
+    if(!inf) return null;
+    var STD = (typeof GRADING_STANDARD !== 'undefined' && GRADING_STANDARD) ? GRADING_STANDARD : window.GRADING_STANDARD;
+    if(!STD || !STD.products || !STD.products[inf]) return null;
+    var p = STD.products[inf] || {};
+    return { pk: inf, cat: p.cat || 'unknown', sub: p.sub || 'unknown', file: fn };
+  }
+  // 内层 A 路径（v4.11.32）是否可用：可用就放手让它定品（顺带把 ④ 模块一起对齐）
+  function aPathUsable(){
+    try{
+      return !!(window.V4PFX && window.V4PFX.__installed && window.V4PFX.offQ && !window.V4PFX.offQ());
+    }catch(e){ return false; }
+  }
+  function fnInfo(f, note){
+    return { pk: f.pk, info: {
+      cat: f.cat, sub: f.sub, reason: note, file: f.file,
+      sL: 0, sB: 0, subBackpack: 0, subTote: 0, candidates: [f.pk], strong: {}
+    }, trace: [] };
+  }
+
   // ---- 挂载：包 window.runGrading，先定品类再交给原有链路 ----
   var _origRun = window.runGrading;
   if(typeof _origRun === 'function'){
     window.runGrading = function(segs, productKey, options){
       var pk = productKey;
       var isAuto = (pk === 'auto' || pk === '' || pk === null || typeof pk === 'undefined');
-      if(isAuto && segs && segs.length && on()){
-        var r = pickScoped(segs);
-        LAST = r;
-        if(r.pk){
-          pk = r.pk;
-          LOG('品类门控 → ' + r.info.cat + (r.info.sub !== 'unknown' ? '/' + r.info.sub : '') + ' ⇒ ' + r.pk + '（' + r.info.reason + '）');
-        } else {
-          LOG('品类门控未定 → 交回原 auto（' + r.info.reason + '）');
+      if(isAuto && on()){
+        // 一级：文件名优先（v4.11.51，2026-10-28 拍板：冲突时以文件名为准）
+        var f = fnPick(segs);
+        if(f){
+          if(aPathUsable()){
+            // 放手：pk 保持 auto，让内层 A 路径用同一文件名定品 ⇒ forcedKey 带上考核品 ⇒ B 的 ④ 模块一起对齐
+            LAST = fnInfo(f, '文件名优先（放手交 A 路径）：' + f.file);
+            LOG('文件名优先 → 放手交 A 路径（' + f.pk + '，文件「' + f.file + '」）');
+          } else {
+            pk = f.pk;
+            LAST = fnInfo(f, '文件名优先（A 路径不可用，门控自定）：' + f.file);
+            LOG('文件名优先 → 门控自定 ' + f.cat + (f.sub !== 'unknown' ? '/' + f.sub : '') + ' ⇒ ' + f.pk + '（文件「' + f.file + '」）');
+          }
+        } else if(segs && segs.length){
+          // 二级：话术门控（v4.11.50 原逻辑，一字未改）
+          var r = pickScoped(segs);
+          LAST = r;
+          if(r.pk){
+            pk = r.pk;
+            LOG('品类门控 → ' + r.info.cat + (r.info.sub !== 'unknown' ? '/' + r.info.sub : '') + ' ⇒ ' + r.pk + '（' + r.info.reason + '）');
+          } else {
+            LOG('品类门控未定 → 交回原 auto（' + r.info.reason + '）');
+          }
         }
       }
       return _origRun(segs, pk, options);
@@ -6617,7 +6696,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
   window.V4CAT = {
     __installed: true,
-    __v: '4.11.50',
+    __v: '4.11.51',
     on: on,
     off: function(){ try{ localStorage.setItem(ON_KEY, '0'); }catch(e){} return 'off'; },
     enable: function(){ try{ localStorage.removeItem(ON_KEY); }catch(e){} return 'on'; },
@@ -6625,10 +6704,18 @@ document.addEventListener('DOMContentLoaded', function(){
     subOf: function(pk){ return ((GRADING_STANDARD.products || {})[pk] || {}).sub || ''; },
     curCat: function(){ return LAST && LAST.info ? LAST.info.cat : ''; },
     last: function(){ return LAST; },
-    pick: function(segs){ return pickScoped(segs); },
+    // v4.11.51：自检入口与真实链路同序 —— 先问文件名，再问话术
+    fnPick: function(segs){ return fnPick(segs); },
+    pick: function(segs){
+      var f = fnPick(segs);
+      if(f) return (LAST = fnInfo(f, '文件名优先（自检）：' + f.file));
+      return pickScoped(segs);
+    },
     debug: function(segs){
-      var r = pickScoped(segs || []);
+      var f = fnPick(segs);
+      var r = f ? fnInfo(f, '文件名优先（自检）：' + f.file) : pickScoped(segs || []);
       var out = {
+        fromFilename: !!f,
         cat: r.info.cat, sub: r.info.sub, picked: r.pk || '(交回原逻辑)', reason: r.info.reason,
         score: {luggage: r.info.sL, bag: r.info.sB, backpack: r.info.subBackpack, tote: r.info.subTote},
         candidates: r.info.candidates || null,
