@@ -8,9 +8,10 @@
  *   {action:'tables'}                      → 列出该多维表格下所有表 [{table_id, name}]
  *   {action:'records', key:'daily'}         → 按逻辑键取记录（自动解析 table_id）
  *   {action:'records', table_id:'tblXXX'}   → 按表 ID 直接取记录
- *   可选：view_id（指定视图）、limit（默认 300，上限 1000）
- * 返回：{ok:true, table:{table_id,name}, fields:['日期','主播',...], rows:[{日期:'…', …}], total:n}
+ *   可选：view_id（指定视图）、limit（默认 300，上限 1200）
+ * 返回：{ok:true, table:{table_id,name}, fields:['日期','主播',...], rows:[{日期:'…', …}], total:n, total_all:表内总数, limited:是否被截断}
  *
+ * v4.11.52（2026-10-30）：修正「超限时丢最新记录」——改为拉全部分页后按日期保留最新 limit 条。
  * v4.11.49（2026-10-21）：补齐 DateTime(type=5) 字段的毫秒 → 'YYYY-MM-DD' 转换。
  * 在此之前该字段原样 String() 输出，导致工作台「日期」列显示裸时间戳、月份分组全部落「未填」。
  * 判定按 GET /fields 的 type===5（不猜位数），口径与 sync_feishu.js / feishu-fill.js 一致。
@@ -214,15 +215,37 @@ module.exports = async function handler(req, res){
 
     if(!tableId) return res.status(200).json({ok:false, reason:'缺少 table_id 或 key'});
 
-    const limit = Math.min(parseInt(data.limit || '300', 10) || 300, 1000);
+    const limit = Math.min(parseInt(data.limit || '300', 10) || 300, 1200);
     const dtf = await dateFieldsOf(token, tableId);   // type===5 字段名集合，见上方 msToDate 说明
     let rows = [], pageToken = '', guard = 0;
     do{
-      const d = await listRecordsPage(token, tableId, Math.min(limit - rows.length, 500), pageToken, data.view_id || '');
+      const d = await listRecordsPage(token, tableId, 500, pageToken, data.view_id || '');
       rows = rows.concat((d.items || []).map(function(rec){ return normalizeRecord(rec, dtf); }));
       pageToken = d.has_more ? (d.page_token || '') : '';
       guard++;
-    }while(pageToken && rows.length < limit && guard < 10);
+    }while(pageToken && guard < 20);                  // 20×500 = 1 万条护栏，防死循环
+
+    // ---------- v4.11.52（2026-10-30）：超限时保留「最新」而不是「最早」 ----------
+    // 事故：历史评分表 556 条、调用方传 limit=500 ⇒ 原实现返回**最早** 500 条，
+    //   最新 56 条（10-26 后半 14 + 10-27/28/29 各 14）全部丢失，
+    //   工作台「历史评分·归档索引」最新一天停在 10-26，而飞书里 10-29 数据齐全。
+    // 根因：飞书 records 按**表格行顺序**返回，且两表方向相反 ——
+    //   历史评分表新记录追加在**尾部**；日报表新记录在**头部**（upsert 先删后建）。
+    //   原实现一律取头部 ⇒ 对历史评分表就是「越新的越先被丢」。
+    // 处理：仅在超限时重排，未超限**保持原顺序**（对现有调用零影响）；
+    //   排序键取 标准日期→日期→日报 归一化后的 YYYY-MM-DD，同日期保持原相对顺序（稳定）。
+    const totalAll = rows.length;
+    if(rows.length > limit){
+      const dkey = function(r){
+        var s = String(r['标准日期'] || r['日期'] || r['日报'] || '').slice(0, 10);
+        var m = s.match(/^(\d{4})\D(\d{1,2})\D(\d{1,2})/);
+        return m ? (+m[1]) * 10000 + (+m[2]) * 100 + (+m[3]) : 0;
+      };
+      rows = rows.map(function(r, i){ return { r: r, i: i, k: dkey(r) }; })
+                 .sort(function(a, b){ return a.k - b.k || a.i - b.i; })
+                 .slice(-limit)
+                 .map(function(x){ return x.r; });
+    }
 
     // 列并集（优先常用列）
     const prio = ['日期','主播','直播间','考核产品','综合评分','等级','产品知识能力','黄金话术','问题','激励','惩罚','周','月'];
@@ -238,7 +261,8 @@ module.exports = async function handler(req, res){
 
     return res.status(200).json({
       ok:true, key: key || '', table:{table_id: tableId, name: tableName || tableId},
-      columns: cols, rows: rows, total: rows.length, limited: rows.length >= limit
+      columns: cols, rows: rows, total: rows.length, total_all: totalAll,
+      limited: totalAll > rows.length
     });
   }catch(e){
     return res.status(200).json({ok:false, error: e.message});
