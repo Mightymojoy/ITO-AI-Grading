@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.54';
+var V4_VERSION = 'v4.11.55';
 // v4.11.36：存档格式版本 ≠ 壳层版本。rawV 只在「rawTotal/rawPen/rawBlk 这套字段的形态真变」时才动，
 //   **不跟 V4_VERSION 走**（否则每次改样式/改文案都要假装改了存档格式，溯源反而失真）。
 //   ⚠️ 渲染侧从不读 rawV（write-only 溯源标记）；断言请读本常量，别跟 V4_VERSION 比。
@@ -645,6 +645,203 @@ function v4RawCellText(x){
 //  ⚠️ 因此块内必须把「信息准确性红旗」那一笔显式列出来 —— 否则「模块加权合计」会对不上总分
 //     （两者差 0～12）。这不是 bug，是口径本身如此。
 //  入参 src 与 v4DetailSnapshot 返回同形：历史详情传 det，当场报告传 v4DetailSnapshot(r)。
+// =====================================================
+// v4.11.55：评分三联面板 —— 主播系统评分 / 主播看板数据评分 / 最终主播综合评分
+// -----------------------------------------------------
+// 起因（2026-11-02 老大）：评分卡右侧大片留白，要求在同一区域把这三个分一并呈现。
+// 口径（必须与飞书日报表**严格同源**，禁止前端自行重算）：
+//   ① 主播系统评分     = v4 引擎分，取「不计平台红线」口径
+//                        （判 0 场次 = det.rawTotal / 复算原分；非判 0 场次 = 总分本身）
+//   ② 主播看板数据评分 = 飞书列「主播数据看板-评分」= 直播数据分（核心分 + 加减分，clamp 0~100）
+//   ③ 最终主播综合评分 = 飞书列「主播最终综合评分」= ROUND(系统分 × 40% + 看板分 × 60%, 2)
+// 🔴 ②③ **只读飞书列值，前端绝不重算**：直播分依赖 live_data.json 与《主播综合评分标准规则_2026》
+//    的月度核心区间（μ），前端没有这两份数据源；一旦重算必与飞书写入值产生偏差 →
+//    同一场两个数字对不上，比不显示更糟。
+// =====================================================
+function v4TriDate(s){
+  var m = String(s || '').match(/(\d{4})\D(\d{1,2})\D(\d{1,2})/);
+  if(!m) return '';
+  return m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2);
+}
+function v4TriNum(x){
+  if(x === null || x === undefined) return null;
+  var s = String(x).replace(/[,%\s]/g, '');
+  if(!s) return null;
+  var n = parseFloat(s);
+  return isFinite(n) ? n : null;
+}
+// 「主播系统评分」——优先取「不计平台红线」口径，取不到才退回正式总分
+function v4TriSys(src){
+  try{
+    if(!src) return null;
+    if(typeof src.rawTotal === 'number') return { v: src.rawTotal, raw: true };
+    var rl = src.redline || src.__redline || null;
+    if(rl && (rl.sessionZero || rl.moduleZero)){
+      var q = v4RawScore(src);
+      if(q && typeof q.total === 'number') return { v: q.total, raw: true };
+    }
+    if(typeof src.total === 'number') return { v: src.total, raw: false };
+    return null;
+  }catch(e){ return null; }
+}
+function v4TriStyle(){
+  if(window.__v4TriCssOn) return;
+  window.__v4TriCssOn = 1;
+  try{
+    var st = document.createElement('style');
+    st.id = 'v4tri-css';
+    st.textContent =
+      '.v4sc-row{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}'
+      + '.v4sc-main{flex:1 1 240px;min-width:0}'
+      + '.v4tri{flex:0 0 200px;max-width:100%;border:1px solid #e8e0cd;border-radius:8px;'
+      + 'background:#fffdf7;padding:6px 9px 7px;font-size:12px}'
+      + '.v4tri-h{font-size:9.5px;letter-spacing:.08em;color:#a89f8d;margin-bottom:1px}'
+      + '.v4tri-r{display:flex;align-items:flex-end;justify-content:space-between;gap:8px;'
+      + 'padding:3px 0 2px;border-top:1px dashed #efe7d4}'
+      + '.v4tri-r:first-of-type{border-top:none}'
+      + '.v4tri-l{font-size:11px;color:#6b655c;line-height:1.2}'
+      + '.v4tri-sub{display:block;font-size:9px;color:#b0a48e;margin-top:0}'
+      + '.v4tri-v{font-size:15px;font-weight:800;color:#3f3a33;line-height:1.05;'
+      + 'font-variant-numeric:tabular-nums;white-space:nowrap}'
+      + '.v4tri-r.is-final .v4tri-l{color:#8a6d3b;font-weight:700}'
+      + '.v4tri-r.is-final .v4tri-v{color:#a8873f;font-size:18px}'
+      + '.v4tri-f{font-size:9px;color:#b0a48e;margin-top:3px;text-align:right;line-height:1.3}'
+      + '.v4tri-na{font-size:9px;color:#b0524c;margin-top:3px;line-height:1.3}'
+      + '@media(max-width:820px){.v4tri{flex:1 1 100%}}';
+    document.head.appendChild(st);
+  }catch(e){}
+}
+function v4TriBuildIdx(rows){
+  var tri = {}, two = {};
+  for(var i = 0; i < (rows || []).length; i++){
+    var r = rows[i] || {};
+    var d = v4TriDate(r['标准日期'] || r['日期'] || r['日报']);
+    if(!d) continue;
+    var h = String(r['主播'] || '').trim();
+    var s = String(r['直播间'] || '').trim();
+    var rawLive = String(r['主播数据看板-评分'] == null ? '' : r['主播数据看板-评分']).trim();
+    var rawComp = String(r['主播最终综合评分'] == null ? '' : r['主播最终综合评分']).trim();
+    if(!rawLive && !rawComp) continue;
+    var rec = { rawLive: rawLive, rawComp: rawComp,
+                live: v4TriNum(rawLive), comp: v4TriNum(rawComp) };
+    tri[d + '|' + h + '|' + s] = rec;
+    if(!two[d + '|' + h]) two[d + '|' + h] = rec;
+  }
+  return { tri: tri, two: two };
+}
+function v4TriLookup(idx, d, h, s){
+  if(!idx || !d) return null;
+  var a = idx.tri[d + '|' + h + '|' + s];
+  if(a) return a;
+  return idx.two[d + '|' + h] || null;
+}
+function v4TriUrls(){
+  var custom = null;
+  try{ custom = localStorage.getItem('feishu_read_url'); }catch(e){}
+  if(custom) return [String(custom).replace(/\/+$/, '')];
+  var h = '', proto = '';
+  try{ h = location.hostname; proto = location.protocol; }catch(e){}
+  if(proto === 'file:' || h === '127.0.0.1' || h === 'localhost')
+    return ['https://ito-ai-grading.vercel.app/api/feishu-read'];
+  return ['/api/feishu-read', 'https://ito-ai-grading.vercel.app/api/feishu-read'];
+}
+function v4TriLoad(){
+  if(window.__v4TriP) return window.__v4TriP;
+  window.__v4TriP = new Promise(function(resolve){
+    // ① 工作台内存里已有飞书日报快照 ⇒ 零请求
+    try{
+      var rows = (window.V4_FS_STATE && window.V4_FS_STATE.rows) || null;
+      if(rows && rows.length){ window.__v4TriIdx = v4TriBuildIdx(rows); return resolve(window.__v4TriIdx); }
+    }catch(e){}
+    var urls = v4TriUrls(), i = 0;
+    function next(){
+      if(i >= urls.length){ window.__v4TriIdx = { tri: {}, two: {} }; return resolve(window.__v4TriIdx); }
+      var u = urls[i++];
+      var ctrl = ('AbortController' in window) ? new AbortController() : null;
+      var tmr = ctrl ? setTimeout(function(){ try{ ctrl.abort(); }catch(e){} }, 25000) : null;
+      fetch(u, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                 body: JSON.stringify({ key: 'daily', limit: 1200 }),
+                 signal: ctrl ? ctrl.signal : undefined })
+        .then(function(r){ if(tmr) clearTimeout(tmr); if(!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+        .then(function(d){
+          if(!d || !d.ok || !d.rows) throw new Error((d && (d.error || d.reason)) || '接口无数据');
+          window.__v4TriIdx = v4TriBuildIdx(d.rows);
+          resolve(window.__v4TriIdx);
+        })['catch'](function(){ if(tmr) clearTimeout(tmr); next(); });
+    }
+    next();
+  });
+  window.__v4TriP.then(function(){ v4TriApply(); });
+  return window.__v4TriP;
+}
+function v4TriApply(){
+  var idx = window.__v4TriIdx;
+  if(!idx) return 0;
+  var els = document.querySelectorAll('[data-v4tri="pending"]');
+  var n = 0;
+  for(var i = 0; i < els.length; i++){
+    var el = els[i];
+    var hit = v4TriLookup(idx, el.getAttribute('data-d'), el.getAttribute('data-h'), el.getAttribute('data-s'));
+    var vs = el.querySelectorAll('.v4tri-v');
+    if(vs.length >= 3){
+      vs[1].textContent = hit ? (hit.rawLive || '—') : '—';
+      vs[2].textContent = hit ? (hit.rawComp || '—') : '—';
+    }
+    if(!hit && !el.querySelector('.v4tri-na')){
+      var na = document.createElement('div');
+      na.className = 'v4tri-na';
+      na.textContent = '飞书日报表无该场记录';
+      el.appendChild(na);
+    }
+    el.setAttribute('data-v4tri', 'done');
+    n++;
+  }
+  return n;
+}
+function v4TriSchedule(){
+  if(window.__v4TriTmr) return;
+  var n = 0;
+  window.__v4TriTmr = setInterval(function(){
+    n++;
+    if(!document.querySelectorAll('[data-v4tri="pending"]').length || n > 24){
+      clearInterval(window.__v4TriTmr); window.__v4TriTmr = null; return;
+    }
+    v4TriLoad();                       // 内部幂等：同一页面只拉一次
+  }, 250);
+  setTimeout(function(){ v4TriLoad(); }, 0);
+}
+// 面板：三行 = 系统 / 看板 / 最终；「最终」高亮为金色
+function v4TriPanel(src){
+  try{
+    v4TriStyle();
+    var sys = v4TriSys(src);
+    var d = v4TriDate(src && src.date);
+    var host = String((src && src.host) || '').trim();
+    var studio = String((src && src.studio) || '').trim();
+    var idx = window.__v4TriIdx || null;
+    var hit = idx ? v4TriLookup(idx, d, host, studio) : null;
+    var state = idx ? 'done' : 'pending';
+    var sysTxt = sys ? String(sys.v) : '—';
+    var sysSub = sys ? (sys.raw ? '不计平台红线' : '引擎综合分') : '取不到';
+    var liveTxt = hit ? (hit.rawLive || '—') : (idx ? '—' : '…');
+    var compTxt = hit ? (hit.rawComp || '—') : (idx ? '—' : '…');
+    var na = (idx && !hit) ? '<div class="v4tri-na">飞书日报表无该场记录</div>' : '';
+    var html = '<div class="v4tri" data-v4tri="' + state + '" data-d="' + esc(d) + '" data-h="' + esc(host)
+      + '" data-s="' + esc(studio) + '">'
+      + '<div class="v4tri-h">评分构成</div>'
+      + '<div class="v4tri-r"><div class="v4tri-l">主播系统评分<span class="v4tri-sub">' + esc(sysSub) + '</span></div>'
+      + '<div class="v4tri-v">' + esc(sysTxt) + '</div></div>'
+      + '<div class="v4tri-r"><div class="v4tri-l">主播看板数据评分</div>'
+      + '<div class="v4tri-v">' + esc(liveTxt) + '</div></div>'
+      + '<div class="v4tri-r is-final"><div class="v4tri-l">最终主播综合评分</div>'
+      + '<div class="v4tri-v">' + esc(compTxt) + '</div></div>'
+      + '<div class="v4tri-f">系统 ×40% + 看板 ×60%</div>'
+      + na + '</div>';
+    if(state === 'pending') v4TriSchedule();
+    return html;
+  }catch(e){ return ''; }
+}
+
 function v4RawTagline(best, worst, tot, grade){
   if(best && (best.score||0) >= 75 && worst && (worst.score||0) <= 30)
     return '「会讲产品，但还没形成完整成交闭环」——' + best.name + ' 明显强于 ' + worst.name;
@@ -714,21 +911,23 @@ function v4RawResultHTML(src, ctx){
           : '<span style="float:right;font-weight:700;font-size:12px;color:#b0524c;background:#fbf3f2;'
             + 'border:1px solid #b0524c;border-radius:10px;padding:1px 9px;white-space:nowrap">反推上限值</span>')
       + '</div>'
-      + '<div style="display:flex;gap:14px;align-items:flex-start">'
+      + '<div class="v4sc-row">'
       + '<div style="text-align:center;flex:none">'
       + '<div style="font-size:34px;font-weight:800;color:' + gCl + ';line-height:1">' + q.total + '</div>'
       + '<div style="font-size:10px;color:#9a927f;margin-top:2px">综合得分 / 100</div>'
       + '<div style="display:inline-block;margin-top:4px;padding:1px 8px;border-radius:10px;background:' + gCl
       + ';color:#fff;font-size:11px;font-weight:700">' + esc(q.grade) + ' 级</div>'
       + '</div>'
-      + '<div style="flex:1;min-width:0;font-size:12px;line-height:1.75;color:#5c564e">'
+      + '<div class="v4sc-main" style="font-size:12px;line-height:1.75;color:#5c564e">'
       + metaLine
       + '<div><b style="color:#a8873f">核心优势：</b>' + esc(src.strength || '—') + '</div>'
       + '<div><b style="color:#b0524c">核心问题：</b>' + esc(src.problem || '—') + '</div>'
       + '<div><b>最优能力：</b>' + esc((best ? (best.name || best.key) : '—') + ' ' + (best ? (best.score||0) : 0) + ' 分') + '</div>'
       + '<div><b>最弱能力：</b>' + esc((worst ? (worst.name || worst.key) : '—') + ' ' + (worst ? (worst.score||0) : 0) + ' 分') + '</div>'
       + '<div><b style="color:#a8873f">一句话总评：</b>' + esc(tg) + '</div>'
-      + '</div></div>'
+      + '</div>'
+      + v4TriPanel(src)
+      + '</div>'
       + '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed #e6ddc8;font-size:11.5px;color:#8b857c;line-height:1.7">'
       + '<div>模块加权：' + modLine.join(' · ') + '</div>'
       + accLine
@@ -881,19 +1080,22 @@ function v4DetailHTML(det){
   var _detRL = det.redline || null;
   var _detZeroed = !!(_detRL && (_detRL.sessionZero || _detRL.moduleZero));
   var _wantRaw = v4RawOn() && (_detZeroed || typeof det.rawTotal === 'number');
-  h += '<div style="display:flex;gap:14px;align-items:flex-start;padding:8px 10px;background:var(--card);border:1px solid var(--border);border-radius:8px;margin-bottom:8px">'
+  h += '<div style="padding:8px 10px;background:var(--card);border:1px solid var(--border);border-radius:8px;margin-bottom:8px">'
+    + '<div class="v4sc-row">'
     + '<div style="text-align:center;flex:none">'
     + '<div style="font-size:34px;font-weight:800;color:' + gCl + ';line-height:1">' + (det.total || 0) + '</div>'
     + '<div style="font-size:10px;color:var(--text3);margin-top:2px">综合得分 / 100</div>'
     + '<div style="display:inline-block;margin-top:4px;padding:1px 8px;border-radius:10px;background:' + gCl + ';color:#fff;font-size:11px;font-weight:700">' + esc(det.grade || '') + ' 级</div>'
     + '</div>'
-    + '<div style="flex:1;min-width:0;font-size:12px;line-height:1.75;color:var(--text1)">'
+    + '<div class="v4sc-main" style="font-size:12px;line-height:1.75;color:var(--text1)">'
     + '<div style="font-weight:700;color:var(--ink);margin-bottom:4px">' + esc(det.host || '') + (det.studio ? ' · ' + esc(det.studio) : '') + (det.date ? ' · ' + esc(det.date) : '') + '</div>'
     + '<div><b style="color:var(--gold)">核心优势：</b>' + esc(det.strength || '—') + '</div>'
     + '<div><b style="color:var(--danger)">核心问题：</b>' + esc(det.problem || '—') + '</div>'
     + (det.bestKey ? '<div><b>最优能力：</b>' + esc(v4ModNameByKey(det.mods, det.bestKey) + ' ' + v4ModScoreByKey(det.mods, det.bestKey) + ' 分') + '</div>' : '')
     + (det.worstKey ? '<div><b>最弱能力：</b>' + esc(v4ModNameByKey(det.mods, det.worstKey) + ' ' + v4ModScoreByKey(det.mods, det.worstKey) + ' 分') + '</div>' : '')
     + '<div><b style="color:var(--gold)">一句话总评：</b>' + esc(det.tagline || '—') + '</div>'
+    + '</div>'
+    + v4TriPanel(det)
     + '</div></div>';
   // ---- v4.11.35：一整份「不计违规项综合评分结果」紧随总分卡之后（与当场报告同一份 builder）----
   if(_wantRaw) h += v4RawResultHTML(det, 'history');
