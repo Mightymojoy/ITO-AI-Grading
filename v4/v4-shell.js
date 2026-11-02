@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.56';
+var V4_VERSION = 'v4.11.57';
 // v4.11.36：存档格式版本 ≠ 壳层版本。rawV 只在「rawTotal/rawPen/rawBlk 这套字段的形态真变」时才动，
 //   **不跟 V4_VERSION 走**（否则每次改样式/改文案都要假装改了存档格式，溯源反而失真）。
 //   ⚠️ 渲染侧从不读 rawV（write-only 溯源标记）；断言请读本常量，别跟 V4_VERSION 比。
@@ -713,6 +713,10 @@ function v4TriStyle(){
       + '.v4tri-p-v{font-weight:700;color:#3f3a33;font-variant-numeric:tabular-nums;white-space:nowrap}'
       + '.v4tri-foot{font-size:9px;color:#b0a48e;margin-top:3px;line-height:1.3}'
       + '.v4tri-na{font-size:9px;color:#b0524c;margin-top:2px;line-height:1.3}'
+      // v4.11.57：记录在、看板分在，只是系统分（40% 段）取不到时的口径说明（灰金色，非报错）
+      + '.v4tri-na2{font-size:9px;color:#9a8f7a;margin-top:2px;line-height:1.35}'
+      + '.v4tri-na2 b{display:block;font-weight:600;color:#8d8270}'
+      + '.v4tri-na2 span{display:block}'
       + '@media(max-width:820px){.v4tri{flex:1 1 100%;border-left:none;border-top:1px solid #e6dcc4;'
       + 'padding:10px 0 0;margin-top:8px}}';
     document.head.appendChild(st);
@@ -798,6 +802,22 @@ function v4TriApply(){
     }
     var eBar = el.querySelector('.v4tri-bar');
     if(eBar && !(hit && hit.rawComp)) eBar.style.display = 'none';
+    // v4.11.57：飞书数据到位后补/撤「系统分不可得」说明（幂等，不重复插）
+    var eNa2 = el.querySelector('.v4tri-na2');
+    var s2 = v4TriSysNa(hit);
+    if(s2){
+      if(!eNa2){
+        eNa2 = document.createElement('div');
+        eNa2.className = 'v4tri-na2';
+        el.appendChild(eNa2);
+      }
+      if(eNa2.getAttribute('data-na') !== s2){
+        eNa2.innerHTML = v4TriSysNaHTML(s2);
+        eNa2.setAttribute('data-na', s2);
+      }
+    }else if(eNa2 && eNa2.parentNode){
+      eNa2.parentNode.removeChild(eNa2);
+    }
     if(!hit && !el.querySelector('.v4tri-na')){
       var na = document.createElement('div');
       na.className = 'v4tri-na';
@@ -822,6 +842,20 @@ function v4TriSchedule(){
   setTimeout(function(){ v4TriLoad(); }, 0);
 }
 // 面板：三行 = 系统 / 看板 / 最终；「最终」高亮为金色
+// v4.11.57：最终分空缺但看板分有值 ⇒ 不是「没这场」，而是系统分（40% 段）取不到，给一句口径说明
+// 返回值用 '|' 分两段：第一段结论、第二段原因（各自独占一行，166px 栏宽下放得下）
+function v4TriSysNa(hit){
+  try{
+    if(!hit) return '';
+    if(hit.rawComp) return '';
+    if(!hit.rawLive) return '';
+    return '系统分不可得|红线归零且无复算分';
+  }catch(e){ return ''; }
+}
+function v4TriSysNaHTML(s){
+  var p = String(s || '').split('|');
+  return '<b>' + esc(p[0] || '') + '</b><span>' + esc(p[1] || '') + '</span>';
+}
 function v4TriPanel(src){
   try{
     v4TriStyle();
@@ -837,6 +871,7 @@ function v4TriPanel(src){
     var liveTxt = hit ? (hit.rawLive || '—') : (idx ? '—' : '…');
     var compTxt = hit ? (hit.rawComp || '—') : (idx ? '—' : '…');
     var na = (idx && !hit) ? '<div class="v4tri-na">飞书日报表无该场记录</div>' : '';
+    var na2 = v4TriSysNa(hit);
     var compNum = !!(hit && hit.rawComp);
     var html = '<div class="v4tri" data-v4tri="' + state + '" data-d="' + esc(d) + '" data-h="' + esc(host)
       + '" data-s="' + esc(studio) + '">'
@@ -849,6 +884,7 @@ function v4TriPanel(src){
       + '<div class="v4tri-p"><span class="v4tri-p-l">看板评分<em>×60%</em></span>'
       + '<span class="v4tri-p-v" data-tri="live">' + esc(liveTxt) + '</span></div>'
       + '<div class="v4tri-foot">系统分口径：' + esc(sys ? (sys.raw ? '不计平台红线' : '引擎综合分') : '—') + '</div>'
+      + (na2 ? '<div class="v4tri-na2">' + v4TriSysNaHTML(na2) + '</div>' : '')
       + na + '</div>';
     if(state === 'pending') v4TriSchedule();
     return html;
