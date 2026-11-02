@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.53';
+var V4_VERSION = 'v4.11.54';
 // v4.11.36：存档格式版本 ≠ 壳层版本。rawV 只在「rawTotal/rawPen/rawBlk 这套字段的形态真变」时才动，
 //   **不跟 V4_VERSION 走**（否则每次改样式/改文案都要假装改了存档格式，溯源反而失真）。
 //   ⚠️ 渲染侧从不读 rawV（write-only 溯源标记）；断言请读本常量，别跟 V4_VERSION 比。
@@ -1425,6 +1425,15 @@ function v4FeishuRender(){
   var box = document.getElementById('v4arch-feishu');
   if(!box) return;
   var rows = V4_FS_STATE.rows, cols = V4_FS_STATE.columns;
+  // v4.11.54 列序收敛：云端/静态快照可能把飞书「字段定义顺序」直接当 columns 带回来，
+  // 导致 V4_FS_BASE_COLS 里登记的列序失效 —— 主播日报的 7 个直播列 + 2 个评分列会散落在表中间，
+  // 与飞书表横着对不上（实测 v4.11.53：两列落在第 25/26 位，单小时GSV 落在第 27 位）。
+  // 这里在渲染前按 BASE 重算一次；只对 V4_FS_BASE_COLS 里登记过的 tab 生效，其余 tab 原样不动。
+  var _base = V4_FS_BASE_COLS[V4_FS_STATE.key];
+  if(_base && rows && rows.length){
+    var _c = v4FsCols(rows, _base);
+    if(_c.length && JSON.stringify(_c) !== JSON.stringify(cols)){ cols = _c; V4_FS_STATE.columns = _c; }
+  }
   if(!rows.length){ box.innerHTML = '<div style="font-size:12px;color:var(--text3)">该表暂无记录</div>'; return; }
   // 找日期列：列名含"日期/周/月"或值匹配 YYYY-MM-DD
   var dateCol = '';
