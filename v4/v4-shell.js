@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.55';
+var V4_VERSION = 'v4.11.56';
 // v4.11.36：存档格式版本 ≠ 壳层版本。rawV 只在「rawTotal/rawPen/rawBlk 这套字段的形态真变」时才动，
 //   **不跟 V4_VERSION 走**（否则每次改样式/改文案都要假装改了存档格式，溯源反而失真）。
 //   ⚠️ 渲染侧从不读 rawV（write-only 溯源标记）；断言请读本常量，别跟 V4_VERSION 比。
@@ -691,23 +691,30 @@ function v4TriStyle(){
     var st = document.createElement('style');
     st.id = 'v4tri-css';
     st.textContent =
-      '.v4sc-row{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}'
+      '.v4sc-row{display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap}'
       + '.v4sc-main{flex:1 1 240px;min-width:0}'
-      + '.v4tri{flex:0 0 200px;max-width:100%;border:1px solid #e8e0cd;border-radius:8px;'
-      + 'background:#fffdf7;padding:6px 9px 7px;font-size:12px}'
-      + '.v4tri-h{font-size:9.5px;letter-spacing:.08em;color:#a89f8d;margin-bottom:1px}'
-      + '.v4tri-r{display:flex;align-items:flex-end;justify-content:space-between;gap:8px;'
-      + 'padding:3px 0 2px;border-top:1px dashed #efe7d4}'
-      + '.v4tri-r:first-of-type{border-top:none}'
-      + '.v4tri-l{font-size:11px;color:#6b655c;line-height:1.2}'
-      + '.v4tri-sub{display:block;font-size:9px;color:#b0a48e;margin-top:0}'
-      + '.v4tri-v{font-size:15px;font-weight:800;color:#3f3a33;line-height:1.05;'
-      + 'font-variant-numeric:tabular-nums;white-space:nowrap}'
-      + '.v4tri-r.is-final .v4tri-l{color:#8a6d3b;font-weight:700}'
-      + '.v4tri-r.is-final .v4tri-v{color:#a8873f;font-size:18px}'
-      + '.v4tri-f{font-size:9px;color:#b0a48e;margin-top:3px;text-align:right;line-height:1.3}'
-      + '.v4tri-na{font-size:9px;color:#b0524c;margin-top:3px;line-height:1.3}'
-      + '@media(max-width:820px){.v4tri{flex:1 1 100%}}';
+      // v4.11.56：右侧改为「最终分主角」列 —— 竖分隔线 + 大号金色数字 + 权重条 + 分项注释
+      + '.v4tri{flex:0 0 166px;box-sizing:border-box;max-width:100%;align-self:stretch;display:flex;flex-direction:column;'
+      + 'justify-content:center;border-left:1px solid #e6dcc4;padding:2px 8px 2px 13px;'
+      + 'background:linear-gradient(90deg,rgba(201,169,98,0),rgba(201,169,98,.07))}'
+      + '.v4tri-cap{font-size:10px;letter-spacing:.06em;color:#a8873f;font-weight:700;line-height:1.25}'
+      + '.v4tri-hero{display:flex;align-items:baseline;gap:4px;margin:0 0 1px}'
+      + '.v4tri-hero-v{font-size:34px;font-weight:800;color:#a8873f;line-height:1.05;'
+      + 'font-variant-numeric:tabular-nums;letter-spacing:-1px}'
+      + '.v4tri-hero-v.is-na{color:#cdc4b0;font-size:26px;letter-spacing:0}'
+      + '.v4tri-hero-u{font-size:10px;font-weight:600;color:#c0b399;white-space:nowrap}'
+      + '.v4tri-bar{display:flex;height:4px;border-radius:2px;overflow:hidden;background:#f1ead9;margin:4px 0 5px}'
+      + '.v4tri-bar i{background:#dbcaa4;display:block;height:100%}'
+      + '.v4tri-bar b{background:#a8873f;display:block;height:100%}'
+      + '.v4tri-p{display:flex;justify-content:space-between;align-items:baseline;gap:8px;'
+      + 'font-size:10.5px;color:#6b655c;line-height:1.6}'
+      + '.v4tri-p-l{white-space:nowrap}'
+      + '.v4tri-p-l em{font-style:normal;font-size:9px;color:#b0a48e;margin-left:3px}'
+      + '.v4tri-p-v{font-weight:700;color:#3f3a33;font-variant-numeric:tabular-nums;white-space:nowrap}'
+      + '.v4tri-foot{font-size:9px;color:#b0a48e;margin-top:3px;line-height:1.3}'
+      + '.v4tri-na{font-size:9px;color:#b0524c;margin-top:2px;line-height:1.3}'
+      + '@media(max-width:820px){.v4tri{flex:1 1 100%;border-left:none;border-top:1px solid #e6dcc4;'
+      + 'padding:10px 0 0;margin-top:8px}}';
     document.head.appendChild(st);
   }catch(e){}
 }
@@ -782,11 +789,15 @@ function v4TriApply(){
   for(var i = 0; i < els.length; i++){
     var el = els[i];
     var hit = v4TriLookup(idx, el.getAttribute('data-d'), el.getAttribute('data-h'), el.getAttribute('data-s'));
-    var vs = el.querySelectorAll('.v4tri-v');
-    if(vs.length >= 3){
-      vs[1].textContent = hit ? (hit.rawLive || '—') : '—';
-      vs[2].textContent = hit ? (hit.rawComp || '—') : '—';
+    var eLive = el.querySelector('[data-tri="live"]');
+    var eComp = el.querySelector('[data-tri="comp"]');
+    if(eLive) eLive.textContent = hit ? (hit.rawLive || '—') : '—';
+    if(eComp){
+      eComp.textContent = hit ? (hit.rawComp || '—') : '—';
+      if(eComp.className.indexOf('is-na') < 0 && !(hit && hit.rawComp)) eComp.className += ' is-na';
     }
+    var eBar = el.querySelector('.v4tri-bar');
+    if(eBar && !(hit && hit.rawComp)) eBar.style.display = 'none';
     if(!hit && !el.querySelector('.v4tri-na')){
       var na = document.createElement('div');
       na.className = 'v4tri-na';
@@ -826,16 +837,18 @@ function v4TriPanel(src){
     var liveTxt = hit ? (hit.rawLive || '—') : (idx ? '—' : '…');
     var compTxt = hit ? (hit.rawComp || '—') : (idx ? '—' : '…');
     var na = (idx && !hit) ? '<div class="v4tri-na">飞书日报表无该场记录</div>' : '';
+    var compNum = !!(hit && hit.rawComp);
     var html = '<div class="v4tri" data-v4tri="' + state + '" data-d="' + esc(d) + '" data-h="' + esc(host)
       + '" data-s="' + esc(studio) + '">'
-      + '<div class="v4tri-h">评分构成</div>'
-      + '<div class="v4tri-r"><div class="v4tri-l">主播系统评分<span class="v4tri-sub">' + esc(sysSub) + '</span></div>'
-      + '<div class="v4tri-v">' + esc(sysTxt) + '</div></div>'
-      + '<div class="v4tri-r"><div class="v4tri-l">主播看板数据评分</div>'
-      + '<div class="v4tri-v">' + esc(liveTxt) + '</div></div>'
-      + '<div class="v4tri-r is-final"><div class="v4tri-l">最终主播综合评分</div>'
-      + '<div class="v4tri-v">' + esc(compTxt) + '</div></div>'
-      + '<div class="v4tri-f">系统 ×40% + 看板 ×60%</div>'
+      + '<div class="v4tri-cap">最终主播综合评分</div>'
+      + '<div class="v4tri-hero"><span class="v4tri-hero-v' + (compNum || !idx ? '' : ' is-na') + '" data-tri="comp">'
+      + esc(compTxt) + '</span><span class="v4tri-hero-u">/ 100</span></div>'
+      + '<div class="v4tri-bar"' + (compNum || !idx ? '' : ' style="display:none"') + '><i style="width:40%"></i><b style="width:60%"></b></div>'
+      + '<div class="v4tri-p"><span class="v4tri-p-l">系统评分<em>×40%</em></span>'
+      + '<span class="v4tri-p-v" data-tri="sys">' + esc(sysTxt) + '</span></div>'
+      + '<div class="v4tri-p"><span class="v4tri-p-l">看板评分<em>×60%</em></span>'
+      + '<span class="v4tri-p-v" data-tri="live">' + esc(liveTxt) + '</span></div>'
+      + '<div class="v4tri-foot">系统分口径：' + esc(sys ? (sys.raw ? '不计平台红线' : '引擎综合分') : '—') + '</div>'
       + na + '</div>';
     if(state === 'pending') v4TriSchedule();
     return html;
