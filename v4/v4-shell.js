@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.57';
+var V4_VERSION = 'v4.11.58';
 // v4.11.36：存档格式版本 ≠ 壳层版本。rawV 只在「rawTotal/rawPen/rawBlk 这套字段的形态真变」时才动，
 //   **不跟 V4_VERSION 走**（否则每次改样式/改文案都要假装改了存档格式，溯源反而失真）。
 //   ⚠️ 渲染侧从不读 rawV（write-only 溯源标记）；断言请读本常量，别跟 V4_VERSION 比。
@@ -2033,6 +2033,19 @@ document.addEventListener('DOMContentLoaded', function(){
     return REDLINE_DEFAULT;
   }
 
+  // 🔴 v4.11.58（2026-11-03 老大拍板「保留扣分」）：极限词族（语义 n1/n2）改 ANNOTATE 档的开关。
+  //   默认开启＝只标注不判 0（-4/处 的 baseline 扣分照旧，由 semantic-core 计算，本处不动分）。
+  //   回退：localStorage.setItem('annotate_n12','0') 恢复旧口径（n1/n2 也整场归 0），需刷新页面。
+  var ANNOTATE_N12_DEFAULT = true;
+  function semAnnotateOn(){
+    try{
+      var v = localStorage.getItem('annotate_n12');
+      if(v === '0') return false;
+      if(v === '1') return true;
+    }catch(e){}
+    return ANNOTATE_N12_DEFAULT;
+  }
+
   function redlineZeroModule(r, modNum){
     var key = 'c' + modNum, n = 0;
     for(var i=0;i<r.modules.length;i++){
@@ -2106,14 +2119,29 @@ document.addEventListener('DOMContentLoaded', function(){
       }catch(e){ rel.err = 'scan:' + (e && e.message); try{ console.warn('[v4.11.17] 红线字面扫描异常', e); }catch(_e){} }
     }else{ rel.err = 'violation-scan 未加载'; }
 
-    // ---- 2) 语义通道：neg0（n1–n8）命中 → 均属 SESSION_ZERO 类别 ----
+    // ---- 2) 语义通道：neg0（n1–n8）命中 → **按 id 分档**（v4.11.58）----
+    // 🔴 事故与修法（2026-11-03）：本处原为「f 以 sem:neg: 开头 ⇒ rel.sessionZero=true」，
+    //   把 n1–n8 **一律**判成整场 0；而 semantic-core.js 的设计是「并入 baseline，与关键词基线
+    //   错误同口径 -4/处、封顶 -12」⇒ 两处直接矛盾。飞书 91 条已复核误判里 35 场被压成 0 分
+    //   （0 分均值 vs 误判组均值 39.8），且违反规则库 v3.1.0 明文：
+    //   「违规极限词均需标注出来，但不作为判处 0 分的规则」（V5 表 R5 C 列）。
+    //   ⇒ n1 绝对化用语 / n2 最高级用语（极限词族）= ANNOTATE：标注可见，**不判 0，-4/处照旧保留**；
+    //     n3 拉踩竞争品牌 / n4 拉踩内部产品 / n5 保价承诺 / n6 诱导互动 / n7 政治敏感 /
+    //     n8 侮辱直播用户 = 真红线 ⇒ 仍 SESSION_ZERO。
+    //   ⚠️ SEM_ANNOTATE_CATS 必须与 semantic-core.js NEG_POINTS 的 name **逐字一致**（拼接处：
+    //      'neg:'+npDef.name → 'sem:'+sf.field），改任一处都要同步，否则分类不生效、静默退回判 0。
+    var SEM_ANNOTATE_CATS = ['绝对化用语', '最高级用语'];
+    var n12AnnOn = semAnnotateOn();
     try{
       var items = (r.baseline && r.baseline.items) || [];
       for(var i=0;i<items.length;i++){
         var f = String(items[i].field || '');
         if(f.indexOf('sem:neg:') !== 0) continue;
-        rel.sessionZero = true;
-        rel.reasons.push({ src:'语义', cat:f.slice(8), term:'', action:'SESSION_ZERO',
+        var _cat = f.slice(8);
+        var _isAnn = n12AnnOn && SEM_ANNOTATE_CATS.indexOf(_cat) >= 0;
+        if(_isAnn) rel.annotate = true; else rel.sessionZero = true;
+        rel.reasons.push({ src:'语义', cat:_cat, term:'',
+                           action:(_isAnn ? 'ANNOTATE' : 'SESSION_ZERO'),
                            ts:(items[i].ev && items[i].ev.ts) || '',
                            quote:(items[i].ev && items[i].ev.ctx) || '' });
       }
@@ -2142,16 +2170,21 @@ document.addEventListener('DOMContentLoaded', function(){
   }
   window.v4RedlineApply = redlineApply;
   window.v4RedlineEnabled = redlineEnabled;
+  // v4.11.58：导出极限词族标注开关，便于诊断与回退核验（纯加法，不参与判定）
+  window.semAnnotateOn = semAnnotateOn;
 
   // ---- 红线横幅（让"为什么 0 分"可见，避免用户以为系统坏了）----
   function redlineBanner(r, root){
     if(!r || !r.__redline) return 0;
     var rel = r.__redline;
-    if(!rel.sessionZero && !rel.moduleZero) return 0;
+    // v4.11.58：只有 ANNOTATE 命中（无归零）时也要出横幅，否则「标注」在界面上完全不可见。
+    if(!rel.sessionZero && !rel.moduleZero && !rel.annotate) return 0;
     var host = root || document.getElementById('singleReport') || document.getElementById('result');
     if(!host) return 0;
     if(host.querySelector && host.querySelector('#redlineBanner')) return 0;
     var sess = !!rel.sessionZero;
+    // v4.11.58：仅标注（极限词 n1/n2）且无任何归零 ⇒ 金色「标注」形态，措辞不能说成"命中红线"
+    var annOnly = !sess && !rel.moduleZero && !!rel.annotate;
     var acc = sess ? '#b0524c' : '#c9a962';
     var box = document.createElement('div');
     box.id = 'redlineBanner';
@@ -2159,7 +2192,9 @@ document.addEventListener('DOMContentLoaded', function(){
       + ';background:' + (sess ? '#fbf3f2' : '#fbf8ef')
       + ';border-radius:8px;padding:12px 14px;margin:10px 0;font-size:13px;line-height:1.7';
     var h = '<div style="font-weight:600;color:' + acc + ';margin-bottom:6px">'
-      + (sess ? '⚠️ 命中平台红线 —— 本场总分按 0 计' : '⚠️ 命中平台红线 —— 对应能力模块按 0 计') + '</div>';
+      + (sess ? '⚠️ 命中平台红线 —— 本场总分按 0 计'
+              : (annOnly ? 'ℹ️ 命中极限词 —— 仅标注，不判 0 分（已按 -4/处 计入信息准确性）'
+                         : '⚠️ 命中平台红线 —— 对应能力模块按 0 计')) + '</div>';
     h += '<div style="color:#5c564e">';
     var shown = rel.reasons.slice(0, 8);
     for(var i=0;i<shown.length;i++){
@@ -2169,7 +2204,7 @@ document.addEventListener('DOMContentLoaded', function(){
         + '<b>' + esc(x.cat) + '</b>'
         + (x.term ? '　触发词「<b>' + esc(x.term) + '</b>」' : '')
         + '　<span style="color:#8b857c">[' + esc(x.src) + '（'
-        + (x.action === 'MODULE_ZERO' ? '模块归0' : '整场归0') + '）]</span>'
+        + (x.action === 'MODULE_ZERO' ? '模块归0' : (x.action === 'ANNOTATE' ? '标注·不判0' : '整场归0')) + '）]</span>'
         + (x.ts ? ' <span style="color:#8b857c">' + esc(x.ts) + '</span>' : '')
         + (x.quote ? '<div style="color:#8b857c;font-size:12px;margin-left:12px">「' + esc(String(x.quote).slice(0, 90)) + '」</div>' : '')
         + '</div>';
@@ -5004,7 +5039,7 @@ document.addEventListener('DOMContentLoaded', function(){
         + '<b>' + E(x.cat) + '</b>'
         + (x.term ? '　触发词「<b>' + E(x.term) + '</b>」' : '')
         + '　<span style="color:#8b857c">[' + E(x.src) + '（'
-        + (x.action === 'MODULE_ZERO' ? '模块归0' : '整场归0') + '）]</span>'
+        + (x.action === 'MODULE_ZERO' ? '模块归0' : (x.action === 'ANNOTATE' ? '标注·不判0' : '整场归0')) + '）]</span>'
         + (x.ts ? ' <span style="color:#8b857c">' + E(x.ts) + '</span>' : '')
         + (x.quote ? '<div style="color:#8b857c;font-size:12px;margin-left:12px">「' + E(String(x.quote).slice(0, SHOWQ)) + '」</div>' : '')
         + '</div>';
@@ -5801,7 +5836,7 @@ document.addEventListener('DOMContentLoaded', function(){
         + (x.code ? '<span style="color:' + (rv ? SUB : acc) + ';font-weight:600">[' + E(x.code) + ']</span> ' : '')
         + '<b style="' + strike + '">' + E(x.cat) + '</b>'
         + (x.term ? '　触发词「<b style="' + strike + '">' + E(x.term) + '</b>」' : '')
-        + '　<span style="color:' + SUB + '">[' + E(x.src) + '（' + (x.action === 'MODULE_ZERO' ? '模块归0' : '整场归0') + '）]</span>'
+        + '　<span style="color:' + SUB + '">[' + E(x.src) + '（' + (x.action === 'MODULE_ZERO' ? '模块归0' : (x.action === 'ANNOTATE' ? '标注·不判0' : '整场归0')) + '）]</span>'
         + (x.ts ? ' <span style="color:' + SUB + '">' + E(x.ts) + '</span>' : '')
         + (canAct ? btn(rv ? 'unrev' : 'rev', it.rid, scope) : '')
         + (x.quote ? '<div style="color:' + SUB + ';font-size:12px;margin-left:12px">「' + E(String(x.quote).slice(0, SHOWQ)) + '」</div>' : '')
@@ -6537,7 +6572,7 @@ document.addEventListener('DOMContentLoaded', function(){
     if(x.code) s = '[' + S(x.code) + '] ' + s;
     if(x.term) s += '　触发词「' + S(x.term) + '」';
     if(x.count && x.count > 1) s += ' ×' + x.count;
-    if(x.src) s += '　[' + S(x.src) + (withAct ? '（' + (x.action === 'MODULE_ZERO' ? '模块归0' : '整场归0') + '）' : '') + ']';
+    if(x.src) s += '　[' + S(x.src) + (withAct ? '（' + (x.action === 'MODULE_ZERO' ? '模块归0' : (x.action === 'ANNOTATE' ? '标注·不判0' : '整场归0')) + '）' : '') + ']';
     if(x.ts) s += ' ' + S(x.ts);
     if(rv) s += '　✗ 已撤销（误判）' + (rv.at ? ' · ' + S(rv.at) : '') + (rv.note ? '　理由：' + S(rv.note) : '');
     return s;
