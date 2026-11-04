@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.60';
+var V4_VERSION = 'v4.11.61';
 // v4.11.36：存档格式版本 ≠ 壳层版本。rawV 只在「rawTotal/rawPen/rawBlk 这套字段的形态真变」时才动，
 //   **不跟 V4_VERSION 走**（否则每次改样式/改文案都要假装改了存档格式，溯源反而失真）。
 //   ⚠️ 渲染侧从不读 rawV（write-only 溯源标记）；断言请读本常量，别跟 V4_VERSION 比。
@@ -53,6 +53,7 @@ var V4_PAGES = {
   vision:    '一键完整日报',
   batch:     '批量 TOP1',
   feishu:    '飞书云端数据',
+  trend:     '主播趋势',
   golden:    '黄金话术库',
   problem:   '问题话术库',
   cases:     '优秀案例TOP3',
@@ -122,6 +123,8 @@ function v4Navigate(){
   if(key === 'dashboard') try{ v4RenderDashboard(); }catch(e){}
   if(key === 'settings')  try{ v4RenderSettings(); }catch(e){}
   if(key === 'feishu')    try{ v4FeishuLoad(curT || 'daily'); }catch(e){}
+  // v4.11.61：主播趋势页（飞书日报「主播最终综合评分」自定义周期趋势）
+  if(key === 'trend')     try{ v4TrendBoot(); }catch(e){ console.error('[v4.11.61] 趋势页渲染异常:', e); }
   // v4.8.10 关键：切到「问题库」页时主动重渲染，确保培训清单芯片一定生成
   // （app-core.js 初始化时用的是未打补丁的 renderProblemLib，不重渲染就没有芯片）
   if(key === 'problem'){
@@ -7234,4 +7237,725 @@ document.addEventListener('DOMContentLoaded', function(){
     }
   };
   log('V2 六步引擎已装载（开关 v4step6_enabled，标准库 ' + (STD.version || '?') + '）');
+})();
+
+// =====================================================
+// v4.11.61：主播趋势 —— 按飞书日报「主播最终综合评分」自定义周期看趋势
+// -----------------------------------------------------
+// 诉求（2026-11-04 老大）：飞书表-主播日报里已有「主播最终综合评分」列，
+//   新增一个 tab，可自定义周期筛选，看某位主播不同时间段的得分情况，
+//   目的是快速了解主播状态（趋势为主，不做跨主播考核排名）。
+//
+// 口径（与飞书列严格同源，前端只读取、绝不重算）：
+//   主播最终综合评分 = ROUND(系统分 × 40% + 看板分 × 60%, 2)     ← 直接取飞书列值
+//   系统分 = 「未记录 违规-综合评分」（不计平台红线口径，形如「75.5（精确）」）
+//   看板分 = 「主播数据看板-评分」
+//   🔴 为什么不在前端重算：看板分依赖 live_data.json 与《主播综合评分标准规则_2026》
+//      的月度核心区间（μ），前端没有这两份数据源；重算必然与飞书写入值产生偏差。
+//
+// 缺失处理（关键）：任一列取不到 ⇒ 该场**不计入趋势**（不补 0、不插值、不前向填充）；
+//   明细表里显式标「缺」并给出缺的是哪一列。补 0 会把「缺数据」画成「得 0 分」，
+//   是最容易误导读数的做法。
+//
+// 口径变更日：2026-11-04（v4.11.60 权重按业务 10 项对齐 + V2 六步）。
+//   该日前后系统分不是同一把尺子，图上画竖虚线标注、脚注说明，不假装连续可比。
+//
+// 回退：localStorage.v4trend_enabled='0' ⇒ 本页只显示「已关闭」提示，其余功能不受影响。
+//       彻底移除 = 删掉 index.html 里 data-page="trend" 的 <a> 与 #page-trend 两处。
+// =====================================================
+(function(){
+  var VER = 'v4.11.61';
+  var CALIBER = '2026-11-04';     // 评分口径变更日（权重按业务10项对齐）
+  var CACHE_MS = 180000;          // 内存缓存 3 分钟，避免来回切页重复拉 12MB
+
+  var TR = {
+    host: '', shop: '', gran: 'day', preset: '30',
+    from: '', to: '',
+    rows: null, at: 0, err: '', loading: false, anchor: ''
+  };
+  window.V4TREND = TR;
+
+  function off(){
+    try{ return String(localStorage.getItem('v4trend_enabled')) === '0'; }catch(e){ return false; }
+  }
+  function E(s){
+    if(typeof esc === 'function') return esc(String(s == null ? '' : s));
+    return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){
+      return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c];
+    });
+  }
+  // 数值解析：兼容「75.5（精确）」「1,234」「76.38」与真数值
+  function num(x){
+    if(x === null || x === undefined) return null;
+    if(typeof x === 'number') return isFinite(x) ? x : null;
+    var s = String(x).replace(/[,%\s]/g, '');
+    if(!s) return null;
+    var m = s.match(/-?\d+(?:\.\d+)?/);
+    if(!m) return null;
+    var v = parseFloat(m[0]);
+    return isFinite(v) ? v : null;
+  }
+  // 日期归一化：标准日期(文本) 优先，其次 日期(DateTime 已由读端点转成 YYYY-MM-DD，老数据可能是毫秒)
+  function dateOf(r){
+    var cands = [r['标准日期'], r['日期'], r['日报']];
+    for(var i = 0; i < cands.length; i++){
+      var v = cands[i];
+      if(v === null || v === undefined || v === '') continue;
+      var s = (typeof v === 'object') ? JSON.stringify(v) : String(v);
+      var m = s.match(/(\d{4})\D(\d{1,2})\D(\d{1,2})/);
+      if(m) return m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2);
+      if(/^\d{12,13}$/.test(s)){                    // 毫秒时间戳兜底
+        var d = new Date(+s);
+        if(!isNaN(d.getTime())){
+          return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+        }
+      }
+    }
+    return '';
+  }
+  function dayNum(s){
+    var p = String(s || '').match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if(!p) return null;
+    return Math.round(Date.UTC(+p[1], +p[2] - 1, +p[3]) / 86400000);
+  }
+  function dayStr(n){
+    var d = new Date(n * 86400000);
+    var m = d.getUTCMonth() + 1, dd = d.getUTCDate();
+    return d.getUTCFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (dd < 10 ? '0' : '') + dd;
+  }
+  function mondayOf(n){
+    var w = new Date(n * 86400000).getUTCDay();    // 0=周日
+    return n - ((w + 6) % 7);
+  }
+  function grade(v){
+    if(v === null || v === undefined) return '';
+    if(v >= 90) return 'A';
+    if(v >= 80) return 'B';
+    if(v >= 70) return 'C';
+    if(v >= 60) return 'D';
+    return 'E';
+  }
+  function fmt(v, d){
+    if(v === null || v === undefined || !isFinite(v)) return '—';
+    return v.toFixed(d === undefined ? 2 : d);
+  }
+  function mean(a){
+    if(!a || !a.length) return null;
+    var s = 0;
+    for(var i = 0; i < a.length; i++) s += a[i];
+    return s / a.length;
+  }
+  function sd(a){
+    if(!a || a.length < 2) return null;
+    var m = mean(a), s = 0;
+    for(var i = 0; i < a.length; i++) s += (a[i] - m) * (a[i] - m);
+    return Math.sqrt(s / (a.length - 1));
+  }
+
+  // ---------- 数据装载 ----------
+  function urls(){
+    try{ if(typeof v4TriUrls === 'function') return v4TriUrls(); }catch(e){}
+    return ['/api/feishu-read', 'https://ito-ai-grading.vercel.app/api/feishu-read'];
+  }
+  function status(t, color){
+    var el = document.getElementById('trStatus');
+    if(el){ el.textContent = t || ''; el.style.color = color || 'var(--text3)'; }
+    return t;
+  }
+  function load(force){
+    if(!force && TR.rows && (Date.now() - TR.at) < CACHE_MS) return Promise.resolve(TR.rows);
+    if(!force && window.__v4TrendP) return window.__v4TrendP;
+    if(force) window.__v4TrendP = null;
+    TR.loading = true; TR.err = '';
+    window.__v4TrendP = new Promise(function(resolve){
+      // ① 工作台内存里已有飞书日报快照（先逛过「主播日报」页）⇒ 零请求
+      try{
+        var mem = (window.V4_FS_STATE && window.V4_FS_STATE.rows) || null;
+        if(mem && mem.length){ TR.rows = mem; TR.at = Date.now(); TR.loading = false; return resolve(mem); }
+      }catch(e){}
+      var us = urls(), i = 0, lastErr = '';
+      function next(){
+        if(i >= us.length){
+          TR.loading = false; TR.err = lastErr || '取数失败';
+          return resolve(TR.rows || []);
+        }
+        var u = us[i++];
+        status('载入中…（飞书日报全量，约 10~20 秒）', 'var(--gold)');
+        var ctrl = ('AbortController' in window) ? new AbortController() : null;
+        var tmr = ctrl ? setTimeout(function(){ try{ ctrl.abort(); }catch(e){} }, 60000) : null;
+        fetch(u, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                   body: JSON.stringify({ key: 'daily', limit: 1200 }),
+                   signal: ctrl ? ctrl.signal : undefined })
+          .then(function(r){ if(tmr) clearTimeout(tmr); if(!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+          .then(function(d){
+            if(!d || !d.ok || !d.rows) throw new Error((d && (d.error || d.reason)) || '接口无数据');
+            TR.rows = d.rows; TR.at = Date.now(); TR.loading = false;
+            try{ window.__v4DailyRows = d.rows; }catch(e){}
+            resolve(d.rows);
+          })['catch'](function(e2){
+            if(tmr) clearTimeout(tmr);
+            lastErr = String((e2 && e2.message) || e2);
+            next();
+          });
+      }
+      next();
+    });
+    return window.__v4TrendP;
+  }
+
+  // ---------- 归一点位 ----------
+  function points(){
+    var rows = TR.rows || [];
+    var out = [];
+    for(var i = 0; i < rows.length; i++){
+      var r = rows[i] || {};
+      var d = dateOf(r);
+      if(!d) continue;
+      var host = String(r['主播'] || '').trim();
+      if(!host) continue;
+      out.push({
+        d: d,
+        host: host,
+        shop: String(r['直播间'] || '').trim(),
+        comp: num(r['主播最终综合评分']),
+        live: num(r['主播数据看板-评分']),
+        sys: num(r['未记录 违规-综合评分']),
+        zero: !!String(r['命中平台红线 —— 本场总分按 0 计'] || '').trim(),
+        total: num(r['综合评分(数值)'])
+      });
+    }
+    out.sort(function(a, b){ return a.d < b.d ? -1 : (a.d > b.d ? 1 : 0); });
+    return out;
+  }
+  function byHostShop(p){
+    return p.filter(function(x){
+      if(TR.host && x.host !== TR.host) return false;
+      if(TR.shop && x.shop !== TR.shop) return false;
+      return true;
+    });
+  }
+  function anchorDate(all){
+    var mx = '';
+    for(var i = 0; i < all.length; i++) if(all[i].d > mx) mx = all[i].d;
+    return mx || (typeof v4TodayStr === 'function' ? v4TodayStr() : '');
+  }
+  function presetRange(name, anchor){
+    if(name === 'all') return { from: '', to: '' };
+    if(name === 'custom') return { from: TR.from, to: TR.to };
+    var a = dayNum(anchor);
+    if(a === null) return { from: '', to: '' };
+    if(name === '7')  return { from: dayStr(a - 6),  to: anchor };
+    if(name === '14') return { from: dayStr(a - 13), to: anchor };
+    if(name === '30') return { from: dayStr(a - 29), to: anchor };
+    var p = anchor.split('-'), y = +p[0], m = +p[1];
+    if(name === 'month') return { from: y + '-' + p[1] + '-01', to: anchor };
+    if(name === 'lastmonth'){
+      var pm = m - 1, py = y;
+      if(pm < 1){ pm = 12; py = y - 1; }
+      var last = new Date(Date.UTC(py, pm, 0)).getUTCDate();
+      var mm = (pm < 10 ? '0' : '') + pm;
+      return { from: py + '-' + mm + '-01', to: py + '-' + mm + '-' + (last < 10 ? '0' : '') + last };
+    }
+    return { from: '', to: '' };
+  }
+  function inRange(p, from, to){
+    if(from && p.d < from) return false;
+    if(to && p.d > to) return false;
+    return true;
+  }
+
+  // ---------- 聚合（日 / 周） ----------
+  function agg(list){
+    var g = {}, keys = [];
+    for(var i = 0; i < list.length; i++){
+      var x = list[i];
+      if(x.comp === null) continue;
+      var n = dayNum(x.d);
+      if(n === null) continue;
+      var k = (TR.gran === 'week') ? dayStr(mondayOf(n)) : x.d;
+      if(!g[k]){ g[k] = { d: k, vals: [], n: 0 }; keys.push(k); }
+      g[k].vals.push(x.comp); g[k].n++;
+    }
+    keys.sort();
+    return keys.map(function(k){
+      var o = g[k];
+      return { d: k, v: mean(o.vals), n: o.n };
+    });
+  }
+  function slope(a){
+    // 最小二乘，单位：分 / 天；点数 < 3 不给
+    if(!a || a.length < 3) return null;
+    var xs = [], ys = [];
+    for(var i = 0; i < a.length; i++){
+      var n = dayNum(a[i].d);
+      if(n === null) continue;
+      xs.push(n); ys.push(a[i].v);
+    }
+    if(xs.length < 3) return null;
+    var mx = mean(xs), my = mean(ys), sxy = 0, sxx = 0;
+    for(var j = 0; j < xs.length; j++){ sxy += (xs[j] - mx) * (ys[j] - my); sxx += (xs[j] - mx) * (xs[j] - mx); }
+    return sxx ? sxy / sxx : null;
+  }
+  function stats(list, A){
+    var vals = [];
+    for(var i = 0; i < list.length; i++) if(list[i].comp !== null) vals.push(list[i].comp);
+    var o = { n: list.length, nv: vals.length, miss: list.length - vals.length,
+              avg: mean(vals), sd: sd(vals), max: null, min: null, delta: null, prev: null, cov: 0 };
+    if(vals.length){
+      o.max = Math.max.apply(null, vals);
+      o.min = Math.min.apply(null, vals);
+      o.cov = vals.length / list.length;
+    }
+    // 环比：紧邻的前一个等长窗口（用同一 host/shop 过滤后的全量，不限于当前范围）
+    var base = byHostShop(points());
+    var from = TR.preset === 'custom' ? TR.from : presetRange(TR.preset, TR.anchor).from;
+    var to   = TR.preset === 'custom' ? TR.to   : presetRange(TR.preset, TR.anchor).to;
+    if(from && to){
+      var f = dayNum(from), t = dayNum(to);
+      if(f !== null && t !== null && t >= f){
+        var len = t - f + 1;
+        var pf = dayStr(f - len), pt = dayStr(f - 1);
+        var prev = base.filter(function(x){
+          if(x.comp === null) return false;
+          if(TR.shop && x.shop !== TR.shop) return false;
+          return x.d >= pf && x.d <= pt;
+        }).map(function(x){ return x.comp; });
+        o.prev = prev.length ? mean(prev) : null;
+        o.prevRange = [pf, pt];
+        if(o.prev !== null && o.avg !== null) o.delta = o.avg - o.prev;
+      }
+    }
+    o.slope = slope(A);
+    return o;
+  }
+
+  // ---------- 样式（运行时注入，不动 index.html 的 CSS） ----------
+  function style(){
+    if(window.__v4TrendCssOn) return;
+    window.__v4TrendCssOn = 1;
+    try{
+      var st = document.createElement('style');
+      st.id = 'v4trend-css';
+      st.textContent =
+        '.tr-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}'
+        + '.tr-bar label{font-size:12px;color:var(--text2);min-width:auto}'
+        + '.tr-bar select,.tr-bar input[type=date]{font-size:12px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text)}'
+        + '.tr-seg{display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;background:var(--card)}'
+        + '.tr-seg button{border:none;background:transparent;font-size:12px;padding:5px 10px;cursor:pointer;color:var(--text2)}'
+        + '.tr-seg button+button{border-left:1px solid var(--border)}'
+        + '.tr-seg button.on{background:var(--gold);color:#fff;font-weight:700}'
+        + '.tr-kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:10px}'
+        + '.tr-k{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:9px 11px}'
+        + '.tr-k .l{font-size:11px;color:var(--text3);margin-bottom:2px}'
+        + '.tr-k .v{font-size:19px;font-weight:800;color:var(--text);letter-spacing:-.5px;font-variant-numeric:tabular-nums}'
+        + '.tr-k .s{font-size:10.5px;color:var(--text3);margin-top:1px}'
+        + '.tr-k.hero{border-color:var(--gold);background:linear-gradient(180deg,#fffdf6,#fff)}'
+        + '.tr-k.hero .v{color:var(--gold);font-size:26px}'
+        + '.tr-up{color:var(--danger)}.tr-dn{color:var(--ok)}'
+        + '.tr-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--text2);margin-top:6px}'
+        + '.tr-legend i{display:inline-block;width:9px;height:2px;background:var(--gold);vertical-align:middle;margin-right:4px}'
+        + '.tr-note{font-size:11px;color:var(--text3);line-height:1.7;margin-top:8px}'
+        + '.tr-tbl{width:100%;border-collapse:collapse;font-size:12px}'
+        + '.tr-tbl th{text-align:left;font-weight:600;color:var(--text2);background:#faf8f3;padding:6px 8px;border-bottom:1px solid var(--border);font-size:11.5px;white-space:nowrap}'
+        + '.tr-tbl td{padding:5px 8px;border-bottom:1px solid #f2efe7;font-variant-numeric:tabular-nums}'
+        + '.tr-tbl tbody tr:hover td{background:var(--gold-dim)}'
+        + '.tr-badge{font-size:10px;padding:0 5px;border-radius:6px;font-weight:700}'
+        + '.tr-bA{background:#f6ecd2;color:#8a6d24}.tr-bB{background:#eef0e4;color:#5d6b35}'
+        + '.tr-bC{background:#eaf0f4;color:#3f5f78}.tr-bD{background:#f6e9dd;color:#8a5a2d}'
+        + '.tr-bE{background:#f7e3dd;color:#9d4030}'
+        + '.tr-miss{color:#b0524c}.tr-zero{color:#8a5a2d}'
+        + '@media(max-width:820px){.tr-kpi{grid-template-columns:repeat(2,minmax(0,1fr))}}';
+      document.head.appendChild(st);
+    }catch(e){}
+  }
+
+  // ---------- 骨架 ----------
+  function skeleton(){
+    return ''
+      + '<div class="panel">'
+      +   '<h3>主播综合评分趋势 · 自定义周期</h3>'
+      +   '<div class="tr-bar">'
+      +     '<label>主播</label><select id="trHost"></select>'
+      +     '<label>直播间</label><select id="trShop"></select>'
+      +     '<label>周期</label><span class="tr-seg" id="trSeg"></span>'
+      +     '<input type="date" id="trFrom"><span style="font-size:11px;color:var(--text3)">至</span><input type="date" id="trTo">'
+      +     '<span class="tr-seg" id="trGranSeg"></span>'
+      +   '</div>'
+      +   '<div style="display:flex;align-items:center;gap:10px">'
+      +     '<div id="trStatus" style="font-size:11.5px;color:var(--text3);flex:1 1 auto;min-width:0"></div>'
+      +     '<button class="btn btn-ghost" id="trReload" style="padding:4px 12px;font-size:12px;flex:0 0 auto">重新载入</button>'
+      +   '</div>'
+      + '</div>'
+      + '<div class="panel"><h3>区间概览</h3><div class="tr-kpi" id="trKpi"></div><div class="tr-note" id="trKpiNote"></div></div>'
+      + '<div class="panel"><h3>趋势</h3><div id="trChart"></div><div class="tr-legend" id="trLegend"></div><div class="tr-note" id="trChartNote"></div></div>'
+      + '<div class="panel"><h3>分场明细</h3><div id="trTable"></div><div class="tr-note" id="trTableNote"></div></div>';
+  }
+
+  // ---------- 控件 ----------
+  function fillSelects(all){
+    var hosts = {}, shops = {};
+    for(var i = 0; i < all.length; i++){
+      if(all[i].host) hosts[all[i].host] = (hosts[all[i].host] || 0) + 1;
+      if(all[i].shop) shops[all[i].shop] = (shops[all[i].shop] || 0) + 1;
+    }
+    var hs = Object.keys(hosts).sort(function(a, b){ return hosts[b] - hosts[a]; });
+    var sel = document.getElementById('trHost');
+    if(sel){
+      var h = '<option value="">全部主播（每日均分）</option>';
+      for(var j = 0; j < hs.length; j++){
+        h += '<option value="' + E(hs[j]) + '">' + E(hs[j]) + '（' + hosts[hs[j]] + ' 场）</option>';
+      }
+      sel.innerHTML = h;
+      sel.value = TR.host;
+      sel.onchange = function(){ TR.host = this.value; render(); };
+    }
+    var ss = Object.keys(shops).sort();
+    var sel2 = document.getElementById('trShop');
+    if(sel2){
+      var h2 = '<option value="">全部直播间</option>';
+      for(var k = 0; k < ss.length; k++) h2 += '<option value="' + E(ss[k]) + '">' + E(ss[k]) + '</option>';
+      sel2.innerHTML = h2;
+      sel2.value = TR.shop;
+      sel2.onchange = function(){ TR.shop = this.value; render(); };
+    }
+    var seg = document.getElementById('trSeg');
+    if(seg){
+      var P = [['7', '近7天'], ['14', '近14天'], ['30', '近30天'], ['month', '本月'], ['lastmonth', '上月'], ['all', '全部']];
+      var h3 = '';
+      for(var p = 0; p < P.length; p++){
+        h3 += '<button type="button" data-p="' + P[p][0] + '" class="' + (TR.preset === P[p][0] ? 'on' : '') + '">' + P[p][1] + '</button>';
+      }
+      h3 += '<button type="button" data-p="custom" class="' + (TR.preset === 'custom' ? 'on' : '') + '">自定义</button>';
+      seg.innerHTML = h3;
+      var bs = seg.querySelectorAll('button');
+      for(var b = 0; b < bs.length; b++){
+        bs[b].onclick = function(){
+          TR.preset = this.getAttribute('data-p');
+          if(TR.preset !== 'custom'){
+            var r = presetRange(TR.preset, TR.anchor);
+            TR.from = r.from; TR.to = r.to;
+          }
+          render();
+        };
+      }
+    }
+    var gs = document.getElementById('trGranSeg');
+    if(gs){
+      gs.innerHTML = '<button type="button" data-g="day" class="' + (TR.gran === 'day' ? 'on' : '') + '">按日</button>'
+                   + '<button type="button" data-g="week" class="' + (TR.gran === 'week' ? 'on' : '') + '">按周</button>';
+      var gb = gs.querySelectorAll('button');
+      for(var q = 0; q < gb.length; q++){
+        gb[q].onclick = function(){ TR.gran = this.getAttribute('data-g'); render(); };
+      }
+    }
+    var fi = document.getElementById('trFrom'), ti = document.getElementById('trTo');
+    if(fi){
+      fi.value = TR.from || '';
+      fi.onchange = function(){ TR.from = this.value; TR.preset = 'custom'; render(); };
+    }
+    if(ti){
+      ti.value = TR.to || '';
+      ti.onchange = function(){ TR.to = this.value; TR.preset = 'custom'; render(); };
+    }
+    var rb = document.getElementById('trReload');
+    if(rb){
+      rb.onclick = function(){
+        window.__v4TrendP = null;
+        this.disabled = true;
+        status('重新载入中…', 'var(--gold)');
+        load(true).then(function(){ render(); });
+      };
+    }
+  }
+
+  // ---------- 图表 ----------
+  function chart(A, st){
+    if(!A.length){
+      return { svg: '<div style="padding:24px 8px;text-align:center;font-size:12px;color:var(--text3)">'
+        + '该区间没有可用数据 —— 换周期或换主播试试'
+        + (st.miss ? '<br>（本区间 ' + st.miss + ' 场缺「主播最终综合评分」，未计入趋势）' : '') + '</div>',
+        hasA: false, hasCal: false };
+    }
+    var W = 760, H = 300, PL = 46, PR = 18, PT = 18, PB = 38;
+    var iw = W - PL - PR, ih = H - PT - PB;
+    var ds = [], vals = [];
+    for(var i = 0; i < A.length; i++){ ds.push(dayNum(A[i].d)); vals.push(A[i].v); }
+    var minD = Math.min.apply(null, ds), maxD = Math.max.apply(null, ds);
+    var spanD = maxD - minD;
+    // 动态 Y 轴（留 6 分余量，按 10 取整；最小跨度 20，避免把噪声放大成过山车）
+    var lo = Math.floor((Math.min.apply(null, vals) - 6) / 10) * 10;
+    var hi = Math.ceil((Math.max.apply(null, vals) + 6) / 10) * 10;
+    lo = Math.max(0, lo); hi = Math.min(100, hi);
+    if(hi - lo < 20) hi = Math.min(100, lo + 20);
+    if(hi - lo < 20) lo = Math.max(0, hi - 20);
+    function X(n){ return spanD ? (PL + (n - minD) / spanD * iw) : (PL + iw / 2); }
+    function Y(v){ return PT + (hi - Math.max(lo, Math.min(hi, v))) / (hi - lo) * ih; }
+    var hasA = false, hasCal = false;
+    var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="auto" style="display:block" font-family="Microsoft YaHei,PingFang SC,sans-serif">';
+    // 网格 + Y 轴刻度
+    var step = (hi - lo) <= 30 ? 10 : ((hi - lo) <= 60 ? 20 : 20);
+    for(var g = lo; g <= hi; g += step){
+      var y = Y(g);
+      s += '<line x1="' + PL + '" y1="' + y.toFixed(1) + '" x2="' + (PL + iw) + '" y2="' + y.toFixed(1) + '" stroke="#eeeae0" stroke-width="1"/>';
+      s += '<text x="' + (PL - 7) + '" y="' + (y + 3.5).toFixed(1) + '" font-size="10" fill="#9a998f" text-anchor="end">' + g + '</text>';
+    }
+    // 90 分（A 线）
+    if(90 > lo && 90 < hi){
+      s += '<line x1="' + PL + '" y1="' + Y(90).toFixed(1) + '" x2="' + (PL + iw) + '" y2="' + Y(90).toFixed(1) + '" stroke="#c9a962" stroke-width="1" stroke-dasharray="2 4" opacity=".75"/>';
+      s += '<text x="' + (PL + iw) + '" y="' + (Y(90) - 4).toFixed(1) + '" font-size="9.5" fill="#b0a488" text-anchor="end">A 线 90</text>';
+      hasA = true;
+    }
+    // X 轴刻度（等距取 6 个）
+    // 刻度按「日期等分」取最近的点：点数等分会造成日期疏密不均、标签挤在一起
+    var tickN = Math.min(6, A.length), usedIdx = {};
+    for(var k = 0; k < tickN; k++){
+      var targetN = spanD ? (minD + Math.round(spanD * k / (tickN - 1 || 1))) : minD;
+      var idx = 0, best = Infinity;
+      for(var t2 = 0; t2 < A.length; t2++){
+        var dd2 = Math.abs(dayNum(A[t2].d) - targetN);
+        if(dd2 < best){ best = dd2; idx = t2; }
+      }
+      if(usedIdx[idx]) continue;
+      usedIdx[idx] = 1;
+      var x = X(dayNum(A[idx].d));
+      var lb = A[idx].d.slice(5);
+      var anch = (k === 0) ? 'start' : (k === tickN - 1 ? 'end' : 'middle');
+      s += '<text x="' + x.toFixed(1) + '" y="' + (H - PB + 17) + '" font-size="10" fill="#9a998f" text-anchor="' + anch + '">' + lb + '</text>';
+    }
+    // 口径变更日竖线
+    var cal = dayNum(CALIBER);
+    if(spanD && cal !== null && cal >= minD && cal <= maxD){
+      var cx = X(cal);
+      s += '<line x1="' + cx.toFixed(1) + '" y1="' + PT + '" x2="' + cx.toFixed(1) + '" y2="' + (PT + ih) + '" stroke="#c0533f" stroke-width="1" stroke-dasharray="3 3" opacity=".55"/>';
+      s += '<text x="' + (cx + 4).toFixed(1) + '" y="' + (PT + 10) + '" font-size="9.5" fill="#c0533f" opacity=".85">口径变更</text>';
+      hasCal = true;
+    }
+    // 区间均分参考线
+    if(st.avg !== null){
+      var ay = Y(st.avg);
+      s += '<line x1="' + PL + '" y1="' + ay.toFixed(1) + '" x2="' + (PL + iw) + '" y2="' + ay.toFixed(1) + '" stroke="#a8873f" stroke-width="1" stroke-dasharray="5 4" opacity=".55"/>';
+      s += '<text x="' + (PL + 3) + '" y="' + (ay - 4).toFixed(1) + '" font-size="9.5" fill="#a8873f" opacity=".9">均分 ' + fmt(st.avg, 1) + '</text>';
+    }
+    // 折线（间隔 > 7 天断开，避免把「没数据」画成「连续」）
+    var seg = '', prev = null, prevN = null;
+    for(var m = 0; m < A.length; m++){
+      var n = dayNum(A[m].d), px = X(n), py = Y(A[m].v);
+      if(prev === null || (prevN !== null && (n - prevN) > 7)) seg += 'M' + px.toFixed(1) + ' ' + py.toFixed(1);
+      else seg += 'L' + px.toFixed(1) + ' ' + py.toFixed(1);
+      prev = 1; prevN = n;
+    }
+    s += '<path d="' + seg + '" fill="none" stroke="#c9a962" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+    // 点位（带原生 tooltip）
+    for(var q = 0; q < A.length; q++){
+      var qx = X(dayNum(A[q].d)), qy = Y(A[q].v), gd = grade(A[q].v);
+      var tip = A[q].d + '  ' + fmt(A[q].v) + ' 分（' + gd + ' 级）' + (A[q].n > 1 ? '｜' + A[q].n + ' 场均分' : '');
+      s += '<circle cx="' + qx.toFixed(1) + '" cy="' + qy.toFixed(1) + '" r="3.2" fill="#fff" stroke="#c9a962" stroke-width="2">'
+        + '<title>' + E(tip) + '</title></circle>';
+    }
+    s += '</svg>';
+    return { svg: s, hasA: hasA, hasCal: hasCal };
+  }
+
+  // ---------- 明细表 ----------
+  function table(list, st){
+    var rows = list.slice().sort(function(a, b){ return a.d < b.d ? 1 : (a.d > b.d ? -1 : 0); });
+    var CAP = 80, shown = rows.slice(0, CAP);
+    var h = '<table class="tr-tbl"><thead><tr>'
+      + '<th>日期</th><th>直播间</th><th>最终综合评分</th><th>等级</th><th>系统分<br><span style="font-weight:400;color:var(--text3)">不计红线</span></th>'
+      + '<th>看板分</th><th>与均分差</th><th>备注</th></tr></thead><tbody>';
+    for(var i = 0; i < shown.length; i++){
+      var x = shown[i];
+      var diff = (x.comp === null || st.avg === null) ? null : (x.comp - st.avg);
+      var dcol = diff === null ? 'var(--text3)' : (diff > 0 ? 'var(--danger)' : (diff < 0 ? 'var(--ok)' : 'var(--text3)'));
+      var note = '';
+      if(x.comp === null) note = '<span class="tr-miss">缺最终分' + (x.live === null ? '（看板分也缺）' : '') + '</span>';
+      else if(x.zero) note = '<span class="tr-zero">红线场次（本场总分按 0 计）</span>';
+      var g2 = grade(x.comp);
+      h += '<tr>'
+        + '<td>' + x.d + '</td>'
+        + '<td>' + E(x.shop || '—') + '</td>'
+        + '<td><b style="color:' + (x.comp === null ? 'var(--text3)' : 'var(--gold)') + '">' + (x.comp === null ? '缺' : fmt(x.comp)) + '</b></td>'
+        + '<td>' + (g2 ? '<span class="tr-badge tr-b' + g2 + '">' + g2 + '</span>' : '—') + '</td>'
+        + '<td>' + (x.sys === null ? '—' : fmt(x.sys, 1)) + '</td>'
+        + '<td>' + (x.live === null ? '—' : fmt(x.live)) + '</td>'
+        + '<td style="color:' + dcol + '">' + (diff === null ? '—' : (diff > 0 ? '+' : '') + diff.toFixed(2)) + '</td>'
+        + '<td style="font-size:11px">' + note + '</td>'
+        + '</tr>';
+    }
+    h += '</tbody></table>';
+    return { html: h, shown: shown.length, total: rows.length };
+  }
+
+  // ---------- 主渲染 ----------
+  function render(){
+    if(off()){
+      var box0 = document.getElementById('page-trend');
+      if(box0) box0.innerHTML = '<div class="panel"><h3>主播趋势</h3><div class="tr-note">已通过 localStorage 开关 <code>v4trend_enabled=0</code> 关闭。清除该键并刷新即恢复。</div></div>';
+      return;
+    }
+    style();
+    var box = document.getElementById('page-trend');
+    if(!box) return;
+    if(!document.getElementById('trStatus')) box.innerHTML = skeleton();
+    var all = points();
+    fillSelects(all);
+    var base = byHostShop(all);
+    TR.anchor = anchorDate(all);
+    // 周期未初始化 ⇒ 默认近 30 天（锚点=数据最新日，不是今天：日报有 1 天滞后）
+    if(TR.preset !== 'custom' && !TR.from){
+      var r0 = presetRange(TR.preset, TR.anchor);
+      TR.from = r0.from; TR.to = r0.to;
+      var fi = document.getElementById('trFrom'), ti = document.getElementById('trTo');
+      if(fi) fi.value = TR.from; if(ti) ti.value = TR.to;
+    }
+    var from = TR.preset === 'custom' ? TR.from : presetRange(TR.preset, TR.anchor).from;
+    var to   = TR.preset === 'custom' ? TR.to   : presetRange(TR.preset, TR.anchor).to;
+    if(TR.preset === 'custom'){ TR.from = TR.from; TR.to = TR.to; }
+    var list = base.filter(function(x){ return inRange(x, from, to); });
+    var A = agg(list);
+    var st = stats(list, A);
+    // 日期框跟随实际生效区间（「全部」时显示数据的起止日），避免出现「选了全部却还显示旧日期框」的错觉
+    if(TR.preset !== 'custom'){
+      var effF = from, effT = to;
+      if(!effF && base.length) effF = base[0].d;
+      if(!effT && base.length) effT = base[base.length - 1].d;
+      var _fi = document.getElementById('trFrom'), _ti = document.getElementById('trTo');
+      if(_fi) _fi.value = effF || '';
+      if(_ti) _ti.value = effT || '';
+    }
+
+    // 概览
+    var kpi = document.getElementById('trKpi');
+    if(kpi){
+      var dir = '—', cls = '';
+      if(st.slope !== null){
+        if(st.slope > 0.15){ dir = '上升'; cls = 'tr-up'; }
+        else if(st.slope < -0.15){ dir = '下降'; cls = 'tr-dn'; }
+        else dir = '平稳';
+      }
+      var deltaTxt = '—', deltaCls = '';
+      if(st.delta !== null){
+        deltaTxt = (st.delta > 0 ? '+' : '') + st.delta.toFixed(2);
+        deltaCls = st.delta > 0 ? 'tr-up' : (st.delta < 0 ? 'tr-dn' : '');
+      }
+      kpi.innerHTML = ''
+        + '<div class="tr-k hero"><div class="l">区间均分</div><div class="v">' + fmt(st.avg) + '</div>'
+        +   '<div class="s">' + (st.avg === null ? '无可用分' : grade(st.avg) + ' 级 · ' + st.nv + ' 场') + '</div></div>'
+        + '<div class="tr-k"><div class="l">环比上一周期</div><div class="v ' + deltaCls + '" style="font-size:16px">' + deltaTxt + '</div>'
+        +   '<div class="s">' + (st.prevRange ? '对比 ' + st.prevRange[0].slice(5) + '~' + st.prevRange[1].slice(5) + '（' + fmt(st.prev) + '）' : '周期为「全部」时无环比') + '</div></div>'
+        + '<div class="tr-k"><div class="l">趋势</div><div class="v ' + cls + '" style="font-size:16px">' + dir + '</div>'
+        +   '<div class="s">' + (st.slope === null ? '点数不足 3 不判' : (st.slope > 0 ? '+' : '') + st.slope.toFixed(2) + ' 分/天') + '</div></div>'
+        + '<div class="tr-k"><div class="l">最高 / 最低</div><div class="v" style="font-size:15px">' + fmt(st.max, 1) + ' / ' + fmt(st.min, 1) + '</div>'
+        +   '<div class="s">单场极值</div></div>'
+        + '<div class="tr-k"><div class="l">波动（标准差）</div><div class="v" style="font-size:16px">' + fmt(st.sd, 2) + '</div>'
+        +   '<div class="s">' + (st.sd === null ? '场次不足' : (st.sd <= 4 ? '很稳定' : (st.sd <= 8 ? '正常波动' : '波动偏大'))) + '</div></div>'
+        + '<div class="tr-k"><div class="l">场次</div><div class="v" style="font-size:16px">' + st.nv + '<span style="font-size:11px;color:var(--text3)">/' + st.n + '</span></div>'
+        +   '<div class="s">' + (st.miss ? st.miss + ' 场缺最终分' : '全覆盖') + '</div></div>';
+    }
+    var kn = document.getElementById('trKpiNote');
+    if(kn){
+      var who = TR.host ? TR.host : '全部主播';
+      var rg = (from || to) ? ((from || '最早') + ' ~ ' + (to || '最新')) : '全部日期';
+      kn.innerHTML = '口径：' + who + '｜' + rg + '｜' + (TR.gran === 'week' ? '按周聚合' : '按日聚合')
+        + (TR.shop ? '｜直播间 ' + E(TR.shop) : '')
+        + '<br>最终综合评分 = 系统分（不计红线）× 40% + 看板分 × 60%，<b>直接取飞书列值</b>，本页不重算；'
+        + '缺任一列则该场不计入趋势（不补 0、不插值）。';
+    }
+
+    // 图
+    var cv = document.getElementById('trChart');
+    var CH = chart(A, st);
+    if(cv) cv.innerHTML = CH.svg;
+    var lg = document.getElementById('trLegend');
+    if(lg){
+      var lh = '<span><i></i>最终综合评分（' + (TR.gran === 'week' ? '周均' : '日均') + '）</span>'
+        + '<span><i style="background:#a8873f;opacity:.6"></i>区间均分</span>';
+      if(CH.hasA) lh += '<span><i style="background:#c9a962;opacity:.9"></i>A 线 90</span>';
+      if(CH.hasCal) lh += '<span><i style="background:#c0533f;opacity:.6"></i>口径变更日 ' + CALIBER + '</span>';
+      lg.innerHTML = lh;
+    }
+    var cn = document.getElementById('trChartNote');
+    if(cn){
+      var gaps = 0;
+      for(var q2 = 1; q2 < A.length; q2++){
+        if((dayNum(A[q2].d) - dayNum(A[q2 - 1].d)) > 7) gaps++;
+      }
+      cn.innerHTML = '· ' + (TR.gran === 'week' ? '按周聚合：落到周一，值为该周所有场次的均分；' : '按日聚合：值为当天所有场次的均分；')
+        + (TR.host ? '' : '当前为「全部主播」，即每天所有主播所有场次的均分，用于看整体水位；')
+        + (gaps ? '折线断开 ' + gaps + ' 处 = 中间有 7 天以上没有数据（不插值连线）；' : '')
+        + '<br>· 原始数据 ' + (TR.rows ? TR.rows.length : 0) + ' 场，最新日期 ' + (TR.anchor || '—')
+        + (TR.anchor && dayNum(TR.anchor) !== null && (dayNum((typeof v4TodayStr === 'function' ? v4TodayStr() : TR.anchor)) - dayNum(TR.anchor)) >= 1
+            ? '（日报综合分有 1 天滞后，当日场次次日 21:30 补算后才出现）' : '')
+        + '<br>· <b>跨 ' + CALIBER + ' 的分数不可直接纵向比较</b>：该日起权重按业务 10 项对齐（v4.11.60），系统分换了一把尺子。'
+        + '<br>· 回退：localStorage <code>v4trend_enabled=0</code> 关闭本页。';
+    }
+
+    // 表
+    var tb = document.getElementById('trTable');
+    var tinfo = tb ? table(list, st) : null;
+    if(tb) tb.innerHTML = tinfo.html;
+    var tn = document.getElementById('trTableNote');
+    if(tn){
+      tn.innerHTML = tinfo.total
+        ? ('共 ' + tinfo.total + ' 场' + (tinfo.total > tinfo.shown ? '，仅显示最近 ' + tinfo.shown + ' 场' : '')
+           + '｜「与均分差」= 该场 − 区间均分，红色高于均分、绿色低于均分（与股市红涨绿跌一致）')
+        : '该区间没有场次。';
+    }
+    if(TR.err) status('⚠ ' + TR.err + '（已尝试全部端点）', 'var(--danger)');
+    else if(TR.rows) status('数据 ' + TR.rows.length + ' 场 · 最新 ' + (TR.anchor || '—') + ' · 内存缓存 3 分钟', 'var(--text3)');
+  }
+
+  function boot(){
+    if(!document.getElementById('page-trend')) return;
+    if(!document.getElementById('trStatus')){
+      var box = document.getElementById('page-trend');
+      if(box) box.innerHTML = skeleton();
+      style();
+    }
+    render();                                    // 先用已有数据（若有）立刻出骨架
+    if(!TR.rows || (Date.now() - TR.at) > CACHE_MS){
+      load(false).then(function(){ render(); });
+    }
+  }
+
+  // 公开入口（验证脚本只走这里，不碰 IIFE 私有）
+  window.v4TrendBoot = boot;
+  window.v4Trend = {
+    version: VER,
+    state: TR,
+    caliber: CALIBER,
+    mount: boot,
+    build: function(rows){
+      TR.rows = rows; TR.at = Date.now();
+      var p = points();
+      return { points: p.length, hosts: (function(){ var m = {}; p.forEach(function(x){ m[x.host] = 1; }); return Object.keys(m).length; })() };
+    },
+    set: function(o){
+      o = o || {};
+      if('host' in o) TR.host = o.host || '';
+      if('shop' in o) TR.shop = o.shop || '';
+      if('gran' in o) TR.gran = o.gran || 'day';
+      if('preset' in o) TR.preset = o.preset || '30';
+      if('from' in o) TR.from = o.from || '';
+      if('to' in o) TR.to = o.to || '';
+      return TR;
+    },
+    series: function(){
+      var all = points(), base = byHostShop(all);
+      var from = TR.preset === 'custom' ? TR.from : presetRange(TR.preset, anchorDate(all)).from;
+      var to   = TR.preset === 'custom' ? TR.to   : presetRange(TR.preset, anchorDate(all)).to;
+      var list = base.filter(function(x){ return inRange(x, from, to); });
+      var A = agg(list);
+      return { from: from, to: to, sessions: list.length, points: A.length,
+               agg: A, stats: stats(list, A), pts: list };
+    }
+  };
+  try{ console.log('[v4.11.61] 主播趋势页已装载（数据源：飞书日报「主播最终综合评分」）'); }catch(e){}
+
+  // 🔴 直接以 #/trend 打开时，v4Navigate() 在本文件**更早**的位置就已执行过，那时本模块尚未定义
+  //   （异常被 v4Navigate 的 try/catch 静默吞掉，页面只剩 index.html 里的静态占位「载入中…」）。
+  //   因此这里必须自己补一次挂载 —— 否则「点导航进入」能出图、「直接打开链接」白页。
+  try{
+    if(String(location.hash || '').indexOf('/trend') >= 0) setTimeout(boot, 0);
+  }catch(e){}
 })();
