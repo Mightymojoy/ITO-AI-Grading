@@ -559,6 +559,15 @@ function runGrading(segs, productKey){
   // 3.1 逐能力逐子标准（V2 能力矩阵 c1-c8）
   var moduleResults = [];
   var order = ['c1','c2','c3','c4','c5','c6','c7','c8'];
+  // v4.11.60 权重基数：原为硬编码 /100；standard.js v3.0 起 c6（业务 10 分）因缺顾客会话边界
+  // 暂挂起，可计分权重合计 90。改为按「可计分权重求和」归一 ⇒ 满分恒为 100，
+  // 业务补回 c6 后 W_SUM 自动变 100，本处无需再改。业务口径：主播直播业务管理标准V2 G6:G15。
+  var W_SUM = 0;
+  for(var wi=0; wi<order.length; wi++){
+    var wmod = STD.modules[order[wi]];
+    if(wmod && wmod.weight > 0) W_SUM += wmod.weight;
+  }
+  if(!(W_SUM > 0)) W_SUM = 100;
   for(var mi=0; mi<order.length; mi++){
     var mk = order[mi];
     var mod = STD.modules[mk];
@@ -576,13 +585,13 @@ function runGrading(segs, productKey){
       stdRes.push({id:s.id, name:s.name, desc:s.desc, complete:cRes, quality:qRes, score:score});
     }
     var modScore = stdRes.length ? Math.round(sum / stdRes.length) : 0;
-    moduleResults.push({key:mk, name:mod.name, weight:mod.weight, analyze:!!mod.analyze, score:modScore, weighted: mod.weight>0 ? Math.round(modScore*mod.weight/100*10)/10 : null, standards:stdRes});
+    moduleResults.push({key:mk, name:mod.name, weight:mod.weight, analyze:!!mod.analyze, score:modScore, weighted: mod.weight>0 ? Math.round(modScore*mod.weight/W_SUM*10)/10 : null, standards:stdRes});
   }
 
   // 3.2 总分 + 等级（只计权重>0 的能力）
   var total = 0;
   for(var i=0;i<moduleResults.length;i++){
-    if(moduleResults[i].weight > 0) total += moduleResults[i].score * moduleResults[i].weight / 100;
+    if(moduleResults[i].weight > 0) total += moduleResults[i].score * moduleResults[i].weight / W_SUM;
   }
   // baseline 信息准确性红旗扣分：每处错误 -4 分（人工将信息准确性作为重扣项），封顶 -12
   var blPenalty = Math.min(12, bl.errors * 4);
@@ -716,6 +725,15 @@ function gradeWindow(segs, productKey){
   // 八维计分（与 runGrading 3.1 同逻辑；无 baseline 扣分）
   var moduleResults = [];
   var order = ['c1','c2','c3','c4','c5','c6','c7','c8'];
+  // v4.11.60（同 runGrading） 权重基数：原为硬编码 /100；standard.js v3.0 起 c6（业务 10 分）因缺顾客会话边界
+  // 暂挂起，可计分权重合计 90。改为按「可计分权重求和」归一 ⇒ 满分恒为 100，
+  // 业务补回 c6 后 W_SUM 自动变 100，本处无需再改。业务口径：主播直播业务管理标准V2 G6:G15。
+  var W_SUM = 0;
+  for(var wi=0; wi<order.length; wi++){
+    var wmod = STD.modules[order[wi]];
+    if(wmod && wmod.weight > 0) W_SUM += wmod.weight;
+  }
+  if(!(W_SUM > 0)) W_SUM = 100;
   for(var mi=0; mi<order.length; mi++){
     var mk = order[mi];
     var mod = STD.modules[mk];
@@ -732,10 +750,10 @@ function gradeWindow(segs, productKey){
       stdRes.push({id:s.id, name:s.name, desc:s.desc, complete:cRes, quality:qRes, score:score});
     }
     var modScore = stdRes.length ? Math.round(sum / stdRes.length) : 0;
-    moduleResults.push({key:mk, name:mod.name, weight:mod.weight, score:modScore, weighted: mod.weight>0 ? Math.round(modScore*mod.weight/100*10)/10 : null, standards:stdRes});
+    moduleResults.push({key:mk, name:mod.name, weight:mod.weight, score:modScore, weighted: mod.weight>0 ? Math.round(modScore*mod.weight/W_SUM*10)/10 : null, standards:stdRes});
   }
   var total = 0;
-  for(var i=0;i<moduleResults.length;i++){ if(moduleResults[i].weight>0) total += moduleResults[i].score * moduleResults[i].weight / 100; }
+  for(var i=0;i<moduleResults.length;i++){ if(moduleResults[i].weight>0) total += moduleResults[i].score * moduleResults[i].weight / W_SUM; }
   total = Math.round(total*10)/10;
   var grade = 'E';
   for(var g=0;g<STD.grades.length;g++){ if(total >= STD.grades[g].min){ grade = STD.grades[g].name; break; } }

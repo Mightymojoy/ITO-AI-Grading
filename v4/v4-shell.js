@@ -12,11 +12,16 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.58';
+var V4_VERSION = 'v4.11.60';
 // v4.11.36：存档格式版本 ≠ 壳层版本。rawV 只在「rawTotal/rawPen/rawBlk 这套字段的形态真变」时才动，
 //   **不跟 V4_VERSION 走**（否则每次改样式/改文案都要假装改了存档格式，溯源反而失真）。
 //   ⚠️ 渲染侧从不读 rawV（write-only 溯源标记）；断言请读本常量，别跟 V4_VERSION 比。
 var V4RAW_FMT = '4.11.35';
+// v4.11.60：权重口径标记 —— 分数结构变了，历史趋势不能直接连（total 的可比性断档）。
+//   'v3.0/90' = standard.js v3.0 权重（业务管理标准V2 十项对齐，c6 挂起，按 90 归一到 100）。
+//   老存档无 wbasisV 字段 ⇒ 一律视为旧口径（standard v2.x / 基数十 100）。
+//   ⚠️ 与 rawV/redlineV 同理：write-only 溯源标记，渲染侧不读它做计算。
+var V4WBASIS = 'v3.0/90';
 (function(){
   function paint(){
     ['pageBadge', 'brandVer', 'footVer'].forEach(function(id){
@@ -1071,6 +1076,7 @@ function v4DetailSnapshot(r, ts){
           rawV:     _raw ? V4RAW_FMT : null,
           rawPen:   _rawPen,
           rawBlk:   (_raw && _raw.exact) ? _blErr : null,
+          wbasisV:  V4WBASIS,   // v4.11.60 权重口径（老存档无此字段 = 旧口径）
           fullDaily:r.fullDaily ? JSON.parse(JSON.stringify(r.fullDaily,function(k,v){return k==='repB64'?undefined:v;})) : null};
 }
 // 落库（在 v4.3 链 orig push 摘要后调用；同 r 对象只存一次，防 renderResult 重入重复）
@@ -7033,4 +7039,199 @@ document.addEventListener('DOMContentLoaded', function(){
     }
   };
   LOG('品类门控已装载（开关 v4cat_enabled）');
+})();
+
+// =====================================================
+// v4.11.59 · V2 六步讲品顺序严格评判（接管 c2.1 逻辑组织）
+// 依据：《直播间产品信息汇总V2》R7「讲解顺序」——8 个在册品该行内容完全一致：
+//   1 讲产品定位关键词 → 2 讲情绪卖点(种草颜值) → 3 讲功能卖点(不分先后)
+//   → 4 简洁总结核心卖点(情绪+功能) → 5 介绍颜色尺寸+促单
+//   → 6 公司/评价/回头客背书+共情话术+再次促单
+// 为什么放在壳层：STEP_WORDS 与 evalComplete 都定义在 v4/app-core.js，
+//   铁律「默认不动 app-core.js」⇒ 两者都是顶层声明（挂在 window 上），壳层可安全接管：
+//   ① 扩展 window.STEP_WORDS 的六步键（保证即使包装失效，原逻辑也不至于整步恒不可达）
+//   ② 包装 window.evalComplete：带 v4step6 标记的规则（c2.1）改走六步引擎
+// 判定口径（严格执行）：
+//   步命中 = 该步的词表在话术里出现（第 1~3 步用本品 R5/R6 词；第 4 步需总结信号词；
+//            第 5/6 步需两组条件同时满足，允许相邻段）
+//   顺序 = 把六步的命中段落位置展开成点，求「步序递增且位置递增」的最长链
+//          ⇒ 多轮循环讲解（同一场讲 2~3 轮）不会被误判成乱序
+//   等级 = 完整有序链 6/6 → 满；命中 ≥5 步 → 半；否则 0
+// 回退阀：localStorage.v4step6_enabled = '0' 后刷新页面 → 完全不接管，恢复旧五步口径
+// =====================================================
+(function(){
+  var LOGP = '[step6]';
+  function log(){ try{ console.log.apply(console, [LOGP].concat([].slice.call(arguments))); }catch(e){} }
+  var ON = true;
+  try{ ON = (localStorage.getItem('v4step6_enabled') !== '0'); }catch(e){}
+  if(!ON){ log('已按 v4step6_enabled=0 关闭，c2.1 恢复旧五步口径'); return; }
+  // 注意：v3/standard.js 用的是顶层 const GRADING_STANDARD，const/let 不挂 window，
+  // 直接 window.GRADING_STANDARD 会拿到 undefined ⇒ 用 typeof 兼容两种声明方式。
+  var STD = (typeof GRADING_STANDARD !== 'undefined') ? GRADING_STANDARD : window.GRADING_STANDARD;
+  var V2S = (STD && STD.v2step) || null;
+  if(!V2S || !V2S.order || V2S.order.length !== 6){
+    log('标准库缺少 v2step（需 standard.js v2.4+），跳过接管');
+    return;
+  }
+  if(window.__v4step6_wrapped){ log('已接管过，跳过重复包装'); return; }
+  var origEval = window.evalComplete;
+  if(typeof origEval !== 'function'){ log('window.evalComplete 不可用，跳过接管'); return; }
+
+  var ORDER = V2S.order.slice();
+  var ANYRE = /[*+?^${}()|[\]\\.]/;
+
+  function isRegexWord(w){ return ANYRE.test(String(w)); }
+  // 该词命中的段索引（升序）
+  function hitIdx(segs, w){
+    var out = [], re = null, low = String(w).toLowerCase();
+    if(isRegexWord(w)){ try{ re = new RegExp(w, 'i'); }catch(e){ return out; } }
+    for(var i=0;i<segs.length;i++){
+      var t = String((segs[i] && segs[i].text) || '');
+      if(!t) continue;
+      if(re){ if(re.test(t)) out.push(i); }
+      else if(t.toLowerCase().indexOf(low) >= 0) out.push(i);
+    }
+    return out;
+  }
+  // 一组词命中的段集合（对象当 set 用）
+  function groupSet(segs, words){
+    var s = {};
+    for(var i=0;i<words.length;i++){
+      var ii = hitIdx(segs, words[i]);
+      for(var k=0;k<ii.length;k++) s[ii[k]] = 1;
+    }
+    return s;
+  }
+  function expand1(set, n){
+    var out = {};
+    for(var k in set){
+      if(!set.hasOwnProperty(k)) continue;
+      var i = parseInt(k, 10);
+      for(var d=-1; d<=1; d++){
+        var j = i + d;
+        if(j >= 0 && j < n) out[j] = 1;
+      }
+    }
+    return out;
+  }
+  // 某步骤的最终命中段索引
+  function stepIdx(segs, step, pk){
+    var W = (V2S.words && V2S.words[step]) || null;
+    var P = (V2S.prod && V2S.prod[pk]) || null;
+    var prodWords = null;
+    if(P){
+      if(step === '定位关键词') prodWords = P.pos;
+      else if(step === '情绪卖点') prodWords = P.emo;
+      else if(step === '功能卖点') prodWords = P.func;
+    }
+    var groups = [];
+    if(prodWords && prodWords.length){
+      // 严格按表：该品有 V2 R5/R6 词就只用产品词，通用词不再兜底放宽
+      groups = [prodWords.slice()];
+    } else if(W && W.all && W.all.length){
+      groups = W.all.map(function(g){ return g.slice(); });
+    } else if(W && W.length){
+      groups = [W.slice()];
+    }
+    if(!groups.length) return [];
+    var n = segs.length, per = [];
+    for(var g=0; g<groups.length; g++){
+      var st = groupSet(segs, groups[g]);
+      per.push(groups.length > 1 ? expand1(st, n) : st);
+    }
+    var out = [];
+    for(var i=0;i<n;i++){
+      var ok = true;
+      for(var g2=0; g2<per.length; g2++){ if(!per[g2][i]){ ok = false; break; } }
+      if(ok) out.push(i);
+    }
+    return out;
+  }
+  // 最长「步序递增 + 段位递增」链（二维 LIS，点数很小，O(N^2) 足够）
+  function maxChain(sets){
+    var pts = [], k, i, j;
+    for(k=0;k<sets.length;k++) for(i=0;i<sets[k].length;i++) pts.push({s:k, p:sets[k][i]});
+    if(!pts.length) return 0;
+    pts.sort(function(a,b){ return (a.s-b.s) || (a.p-b.p); });
+    var dp = new Array(pts.length), best = 0;
+    for(i=0;i<pts.length;i++){
+      dp[i] = 1;
+      for(j=0;j<i;j++){
+        if(pts[j].s < pts[i].s && pts[j].p <= pts[i].p && dp[j]+1 > dp[i]) dp[i] = dp[j]+1;
+      }
+      if(dp[i] > best) best = dp[i];
+    }
+    return best;
+  }
+  function evalStep6(segs, pk, ctx){
+    segs = segs || [];
+    pk = pk || '';
+    var sets = [], hitSteps = [], missSteps = [], hits = [];
+    for(var k=0;k<ORDER.length;k++){
+      var step = ORDER[k];
+      var idx = stepIdx(segs, step, pk);
+      sets.push(idx);
+      if(idx.length){
+        hitSteps.push(step);
+        var seg0 = segs[idx[0]] || {};
+        hits.push({
+          kw: step,
+          ts: seg0.ts || '',
+          ctx: '第' + (k+1) + '步「' + step + '」：' + String(seg0.text || '').slice(0, 60)
+        });
+      } else {
+        missSteps.push('未命中步骤：' + step);
+      }
+    }
+    var chain = maxChain(sets);
+    var n = hitSteps.length;
+    var level = (chain === ORDER.length) ? 1 : (n >= 5 ? 0.5 : 0);
+    if(ctx){
+      ctx.stepAll = (n === ORDER.length);
+      ctx.stepOrdered = (chain === ORDER.length);
+      ctx.step6 = {hit: n, chain: chain, steps: hitSteps, miss: missSteps, level: level};
+    }
+    var detail = 'V2 六步命中 ' + n + '/' + ORDER.length + ' 步，最长有序链 ' + chain + '/' + ORDER.length +
+                 '（' + (hitSteps.join('→') || '无') + '）';
+    return {level: level, detail: detail, hits: hits, misses: missSteps};
+  }
+
+  window.evalComplete = function(rule, segs, ctx){
+    if(rule && rule.v4step6){ return evalStep6(segs, (ctx || {}).productKey, ctx); }
+    return origEval.apply(this, arguments);
+  };
+  window.__v4step6_wrapped = 1;
+
+  // 兜底：把六步键写进 STEP_WORDS（万一包装被其他壳层覆盖，原逻辑仍可命中而不是恒空）
+  try{
+    var SW = window.STEP_WORDS;
+    if(SW){
+      for(var si=0; si<ORDER.length; si++){
+        var nm = ORDER[si];
+        if(SW[nm] && SW[nm].length) continue;
+        var W = (V2S.words && V2S.words[nm]) || null;
+        var flat = [];
+        if(W && W.all && W.all.length){ for(var g=0; g<W.all.length; g++) flat = flat.concat(W.all[g]); }
+        else if(W && W.length) flat = W.slice();
+        SW[nm] = flat;
+      }
+    }
+  }catch(e){}
+
+  // 自检入口（验证脚本只走公开入口，不碰 IIFE 私有）
+  window.v4Step6 = {
+    version: V4_VERSION,
+    on: true,
+    order: ORDER.slice(),
+    eval: function(segs, productKey){ return evalStep6(segs || [], productKey || '', null); },
+    run: function(segs, productKey){
+      var ctx = {productKey: productKey || '', raw: ''};
+      var r = evalStep6(segs || [], productKey || '', ctx);
+      r.stepAll = ctx.stepAll;
+      r.stepOrdered = ctx.stepOrdered;
+      r.brief = ctx.step6;
+      return r;
+    }
+  };
+  log('V2 六步引擎已装载（开关 v4step6_enabled，标准库 ' + (STD.version || '?') + '）');
 })();
