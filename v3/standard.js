@@ -6,11 +6,12 @@
 // 分析：需求识别 / 临场反应 / 转化引导（权重0，只分析不计分，同分仲裁用）
 // 评分法：完成度(0/0.5/1) × 质量(1-5) × 20 = 单项分；能力分=子项平均；总分=Σ(能力分×权重)
 // 证据：无原文证据→完成度记0；证据带时间戳；SRT 转写异常不判主播口误
-// 版本：v2.1（2026-08-19）｜ 原六大模块数据标注 legacy 保留参考
+// 版本：v2.3（2026-11-04）产品硬参数按《直播间产品信息汇总V2》校正
+// v2.2（2026-10-27）新增 cat/sub 品类门控｜v2.1（2026-08-19）原始版本｜原六大模块数据标注 legacy 保留参考
 // =====================================================
 
 const GRADING_STANDARD = {
-  version: 'v2.2',
+  version: 'v2.3',
   meta: {
     name: '主播能力矩阵（V2 日报标准）',
     scoring: '完成度(0/0.5/1) × 质量(1-5) × 20 = 单项分；能力分 = 子项平均；总分 = Σ(能力分×权重%)',
@@ -289,14 +290,14 @@ const GRADING_STANDARD = {
 
   baseline: {
     facts: [
-      { id: 'F1', field: '明星同款姓名', standard: '袁泉', wrong: ['袁晨'], note: '开场即错更严重；正确为"袁泉同款"' },
+      { id: 'F1', field: '明星同款姓名', standard: '袁泉', wrong: ['袁晨'], note: '开场即错更严重。V2 口径（2026-11-04）：PISTACHIO 一代 / P PLUS / TRUFFLE PRO 双品＝袁泉同款；PISTACHIO 2 与 TRUFFLE BACKPACK 2 仅称"明星同款"不点名；GINKGO 4 无明星背书（红点设计奖）；MYCENA LITE＝卢昱晓同款（判据在本品 baselineFacts）。本行只查「袁晨」错词，不判"未讲明星"；包袋场次按品类门控跳过本行。' },
       { id: 'F2', field: '设计师姓名', standard: '刘知礼（爱马仕"上下"设计师）', wrong: ['刘振林', '刘志丽'], note: '姓名不能错' },
       // 口径（2026-09-23 老大定）：提到「科思创」或「四层PC」任一即算通过。
       // 原 wrong ['德国巴尔','巴尔'] 已移除 —— 55 场真实语料实测 3 场误判，全部是 ASR 把
       // 「德国拜耳」误转成「德国巴尔」（拜耳=科思创母品牌，主播说法本身无错），
       // 已在 asrFix 补纠正让报告证据文本可读。属转写误差，不作为判错依据。
       { id: 'F3', field: 'PC 材质品牌', standard: '德国进口科思创 / 100%全新四层PC（wave 3 层）', wrong: [], note: '口径：提到「科思创」或「四层PC」任一即算通过（2026-09-23 老大定）' },
-      { id: 'F4', field: '售后权益', standard: '360天内功能性损坏直接换新、只换不修；超360天五年免费维修（ginkgo 720天）', wrong: ['一次只换不修', '只换不修一次'], note: '"一次"限制会改变权益理解，高风险' },
+      { id: 'F4', field: '售后权益', standard: '360天内功能性损坏直接换新、只换不修；超360天五年免费维修（GINKGO 4 为720天无忧换新、十年以内免费维修）', wrong: ['一次只换不修', '只换不修一次'], note: '2026-11-04 按 V2 校正：仅 GINKGO 4 升级为720天/十年，其余7品360天/五年。本行只判「一次」限制类错误表述；「一年保修／30天换新」等错词由包袋本品 baselineFacts 的 B6 承担，行李箱侧暂未覆盖（不改判据，避免比价话术误伤）。' },
       { id: 'F5', field: '20寸适用天数', standard: '3-5天', wrong: ['1到5天', '2到5天', '1-5天', '2-5天'] },
       { id: 'F6', field: '25寸适用天数', standard: '7-14天', wrong: ['7到15天', '15天16天', '7-15天'] },
       // 口径（2026-09-23 老大定）：提到 一周／7天／7天以上／10天／半个月／15天以上／两周／一个月 任一即算通过。
@@ -307,7 +308,7 @@ const GRADING_STANDARD = {
       { id: 'F8', field: '材质自行延展', standard: '以官方资料为准（勿自行延展）', wrong: ['防弹玻璃', '飞机窗', '悬窗玻璃'], note: '未收录口径不判对错，"防弹/飞机窗"类自行延展标记风险' },
       { id: 'F9', field: '内里抗菌率', standard: '7A级长效抗菌里布，30次水洗后细菌杀灭率高达99%', wrong: [], numCheck: { bad: ['90%', '98%', '95%', '80%'], ctx: '抗菌|抑菌|杀灭|细菌' }, note: '数值口径不可自由发挥' },
       { id: 'F10', field: '拉杆间隙', standard: '摇晃度控制在 1.2cm 以内', wrong: [], numCheck: { bad: ['1厘米', '1cm', '1.5厘米', '1.5cm', '0.5厘米'], ctx: '间隙|摇晃|晃动|拉杆' }, note: '拉杆硬参数红线' },
-      { id: 'F11', field: '拉杆材质', standard: '5系铝合金（壁厚1mm，三段式，离地105cm）', wrong: ['6系', '6系铝', '7系', '4系'], note: '拉杆硬参数红线：5系铝合金' }
+      { id: 'F11', field: '拉杆材质', standard: '5系铝合金（壁厚1mm，三段式，离地105cm）；例外：PISTACHIO 2 限定色、PISTACHIO PLUS 为6系铝合金', wrong: ['7系', '7系铝', '4系', '4系铝'], note: '拉杆硬参数红线（2026-11-04 按产品信息汇总V2 校正）：全局只判 7系/4系 为错；「6系」不再是全局错误词—— V2 明写 P2 限定色与 P PLUS 合法用6系。PISTACHIO 一代 / GINKGO 4 仍为5系，这两品的「6系」误判由本品 baselineFacts（field=拉杆材质-本品）承担。' }
     ],
     sizeDays: { '20寸': '3-5天', '22寸': '3-5天', '25寸': '7-14天', '26寸': '7-14天', '29寸': '半个月以上/家庭', '30寸': '半个月以上/家庭' }
   },
@@ -340,6 +341,9 @@ const GRADING_STANDARD = {
     },
     pistachio_1: {
       name: 'PISTACHIO 一代（开心果1）',
+      baselineFacts: [
+        { id: 'L1', field: '拉杆材质-本品', standard: '5系铝合金（壁厚1mm）', wrong: ['6系', '6系铝'], note: 'V2《产品信息汇总V2》E11：PISTACHIO 五五开／TRUNK 拉杆均为5系；全局 F11 已收窄不再判6系，故本品单独判' }
+      ],
       list: [
         { name: '袁泉同款/经典款', keywords: ['袁泉', '经典款', '同款', '一代'] },
         { name: '大方得体、经典耐看', keywords: ['大方', '经典', '耐看', '简约', '低调', '长期主义'] },
@@ -352,6 +356,9 @@ const GRADING_STANDARD = {
     },
     ginkgo4: {
       name: 'GINKGO 4（银杏4）',
+      baselineFacts: [
+        { id: 'L1', field: '拉杆材质-本品', standard: '5系铝合金（壁厚1mm）', wrong: ['6系', '6系铝'], note: 'V2 G11：GINKGO 4 拉杆为5系；本品另有牛皮提手／PEBBLE旋转圆锁／极窄铝框／720天-十年售后，与全局行李箱口径不同，详见《系统实现对照》' }
+      ],
       list: [
         { name: '红点设计奖/明星款', keywords: ['红点', '设计奖', '明星', '原创'] },
         { name: 'PEBBLE旋转圆锁', keywords: ['旋转圆锁', 'PEBBLE', '圆锁', '海关锁', '仪式感'] },
@@ -449,6 +456,26 @@ const GRADING_STANDARD = {
         { name: '售后（无忧换新）', keywords: ['无忧', '换新', '售后', '360天'] }
       ]
     },
+    mycena_lite_backpack: {
+      name: 'MYCENA LITE BACKPACK（小伞菌折叠双肩包）',
+      knowledge: ['15L', '0.32', '590', 'cordura', 'naturalle', '三防', '折叠', '三种背负', '14寸', '抗菌', '卢昱晓'],
+      baselineFacts: [
+        { id: 'L1', field: '包身面料', standard: 'CORDURA® Naturalle；DAIKIN三防处理（防水/防油/防污）', wrong: ['普通尼龙', '涤纶', '棉布', '帆布'], note: 'V2 K11' },
+        { id: 'L2', field: '容量与电脑仓', standard: '15L，可放14寸笔记本', wrong: ['18L', '18升', '20L', '20升', '可放16寸', '放不了电脑'], note: '同系列 TOTE 为16L/18L，勿混' },
+        { id: 'L3', field: '明星同款姓名', standard: '卢昱晓同款', wrong: ['袁泉', '袁晨'], note: 'V2 K6 明写卢昱晓；全局 F1 是行李箱口径（袁泉），包袋场次已跳过全局' },
+        { id: 'L4', field: '售后权益', standard: '360天无忧换新、五年免费维修', wrong: ['30天换新', '一年保修', '只修不换'], note: 'V2 K12' }
+      ],
+      list: [
+        { name: '卢昱晓同款', keywords: ['卢昱晓', '明星同款'] },
+        { name: 'CORDURA面料坚韧耐用', keywords: ['cordura', 'naturalle', '耐磨', '坚韧', '耐用'] },
+        { name: 'DAIKIN三防免打理', keywords: ['三防', '防水', '防油', '防污', '免打理'] },
+        { name: '重量轻容量大、折叠省空间', keywords: ['0.32', '15L', '轻', '折叠', '省空间', '无压力'] },
+        { name: '抗菌里衬+分区快取', keywords: ['抗菌', '7A', '分区', '快取', '翻找', '里衬'] },
+        { name: '三种背负方式', keywords: ['三种', '背负', '单肩', '手提', '切换', '背法'] },
+        { name: '售后保障（360天/5年）', keywords: ['360天', '换新', '五年', '维修', '售后'] }
+      ]
+    },
+
     porcini_tote: {
       name: 'porcini 托特包（云端商务家）',
       knowledge: ['刘知礼', '爱马仕', '16L', '20L', '1.1', '1.2', '精仿羊毛', '牛皮', 'teflon', '防水', '防油', '电脑仓', '快取', '1890', '2190'],
@@ -530,6 +557,7 @@ const GRADING_STANDARD = {
     truffle_pro_tote: { name: 'TRUFFLE PRO TOTE（托特包）', sellKey: 'truffle_pro_tote', cat: 'bag', sub: 'tote', aliases: ['truffle pro tote', 'truffle pro 托特', 'pro tote', 'truffle pro'] },
     truffle_pro_backpack: { name: 'TRUFFLE PRO BACKPACK（双肩包）', sellKey: 'truffle_pro_backpack', cat: 'bag', sub: 'backpack', aliases: ['truffle pro backpack', 'truffle pro 双肩包', 'pro backpack', 'truffle pro', 'PACK', 'pack'] },
     mycena_tote: { name: 'MYCENA TOTE（托特包）', sellKey: 'mycena_tote', cat: 'bag', sub: 'tote', aliases: ['mycena tote', 'mycena托特', 'mycena tote 托特'] },
+    mycena_lite_backpack: { name: 'MYCENA LITE BACKPACK（小伞菌折叠双肩包）', sellKey: 'mycena_lite_backpack', cat: 'bag', sub: 'backpack', aliases: ['mycena lite', 'mycena lite backpack', '小伞菌', '小伞菌折叠背包', '折叠背包', 'lite backpack', 'mycena cordura'] },
     porcini_tote: { name: 'porcini 托特包（云端商务家）', sellKey: 'porcini_tote', cat: 'bag', sub: 'tote', aliases: ['porcini托特', 'porcini 托特', 'porcini tote'] },
     porcini_backpack: { name: 'porcini 双肩包（云端商务家）', sellKey: 'porcini_backpack', cat: 'bag', sub: 'backpack', aliases: ['porcini双肩', 'porcini 双肩包', 'porcini backpack', 'porcini双肩包'] }
   },
@@ -542,6 +570,7 @@ const GRADING_STANDARD = {
     truffle_pro_tote: ['pro tote', 'truffle pro tote', 'pro 托特'],
     truffle_pro_backpack: ['pro backpack', 'pro 双肩包', '扩容'],
     mycena_tote: ['mycena tote', 'mycena托特', '0.42', '像空气一样轻'],
+    mycena_lite_backpack: ['mycena lite', '小伞菌', '折叠', '0.32', '590', '三种背负', 'cordura naturalle'],
     porcini_tote: ['porcini托特', 'porcini 托特', '去班味', '雨伞仓'],
     porcini_backpack: ['porcini双肩', 'porcini 双肩包', '公文包', '系带']
   },
