@@ -74,14 +74,41 @@ async function getToken(){
   return tokenCache;
 }
 
+// v4.11.63（2026-11-09）：两个致命缺陷一起修。
+// ① 【只拉 200 行且不翻页】原实现 page_size=200、只取第一页。
+//    实测 2026-11-09：历史评分表已 **703 行**，本函数只看得见**前 200 行（最老的）**，
+//    而历史评分的新记录**追加在尾部** ⇒ findRecordsByHostDate 永远匹配不到旧行
+//    ⇒ upsert 的「先删旧行」环节**从未生效过** ⇒ 每评一次多一条。
+//    证据：该表 703 行里只有 560 个唯一（主播+日期）组合，重复 69 组、多出 143 行，
+//      最严重的「曲姝锜 2026-08-19」达 24 条、「张天翊 2026-11-01」6 条、「刘旭 2026-10-14」6 条。
+//    决定性对照：同一套去重逻辑在 api/feishu-fill.js 已于 v4.11.47 改成全量分页，
+//      所以**主播日报表 0 重复**；本文件漏改 —— 同一动作多入口，每个入口都要单独修。
+// ② 【失败被伪装成「没有旧行」】原实现 r.code!==0 时 `return []`，于是飞书报错 / 限流 /
+//    表 ID 配错，都会被当成「查无旧记录」然后照常 create ⇒ 错误被静默吞掉、脏数据照写。
+//    改为**抛错**：宁可在写入前失败并让前端看到原因，也不要悄悄堆重复行。
+//    唯一例外：tableId 为空 ⇒ 返回 []，因为各调用方（upsertHistory / syncRecord）本就有
+//      `if(!tableId) return {skipped:true}` 守卫，这里保持「空表 = 空结果」的旧语义。
 async function listRecords(token, tableId){
-  const r = await httpsJson({
-    hostname:'open.feishu.cn',
-    path:'/open-apis/bitable/v1/apps/'+BASE_TOKEN+'/tables/'+tableId+'/records?page_size=200',
-    method:'GET', headers:{'Authorization':'Bearer '+token}
-  });
-  if(r.code !== 0) return [];
-  return r.data.items || [];
+  if(!tableId) return [];
+  const all = [];
+  let pageToken = '';
+  for(let guard = 0; guard < 40; guard++){          // 40×500 = 2 万条，足够且防死循环
+    const q = '/open-apis/bitable/v1/apps/'+BASE_TOKEN+'/tables/'+tableId
+            + '/records?page_size=500' + (pageToken ? '&page_token='+encodeURIComponent(pageToken) : '');
+    const r = await httpsJson({
+      hostname:'open.feishu.cn', path:q,
+      method:'GET', headers:{'Authorization':'Bearer '+token}
+    });
+    if(r.code !== 0){
+      throw new Error('拉取记录失败（table=' + tableId + '）: ' + (r.msg || '') + ' code=' + r.code);
+    }
+    const d = r.data || {};
+    all.push.apply(all, d.items || []);
+    if(!d.has_more) break;
+    pageToken = d.page_token || '';
+    if(!pageToken) break;
+  }
+  return all;
 }
 
 async function createRecord(token, tableId, fields){
@@ -223,9 +250,17 @@ module.exports = async function handler(req, res){
     }
 
     // 历史评分（v4.11.8 强一致：同一 主播+日期 只保留 1 条最新 —— 先删旧再新建）
+    // ⚠️ v4.11.63：`listRecords` 改为「失败抛错」后，这里必须就地兜住 ——
+    //   否则一条记录查旧行失败会把后面所有表（案例 / TOP1 / 明星整改）一起带走。
+    //   失败时**不写入**（比"删了旧行却写不进新行"安全），并把原因带回前端。
     for(const h of (data.history || [])){
       if(!h.host || !h.date) continue;
-      const hr = await upsertHistory(token, TBL.history, h);
+      let hr;
+      try{
+        hr = await upsertHistory(token, TBL.history, h);
+      }catch(e){
+        hr = {ok:false, reason:'查询旧行失败，本条未写入（避免堆重复）: ' + ((e && e.message) || e)};
+      }
       results.push({type:'history', r: hr});
     }
 
@@ -261,7 +296,12 @@ module.exports = async function handler(req, res){
 
     // V3.9 明星主播评分结果额外写入"问题整改"表（每次评分实时，按 周起始+主播 去重更新）
     // 表结构（老大 8.27 重设计）：周起始/周结束/主播/直播间 + 8能力 + 能力欠缺总结/整改计划
-    for(const st of (data.stars || [])){
+    // ⚠️ v4.11.63：`listRecords` 改成全量分页后，**必须**把这张表的读取提到循环外。
+    //   原写在循环内 ⇒ 6 名明星 × 全量分页（飞书单次 10~30 秒）⇒ 一场评分要串行打十几次表，
+    //   直接把请求拖到超时。这里只拉一次、循环内复用。
+    const starList = data.stars || [];
+    const detailRecs = starList.length ? await listRecords(token, TBL.detail) : [];
+    for(const st of starList){
       if(!st.host || STARS.indexOf(st.host) < 0) continue;
       const wk = currentWeekInfo();
       // 8 能力分映射（评分系统 c1-c8 → 飞书字段）
@@ -286,8 +326,8 @@ module.exports = async function handler(req, res){
         '能力欠缺总结': lacks || (st.total != null && st.total < 60 ? '综合评分低于60分，需重点辅导' : '—'),
         '整改计划': plan || (st.total != null && st.total < 60 ? '按评分报告改进建议逐项训练' : '保持现有水平')
       });
-      // 去重：周起始 + 主播
-      const existRecs = await listRecords(token, TBL.detail);
+      // 去重：周起始 + 主播（数据来自循环外那一次读取）
+      const existRecs = detailRecs;
       let found = null;
       for(const er of existRecs){
         const f = er.fields || {};

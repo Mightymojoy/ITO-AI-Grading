@@ -11,6 +11,14 @@
  *   可选：view_id（指定视图）、limit（默认 300，上限 1200）
  * 返回：{ok:true, table:{table_id,name}, fields:['日期','主播',...], rows:[{日期:'…', …}], total:n, total_all:表内总数, limited:是否被截断}
  *
+ * v4.11.63（2026-11-09）：两处健壮性收紧（都不改变默认输出的数据内容）。
+ *   ① `field_names` 命中 `1254045 FieldNameNotFound` 时自动**去掉该参数重试一次**。
+ *     起因：飞书对 field_names 严格校验——任一字段名不符就**整条请求拒绝**（实测：混入一个
+ *       不存在的字段 3.5s 报 1254045；字段名差一个前导空格同样 1254045）。而字段名取自
+ *       `/fields` 的 10 分钟缓存，缓存期内若有人改列名/删列，omit 就会让整条读取失败，
+ *       前端随即静默回退静态快照 —— 等于把「偶发慢」换成「偶发全挂」，比不 omit 更糟。
+ *   ② `stop_at` 提前停时如实回 `limited:true`。原实现提前停后 `total_all` 就等于已拉行数
+ *       ⇒ `limited` 恒为 false ⇒ 前端把被截断的结果当全量，静默丢掉表尾。
  * v4.11.62（2026-11-09）：新增 omit / stop_at 两个可选参数（都不传时行为与 v4.11.52 完全一致）。
  *   omit    ：要剔除的字段名，字符串（逗号分隔）或数组。**既用 field_names 让飞书少传，
  *             也在服务端从结果里删掉**，两道保险。
@@ -102,20 +110,36 @@ async function listTables(token){
   return (r.data && r.data.items || []).map(t => ({table_id: t.table_id, name: t.name}));
 }
 
+// v4.11.63（2026-11-09）：field_names 加 1254045 兜底 —— 不改的话 omit 可能比不 omit 更危险。
+// 事故风险：飞书对 `field_names` 是**严格校验**，只要有一个字段名对不上就**整条请求拒绝**。
+//   实测（2026-11-09 直连飞书）：
+//     · 混入一个不存在的字段 → 3.5s  code=1254045 FieldNameNotFound
+//     · 字段名差一个前导空格 → 5.8s  code=1254045 FieldNameNotFound
+//   而字段名来自 `/fields` 的 **10 分钟缓存** ⇒ 这 10 分钟内若有人改字段名 / 删列 / 加列，
+//   请求就会整条失败 ⇒ 前端静默回退静态快照 ⇒ 表现成「数据又不更新了」，与本轮要修的病一模一样。
+// 处置：命中 1254045 时**自动去掉 field_names 重试一次**（服务端仍会剔除 omit 字段，结果等价）；
+//   其它错误码照旧抛错。返回值带上 `fieldFiltered` 告诉调用方这次到底有没有走字段过滤。
 async function listRecordsPage(token, tableId, pageSize, pageToken, viewId, fieldNames){
-  let path = '/open-apis/bitable/v1/apps/'+BASE_TOKEN+'/tables/'+tableId+'/records?page_size='+pageSize;
-  if(viewId) path += '&view_id=' + encodeURIComponent(viewId);
-  if(pageToken) path += '&page_token=' + encodeURIComponent(pageToken);
-  // v4.11.62：field_names 让飞书**不要返回**这些字段，从源头减小响应
+  const base = '/open-apis/bitable/v1/apps/' + BASE_TOKEN + '/tables/' + tableId + '/records?page_size=' + pageSize
+             + (viewId ? '&view_id=' + encodeURIComponent(viewId) : '')
+             + (pageToken ? '&page_token=' + encodeURIComponent(pageToken) : '');
+  const headers = { 'Authorization': 'Bearer ' + token };
+
   if(fieldNames && fieldNames.length){
-    try{ path += '&field_names=' + encodeURIComponent(JSON.stringify(fieldNames)); }catch(e){}
+    let path2 = base;
+    try{ path2 += '&field_names=' + encodeURIComponent(JSON.stringify(fieldNames)); }catch(e){}
+    const r = await httpsJson({ hostname:'open.feishu.cn', path: path2, method:'GET', headers: headers });
+    if(r.code === 0) return { d: r.data || {}, fieldFiltered: true };
+    if(Number(r.code) !== 1254045){
+      throw new Error('拉取记录失败: ' + (r.msg||'') + ' code=' + r.code);
+    }
+    console.log('[feishu-read] field_names 被拒（1254045 FieldNameNotFound，table=' + tableId +
+                '）⇒ 已退回全字段重试，omit 改由服务端剔除');
   }
-  const r = await httpsJson({
-    hostname:'open.feishu.cn', path: path,
-    method:'GET', headers:{'Authorization':'Bearer '+token}
-  });
-  if(r.code !== 0) throw new Error('拉取记录失败: ' + (r.msg||'') + ' code=' + r.code);
-  return r.data || {};
+
+  const r2 = await httpsJson({ hostname:'open.feishu.cn', path: base, method:'GET', headers: headers });
+  if(r2.code !== 0) throw new Error('拉取记录失败: ' + (r2.msg||'') + ' code=' + r2.code);
+  return { d: r2.data || {}, fieldFiltered: false };
 }
 
 // 字段值归一化：人员/多选/附件/公式/日期 → 可显示字符串
@@ -271,9 +295,11 @@ module.exports = async function handler(req, res){
         if(keep.length && keep.length < all.length) fieldNames = keep;
       }
     }
-    let rows = [], pageToken = '', guard = 0;
+    let rows = [], pageToken = '', guard = 0, usedFieldFilter = false, stoppedEarly = false;
     do{
-      const d = await listRecordsPage(token, tableId, 500, pageToken, data.view_id || '', fieldNames);
+      const pg = await listRecordsPage(token, tableId, 500, pageToken, data.view_id || '', fieldNames);
+      const d = pg.d;
+      if(pg.fieldFiltered) usedFieldFilter = true;
       rows = rows.concat((d.items || []).map(function(rec){
         const o = normalizeRecord(rec, dtf);
         if(omitSet){ for(const k in omitSet){ if(k in o) delete o[k]; } }
@@ -283,7 +309,12 @@ module.exports = async function handler(req, res){
       guard++;
       // 拉够就停：**只对「新记录在表头」的表安全**（日报表先删后建 ⇒ 头在前）。
       // 历史评分表新记录在尾部，传 stop_at 会丢掉最新记录 —— 前端不得对该表使用。
-      if(stopAt && rows.length >= limit) break;
+      if(stopAt && rows.length >= limit){
+        // v4.11.63：若还有下一页才叫「提前停」⇒ 必须如实报 limited，
+        //   原实现此时 totalAll=rows.length ⇒ limited 恒 false ⇒ 前端以为拿全了，静默丢数据。
+        if(pageToken) stoppedEarly = true;
+        break;
+      }
     }while(pageToken && guard < 20);                  // 20×500 = 1 万条护栏，防死循环
 
     // ---------- v4.11.52（2026-10-30）：超限时保留「最新」而不是「最早」 ----------
@@ -323,11 +354,12 @@ module.exports = async function handler(req, res){
     return res.status(200).json({
       ok:true, key: key || '', table:{table_id: tableId, name: tableName || tableId},
       columns: cols, rows: rows, total: rows.length, total_all: totalAll,
-      limited: totalAll > rows.length,
-      // v4.11.62：回显实际剔除的字段，便于排查「为什么少了一列」
+      // v4.11.63：提前停（stop_at 拉够 limit 但还有下一页）也必须报 limited=true，
+      //   否则前端把「被截断的 500 条」当成全量 → 「以为看全了，其实少了最老的几十条」。
+      limited: (totalAll > rows.length) || stoppedEarly,
+      // v4.11.62/63：回显实际剔除的字段与是否真走了字段过滤，便于排查「为什么少了一列」
       omitted: omitSet ? Object.keys(omitSet) : [],
-      // v4.11.62：是否走了 field_names（false ⇒ 只是服务端删字段，响应仍大）
-      fieldFiltered: !!fieldNames
+      fieldFiltered: usedFieldFilter
     });
   }catch(e){
     return res.status(200).json({ok:false, error: e.message});

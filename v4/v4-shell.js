@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.62';
+var V4_VERSION = 'v4.11.63';
 // v4.11.36：存档格式版本 ≠ 壳层版本。rawV 只在「rawTotal/rawPen/rawBlk 这套字段的形态真变」时才动，
 //   **不跟 V4_VERSION 走**（否则每次改样式/改文案都要假装改了存档格式，溯源反而失真）。
 //   ⚠️ 渲染侧从不读 rawV（write-only 溯源标记）；断言请读本常量，别跟 V4_VERSION 比。
@@ -1611,6 +1611,22 @@ function v4FsNoData(key){
 function v4FsShowSync(){
   var el = document.getElementById('fsSyncAt');
   if(el) el.textContent = V4_FS_STATE.syncedAt ? ('最近同步：' + V4_FS_STATE.syncedAt) : '';
+  // v4.11.63：云端失败、当前显示的是本地静态快照时，**必须在页面顶部显式警示**。
+  //   原来失败只写 console ⇒ 页面照常渲染 10-20 的旧快照，看起来毫无异常，
+  //   于是「数据不更新」连续几周都被当成"没跑评分"。这个警示就是为了让这种事一眼可见。
+  var warn = document.getElementById('fsWarn');
+  if(!warn) return;
+  var fb = null;
+  try{
+    var k = V4_FS_STATE.key || '';
+    fb = (window.V4CLOUD && window.V4CLOUD.fallback) ? window.V4CLOUD.fallback[k] : null;
+  }catch(e){ fb = null; }
+  if(!fb){ warn.textContent = ''; warn.title = ''; return; }
+  var asOf = fb.syncedAt ? String(fb.syncedAt) : '未知';
+  warn.textContent = '⚠️ 云端取数失败，当前为本地快照（截至 ' + asOf + '，' + (fb.rows || 0) + ' 条）';
+  warn.title = '失败原因：' + fb.reason + '\n解决：点「立即同步飞书」重试；若持续失败说明飞书接口超时或未部署。';
+  warn.style.color = '#c0392b';
+  warn.style.fontWeight = '600';
 }
 var V4_FS_REQUEST_ID = 0;
 function v4FeishuLoad(key){
@@ -1625,7 +1641,7 @@ function v4FeishuLoad(key){
   var _slow = (key === 'daily' || key === 'history');
   if(box) box.innerHTML = '<div class="fs-meta">正在从飞书载入「' + (V4_FS_NAMES[key] || key) + '」' +
     (_slow ? '…（该表数据量大，实测约 20~50 秒，请勿关闭页面）' : '…') + '</div>';
-  if(st) st.textContent = '载入中…';
+  if(st){ st.textContent = '载入中…'; st.style.color = 'var(--text3)'; }
   if(_slow){
     // 秒表：让「还在跑」和「已经卡死」可区分（沿用原计时器风格，结束/失败时清掉）
     var _t0 = Date.now();
@@ -2004,6 +2020,75 @@ function mergeDaily(local, synced){
 document.addEventListener('DOMContentLoaded', function(){
   var rb = document.getElementById('fsReloadBtn');
   if(rb) rb.onclick = function(){ v4FsReload(); };
+
+  // ---------- v4.11.63：「立即同步飞书」按钮 ----------
+  // 和「重新载入」的区别（两者都保留，别合并）：
+  //   · 重新载入：只清 window.V4FS / V4_FS_PENDING / BUST ⇒ 用来读磁盘上刚同步出来的 data/*.js
+  //   · 立即同步飞书：额外清 window.V4CLOUD.cache 与 fallback（云端那层 60 秒缓存）
+  //     ⇒「刚传了新评分、想立刻看到飞书上的结果」用这个，不用等缓存过期
+  // 反馈：按钮上跑秒表，结束后把真实结果写回状态行（成功报条数+最新日期，失败说原因）。
+  var sb = document.getElementById('fsSyncNowBtn');
+  if(sb) sb.onclick = function(){
+    if(sb.__busy) return;
+    sb.__busy = true;
+    var label = sb.textContent;
+    var key = (typeof V4_FS_STATE !== 'undefined' && V4_FS_STATE.key) || 'daily';
+    try{
+      if(window.V4CLOUD){
+        window.V4CLOUD.cache = {};
+        window.V4CLOUD.fallback = {};
+      }
+    }catch(e){}
+    var warn = document.getElementById('fsWarn');
+    if(warn){ warn.textContent = ''; warn.title = ''; }
+    var st = document.getElementById('fsStatus');
+    if(st) st.textContent = '正在向飞书取数…';
+
+    sb.disabled = true;
+    var t0 = Date.now();
+    sb.textContent = '同步中…0s';
+    var tick = setInterval(function(){
+      sb.textContent = '同步中…' + Math.round((Date.now() - t0) / 1000) + 's';
+    }, 1000);
+
+    var finish = function(msg, isErr){
+      clearInterval(tick);
+      clearInterval(poll);
+      clearTimeout(guard);
+      sb.disabled = false;
+      sb.__busy = false;
+      sb.textContent = label;
+      var s2 = document.getElementById('fsStatus');
+      if(s2 && msg){ s2.textContent = msg; s2.style.color = isErr ? '#c0392b' : 'var(--text3)'; }
+      try{ v4FsShowSync(); }catch(e){}
+    };
+
+    var poll = setInterval(function(){
+      var got = null;
+      try{
+        if(window.V4CLOUD && window.V4CLOUD.fallback && window.V4CLOUD.fallback[key]) got = 'fail';
+        else if(window.V4FS && window.V4FS[key]) got = 'ok';
+      }catch(e){}
+      if(!got) return;
+      var sec = Math.round((Date.now() - t0) / 1000);
+      if(got === 'fail'){
+        finish('同步失败（' + sec + ' 秒）：已回退本地快照，原因见顶部红字', true);
+      }else{
+        var rows = (window.V4FS[key] && window.V4FS[key].rows) || [];
+        var newest = '';
+        for(var i = 0; i < rows.length; i++){
+          var d = String(rows[i]['日期'] || rows[i]['标准日期'] || '').slice(0, 10);
+          if(d > newest) newest = d;
+        }
+        finish('已同步 ' + rows.length + ' 条' + (newest ? '，最新日期 ' + newest : '') + '（' + sec + ' 秒）', false);
+      }
+    }, 500);
+
+    // 硬护栏：前端超时已放宽到 90~120 秒，这里留 150 秒兜底，避免按钮永远卡在「同步中」
+    var guard = setTimeout(function(){ finish('同步超时（已 150 秒），请重试', true); }, 150000);
+
+    try{ v4FsReload(); }catch(e){ finish('同步失败：' + ((e && e.message) || e), true); }
+  };
 });
 
 // =====================================================
@@ -3062,12 +3147,16 @@ document.addEventListener('DOMContentLoaded', function(){
 
     var V4CLOUD = {
       cache: {},          // key -> {data, ts}；data=null 表示上次失败
+      fallback: {},       // v4.11.63：key -> {ts, reason, syncedAt} 记录「云端失败、已回退静态快照」
+                          //   ⚠️ 这是「连续几周没人发现数据是旧的」的正面解药：
+                          //     原来失败只写 console，页面照常显示 10-20 的快照，用户毫不知情。
       TTL: 60000,         // 成功缓存 60s（飞书接口限流约 100 次/分/应用）
       FAIL_TTL: 30000,    // 失败缓存 30s，避免反复重试拖慢界面
       grace: 300000,      // 本机 5 分钟内新评的记录优先于远端（飞书回写可能有延迟）
-      limit: 800          // v4.11.52：500 → 800。接口上限 1200；历史评分表已 556 条，
-                          //   原来 500 会把最新 56 条（10-26 后半 + 10-27/28/29）直接丢掉，
-                          //   工作台归档索引因此停在 10-26。gzip 后仅 1.82MB，远低于 Vercel 4.5MB 限制。
+      limit: 1200        // v4.11.63：800 → 1200（= 接口上限）。历史表已 703 行，800 只剩 97 行
+                          //   （约 7 天）余量；提到上限后与 LIMIT_BY_KEY 两处口径一致，
+                          //   免得出现「第一批 1200 / 第二批 800」两批行数不一致。
+                          //   v4.11.52 历史：500 → 800，原 500 会把最新 56 条直接丢掉。
     };
     window.V4CLOUD = V4CLOUD;
 
@@ -3092,7 +3181,11 @@ document.addEventListener('DOMContentLoaded', function(){
     var OMIT_KEYS = { daily: 1, history: 1 };
     var OMIT_TBLS = { tblQC7Jfzmxp6QJI: 1, tblkN1e6yCtXl5bG: 1 };   // 按 table_id 兜住「手动切表」入口
     var READ_TIMEOUT = READ_SLIM ? 90000 : 20000;
-    var LIMIT_BY_KEY = { daily: 500, history: 800 };                // 日报 474 / 历史 703，均取全量
+    // v4.11.63：daily 500 → 1200。日报表已 474 行、每天 +13~14 行 ⇒ **约 2 天后就超 500**。
+    //   超限时接口会按 stop_at 截断，且原来连 limited 都报 false（已在接口侧修），
+    //   前端只会觉得"9 月的数据莫名其妙少了"。1200 是接口上限，等于全量，不再有截断风险。
+    var LIMIT_BY_KEY = { daily: 1200, history: 1200 };               // 日报 474 / 历史 703，均取全量
+                        // history 500→1200：该表已 703 行，原 800 只剩 97 行余量（约 7 天）
     function withOmit(payload, keyOrTableId, stopAt){
       if(!READ_SLIM) return payload;
       if(OMIT_KEYS[keyOrTableId] || OMIT_TBLS[keyOrTableId]) payload.omit = OMIT_RPT;
@@ -3229,11 +3322,23 @@ document.addEventListener('DOMContentLoaded', function(){
       }
       return task.then(function(d){
         V4CLOUD.cache[key] = { data: d, ts: Date.now() };
+        delete V4CLOUD.fallback[key];                 // v4.11.63：成功即清掉回退警示
         return d;
       })['catch'](function(e){
         V4CLOUD.cache[key] = { data: null, ts: Date.now() };
-        console.log('[v4.11.11] 云端读取失败 → 回退静态快照 | ' + key + ' | ' + ((e && e.message) || e));
-        return _origEnsure(key);
+        var why = (e && e.message) || String(e);
+        console.log('[v4.11.11] 云端读取失败 → 回退静态快照 | ' + key + ' | ' + why);
+        // v4.11.63：把「这次是回退」记下来，供 v4FsShowSync() 在页面上明确警示。
+        //   不回退会让页面停在旧数据却看起来一切正常 —— 那正是这次故障藏了几周的原因。
+        return Promise.resolve(_origEnsure(key)).then(function(d){
+          V4CLOUD.fallback[key] = {
+            ts: Date.now(),
+            reason: why,
+            rows: (d && d.rows) ? d.rows.length : 0,
+            syncedAt: (d && d.syncedAt) || ''
+          };
+          return d;
+        });
       });
     }
 
