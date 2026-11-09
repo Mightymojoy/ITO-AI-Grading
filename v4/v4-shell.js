@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.61';
+var V4_VERSION = 'v4.11.62';
 // v4.11.36：存档格式版本 ≠ 壳层版本。rawV 只在「rawTotal/rawPen/rawBlk 这套字段的形态真变」时才动，
 //   **不跟 V4_VERSION 走**（否则每次改样式/改文案都要假装改了存档格式，溯源反而失真）。
 //   ⚠️ 渲染侧从不读 rawV（write-only 溯源标记）；断言请读本常量，别跟 V4_VERSION 比。
@@ -444,6 +444,9 @@ function v4ArchRender(type){
     rows.sort(function(a,b){ return (b.ts||0)-(a.ts||0); });
     v4HisEnsureStyle();
     var hisDetN = 0, hisMissN = 0;
+    // v4.11.62：报告列改为后台第二批拉 ⇒ 这一批还没到时不能误报「暂无完整报告」
+    var _rptPend = false;
+    try{ _rptPend = !!(window.V4RPT && window.V4RPT.reportsPending && window.V4RPT.reportsPending()); }catch(e){}
     h += '<div style="font-size:11px;color:var(--text3);margin-bottom:4px">点击行内「查看完整评分记录」展开该次评分的模块分卡与逐子点判定证据；再点收起</div>';
     for(var e2=0;e2<rows.length;e2++){
       var r = rows[e2];
@@ -460,7 +463,9 @@ function v4ArchRender(type){
         + '<span style="font-size:11px;color:var(--text2);flex:1;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc((r.product || '—')) + '</span>'
         + '<label for="' + uid + '" class="v4his-lb">查看完整评分记录</label>'
         + '</div>'
-        + '<div class="v4his-det">' + (det ? v4DetailHTML(det) : '<div class="v4his-none">该记录暂无完整报告。<b>完整报告功能于 v4.11.24（2026-09-23）上线</b>，此前的记录没有生成过报告、无法回填 —— 重新评分一次即可，评完立即全员可见。</div>') + '</div>'
+        + '<div class="v4his-det">' + (det ? v4DetailHTML(det) : (_rptPend
+            ? '<div class="v4his-none">完整报告正在从飞书加载（首次约 20~50 秒），到位后会自动展开；也可点上方「立即刷新」手动重试。</div>'
+            : '<div class="v4his-none">该记录暂无完整报告。<b>完整报告功能于 v4.11.24（2026-09-23）上线</b>，此前的记录没有生成过报告、无法回填 —— 重新评分一次即可，评完立即全员可见。</div>')) + '</div>'
         + '</div>';
       if(det) hisDetN++; else hisMissN++;
     }
@@ -777,9 +782,10 @@ function v4TriLoad(){
       if(i >= urls.length){ window.__v4TriIdx = { tri: {}, two: {} }; return resolve(window.__v4TriIdx); }
       var u = urls[i++];
       var ctrl = ('AbortController' in window) ? new AbortController() : null;
-      var tmr = ctrl ? setTimeout(function(){ try{ ctrl.abort(); }catch(e){} }, 25000) : null;
+      var tmr = ctrl ? setTimeout(function(){ try{ ctrl.abort(); }catch(e){} }, 90000) : null;
+      // v4.11.62：只读三评用的列 ⇒ 剔除「完整主播报告」（79% 体积）；超时 25s → 90s（实测抖动可达 50s+）
       fetch(u, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                 body: JSON.stringify({ key: 'daily', limit: 1200 }),
+                 body: JSON.stringify({ key: 'daily', limit: 500, omit: ['完整主播报告'], stop_at: 1 }),
                  signal: ctrl ? ctrl.signal : undefined })
         .then(function(r){ if(tmr) clearTimeout(tmr); if(!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
         .then(function(d){
@@ -1580,6 +1586,7 @@ function v4FsEnsure(key){
 }
 // 未同步时的引导空态（不跳转、不报错）
 function v4FsNoData(key){
+  try{ if(window.__v4FsTick){ clearInterval(window.__v4FsTick); window.__v4FsTick = null; } }catch(e){}
   var box = document.getElementById('v4arch-feishu');
   var st = document.getElementById('fsStatus');
   if(st) st.textContent = '暂无数据';
@@ -1613,8 +1620,24 @@ function v4FeishuLoad(key){
   var st = document.getElementById('fsStatus');
   var ttl = document.getElementById('fs-title');
   if(ttl) ttl.textContent = '飞书数据表 · ' + (V4_FS_NAMES[key] || key);
-  if(box) box.innerHTML = '<div class="fs-meta">正在载入「' + (V4_FS_NAMES[key] || key) + '」…</div>';
+  // v4.11.62：飞书这两张大表（日报 474 行 / 历史 703 行，含公式字段）实测往返 20~50 秒，
+  //   原来只写「载入中…」会让人以为卡死；这里把预计耗时和进度说清楚，并把超时放到 90 秒。
+  var _slow = (key === 'daily' || key === 'history');
+  if(box) box.innerHTML = '<div class="fs-meta">正在从飞书载入「' + (V4_FS_NAMES[key] || key) + '」' +
+    (_slow ? '…（该表数据量大，实测约 20~50 秒，请勿关闭页面）' : '…') + '</div>';
   if(st) st.textContent = '载入中…';
+  if(_slow){
+    // 秒表：让「还在跑」和「已经卡死」可区分（沿用原计时器风格，结束/失败时清掉）
+    var _t0 = Date.now();
+    if(window.__v4FsTick) { try{ clearInterval(window.__v4FsTick); }catch(e){} }
+    window.__v4FsTick = setInterval(function(){
+      try{
+        if(requestId !== V4_FS_REQUEST_ID) { clearInterval(window.__v4FsTick); window.__v4FsTick = null; return; }
+        var sec = Math.round((Date.now() - _t0) / 1000);
+        if(st) st.textContent = '载入中…已 ' + sec + ' 秒（上限 90 秒）';
+      }catch(e){}
+    }, 1000);
+  }
 
   // ---- v4.6 本地快速通道：daily/week/month/weekstar/top1 均由评分自动写入，评完即见、零取数 ----
   var lsKey = V4_FS_LOCAL_KEY[key];
@@ -1682,6 +1705,8 @@ function v4FsFillSel(curKey){
 }
 // 渲染：存在日期列 → 月/日归档索引；否则平铺表格
 function v4FeishuRender(){
+  // v4.11.62：渲染即视为本轮取数结束 ⇒ 停掉「已 N 秒」秒表
+  try{ if(window.__v4FsTick){ clearInterval(window.__v4FsTick); window.__v4FsTick = null; } }catch(e){}
   var box = document.getElementById('v4arch-feishu');
   if(!box) return;
   var rows = V4_FS_STATE.rows, cols = V4_FS_STATE.columns;
@@ -3046,6 +3071,35 @@ document.addEventListener('DOMContentLoaded', function(){
     };
     window.V4CLOUD = V4CLOUD;
 
+    // ---------- v4.11.62（2026-11-09）：超长列剔除 + 超时放宽 ----------
+    // 现场实测（2026-11-09，直连飞书 + 直连线上接口各测多轮）：
+    //   · 主播日报 474 行 = 13.40MB，其中「完整主播报告」一列 7,535,501 字 = 79%
+    //   · 历史评分 703 行 = 15.54MB，其中同一列 9,271,400 字 = 82%
+    //   · 同一请求耗时抖动极大（page_size=100 全字段：3.8s / 10.2s / 24.8s；
+    //     page_size=500：28.5s / 35.9s / 51.4s）—— 因为日报表有 7 个公式字段、
+    //     历史表有 3 个，飞书读取时**全表重算**：500 行只取 2 个字段仍需 29.8s。
+    //   ⇒ 结论：去掉字段只省约 6 秒，**真正致命的是前端 20 秒超时**。
+    //   而超时一失败就静默回退 data/daily.js 静态快照（停在 2026-10-20），
+    //   表现出来就是「每周一打开都是一周前的数据」。
+    // 处置三条：
+    //   ① omit：请求剔掉「完整主播报告」⇒ 响应 13.4MB → 0.96MB（浏览器解析、DOM、title 属性同步瘦身）
+    //   ② 超时 20s → 90s：这才是治「失败」的那一刀
+    //   ③ 历史页报告列改为「摘要先回、报告后台补」，列表 0.23MB 秒回（见 ensureCloud / kickReports）
+    // 回退：localStorage.setItem('v4read_slim','0') 即恢复「拉全字段 + 20 秒超时」
+    var READ_SLIM = true;
+    try{ if(localStorage.getItem('v4read_slim') === '0') READ_SLIM = false; }catch(e){}
+    var OMIT_RPT = ['完整主播报告'];
+    var OMIT_KEYS = { daily: 1, history: 1 };
+    var OMIT_TBLS = { tblQC7Jfzmxp6QJI: 1, tblkN1e6yCtXl5bG: 1 };   // 按 table_id 兜住「手动切表」入口
+    var READ_TIMEOUT = READ_SLIM ? 90000 : 20000;
+    var LIMIT_BY_KEY = { daily: 500, history: 800 };                // 日报 474 / 历史 703，均取全量
+    function withOmit(payload, keyOrTableId, stopAt){
+      if(!READ_SLIM) return payload;
+      if(OMIT_KEYS[keyOrTableId] || OMIT_TBLS[keyOrTableId]) payload.omit = OMIT_RPT;
+      if(stopAt) payload.stop_at = 1;                               // 仅「新记录在表头」的日报表可用
+      return payload;
+    }
+
     var ABS_READ = 'https://ito-ai-grading.vercel.app/api/feishu-read';
 
     function isLocalHost(){
@@ -3086,11 +3140,11 @@ document.addEventListener('DOMContentLoaded', function(){
         });
       });
     }
-    function fetchCloud(payload){
+    function fetchCloud(payload, timeoutMs){
       var urls = readUrls(), i = 0;
       function next(){
         if(i >= urls.length) return Promise.reject(new Error('全部云端端点不可用'));
-        return postJson(urls[i++], payload)['catch'](function(){ return next(); });
+        return postJson(urls[i++], payload, timeoutMs)['catch'](function(){ return next(); });
       }
       return next();
     }
@@ -3164,9 +3218,9 @@ document.addEventListener('DOMContentLoaded', function(){
         task = buildIndex();
       } else {
         var payload = /^tbl_/.test(key)
-          ? { action: 'records', table_id: key.slice(4), limit: V4CLOUD.limit }
-          : { action: 'records', key: key, limit: V4CLOUD.limit };
-        task = fetchCloud(payload).then(function(j){
+          ? withOmit({ action: 'records', table_id: key.slice(4), limit: V4CLOUD.limit }, key.slice(4), false)
+          : withOmit({ action: 'records', key: key, limit: (LIMIT_BY_KEY[key] || V4CLOUD.limit) }, key, key === 'daily');
+        task = fetchCloud(payload, READ_TIMEOUT).then(function(j){
           j.syncedAt = stamp();
           window.V4FS = window.V4FS || {};
           window.V4FS[key] = j;
@@ -4739,42 +4793,96 @@ document.addEventListener('DOMContentLoaded', function(){
     //    上一版「LOADED 后直接返回缓存」= 页面生命周期内只拉一次 ⇒ 同事刚评完、我这边
     //    切到历史 tab 也永远看不到（要整页刷新）。现在每次都走底层，由底层 V4CLOUD.TTL(60s)
     //    控制真实请求频率；force=true 时连底层缓存一并清掉，用于「立即刷新」逃生阀。
+    // ---------- v4.11.62：摘要 / 报告分两批取 ----------
+    // 起因（2026-11-09 实测）：历史评分表 703 行 15.54MB，其中「完整主播报告」927 万字 = 82%，
+    //   一次拉完 25~50 秒，而前端超时 20 秒 ⇒ 云端合并**从未成功过**，历史页其实一直只剩本机记录
+    //   （不像日报页会整页停旧数据，所以一直没人报障）。
+    // 现在：① 第一批只拉摘要（响应 0.23MB）⇒ 列表立刻能看到全员；
+    //       ② 第二批后台单独拉报告列（长超时）⇒ 到位后自动重渲染并恢复已展开的行；
+    //       ③ 两批之间展开某行会提示「报告加载中」，不再误报「暂无完整报告」。
+    var RPT_LOADING = false, RPT_LOADED = false, RPT_FAILS = 0, RPT_AT = 0, RPT_P = null;
+    var RPT_TIMEOUT = 120000;
+
+    function buildCloudRows(rows){
+      var out = [];
+      for(var i=0;i<rows.length;i++){
+        var x = rows[i] || {};
+        var host = String(x['主播'] || '').trim();
+        if(!host) continue;
+        var date = ddate(x['标准日期'] || x['日期'] || '');
+        if(!date) continue;
+        out.push({ host: host, date: date,
+          total: x['总分'] || x['历史总分(数值)'] || '—',
+          c1Score: x['c1产品理解'] || x['产品理解(数值)'] || '',
+          product: x['产品'] || '', grade: x['等级'] || '', _src: 'cloud' });
+      }
+      return out;
+    }
+    // 把报告列灌进 DET_MAP（只认结构完整的 JSON；坏档只记日志，不影响列表）
+    function applyReports(rows){
+      var ok = 0, bad = 0;
+      for(var i=0;i<rows.length;i++){
+        var x = rows[i] || {};
+        var host = String(x['主播'] || '').trim();
+        if(!host) continue;
+        var date = ddate(x['标准日期'] || x['日期'] || '');
+        if(!date) continue;
+        var rep = x[RPT_FIELD];
+        if(typeof rep !== 'string' || rep.length <= 20) continue;
+        try{
+          var det = JSON.parse(rep);
+          if(det && det.mods && det.mods.length){ DET_MAP[dkey(host, date)] = det; ok++; }
+          else { bad++; log('报告结构异常（无 mods）: ' + host + ' ' + date); }
+        }catch(e){
+          bad++;
+          log('报告解析失败（' + host + ' ' + date + '，' + rep.length + ' 字符）: ' + ((e && e.message) || e));
+        }
+      }
+      return { ok: ok, bad: bad };
+    }
+    function rerenderHistory(){
+      if(typeof _ar !== 'function' || !boxOf()) return;
+      var keep = captureExpanded();
+      IN_RENDER = true;
+      try{ _ar.call(window, 'history'); }
+      catch(e){ log('报告到位后重渲染异常: ' + ((e && e.message) || e)); }
+      IN_RENDER = false;
+      restoreExpanded(keep);
+      setTip(tipHtml((CLOUD_ROWS || []).length));
+    }
+    function kickReports(force){
+      if(!force && RPT_LOADED) return Promise.resolve(true);
+      if(RPT_P) return RPT_P;
+      RPT_LOADING = true;
+      RPT_P = fetchCloud({ action: 'records', key: 'history', limit: V4CLOUD.limit }, RPT_TIMEOUT)   // 不带 omit：这一批就是要报告列
+        .then(function(j){
+          var r = applyReports((j && j.rows) || []);
+          RPT_LOADED = true; RPT_LOADING = false; RPT_P = null; RPT_FAILS = 0; RPT_AT = Date.now();
+          log('完整报告后台到位：成功 ' + r.ok + ' 条' + (r.bad ? '（解析失败 ' + r.bad + ' 条）' : ''));
+          rerenderHistory();
+          return true;
+        })['catch'](function(e){
+          RPT_LOADING = false; RPT_P = null; RPT_FAILS++;
+          log('完整报告后台拉取失败（第 ' + RPT_FAILS + ' 次）: ' + ((e && e.message) || e));
+          return false;
+        });
+      return RPT_P;
+    }
+    function reportsPending(){ return RPT_LOADING || (!RPT_LOADED && RPT_FAILS === 0); }
+
     function ensureCloud(force){
       if(LOADING) return PENDING || Promise.resolve(CLOUD_ROWS);
       if(typeof window.v4FsEnsure !== 'function') return Promise.resolve(null);
       if(force){
         try{ if(window.V4CLOUD && window.V4CLOUD.cache) delete window.V4CLOUD.cache['history']; }catch(e){}
+        RPT_LOADED = false; RPT_FAILS = 0;               // 强制刷新连报告一起重取
       }
       LOADING = true;
-      var badReport = 0;
       var p = window.v4FsEnsure('history').then(function(d){
-        var rows = (d && d.rows) || [];
-        var out = [];
-        for(var i=0;i<rows.length;i++){
-          var x = rows[i] || {};
-          var host = String(x['主播'] || '').trim();
-          if(!host) continue;
-          var date = ddate(x['标准日期'] || x['日期'] || '');
-          if(!date) continue;
-          var rep = x[RPT_FIELD];
-          if(typeof rep === 'string' && rep.length > 20){
-            try{
-              var det = JSON.parse(rep);
-              if(det && det.mods && det.mods.length) DET_MAP[dkey(host, date)] = det;
-              else { badReport++; log('报告结构异常（无 mods）: ' + host + ' ' + date); }
-            }catch(e){
-              badReport++;
-              log('报告解析失败（' + host + ' ' + date + '，' + rep.length + ' 字符）: ' + ((e && e.message) || e));
-            }
-          }
-          out.push({ host: host, date: date,
-            total: x['总分'] || x['历史总分(数值)'] || '—',
-            c1Score: x['c1产品理解'] || x['产品理解(数值)'] || '',
-            product: x['产品'] || '', grade: x['等级'] || '', _src: 'cloud' });
-        }
+        var out = buildCloudRows((d && d.rows) || []);
         CLOUD_ROWS = out; LOADED = true; LOADING = false; FAILS = 0; LAST_OK_TS = Date.now();
-        log('云端历史评分 ' + out.length + ' 条，其中含完整报告 ' + Object.keys(DET_MAP).length + ' 条' +
-            (badReport ? '（解析失败 ' + badReport + ' 条）' : ''));
+        log('云端历史评分摘要 ' + out.length + ' 条（报告列后台另取）');
+        kickReports();                                   // 不阻塞列表：报告到位后再重渲染
         return out;
       })['catch'](function(e){
         LOADING = false; FAILS++;
@@ -4901,8 +5009,12 @@ document.addEventListener('DOMContentLoaded', function(){
     // 真实请求频率由底层 V4CLOUD.TTL(60s) 控制，不会打爆飞书限流。
     var UI_DEBOUNCE = 8000;
     function tipHtml(n){
-      var t = '已合并飞书全员记录 <b>' + n + '</b> 条 ｜ 含完整报告 <b>' + Object.keys(DET_MAP).length +
-              '</b> 条 · ' + new Date().toLocaleTimeString('zh-CN', { hour12: false });
+      // v4.11.62：报告列改成后台单独拉 ⇒ 把「加载中」明确说出来，别让老大以为报告没了
+      var rep = Object.keys(DET_MAP).length;
+      var st = RPT_LOADING ? ' · <span style="color:var(--gold)">完整报告加载中…</span>'
+             : (RPT_LOADED ? '' : (RPT_FAILS ? ' · <span style="color:var(--danger)">完整报告加载失败</span>' : ''));
+      var t = '已合并飞书全员记录 <b>' + n + '</b> 条 ｜ 含完整报告 <b>' + rep +
+              '</b> 条' + st + ' · ' + new Date().toLocaleTimeString('zh-CN', { hour12: false });
       // 逃生阀：刚上传完想立刻看到（绕过底层 60s 缓存）时点这里
       return t + ' ｜ <a href="javascript:void 0" onclick="V4RPT.refresh(1);return false" style="color:var(--gold)">立即刷新</a>';
     }
@@ -4944,6 +5056,8 @@ document.addEventListener('DOMContentLoaded', function(){
       fit: fit,
       RPT_MAX: RPT_MAX,
       ensureCloud: ensureCloud,
+      reportsPending: reportsPending,          // v4.11.62：渲染层用它区分「加载中」和「确实没有」
+      kickReports: kickReports,                // v4.11.62：手动重拉报告列
       refresh: function(force){
         var f = (force === true || force === 1);
         if(boxOf()){ LAST_UI_TS = 0; scheduleCloudRefresh(['history'], f); }
@@ -4954,6 +5068,10 @@ document.addEventListener('DOMContentLoaded', function(){
                   cloudRows: (CLOUD_ROWS || []).length,
                   cloudReports: Object.keys(DET_MAP).length,
                   rowBound: Object.keys(TS_DET).length,
+                  reportLoaded: RPT_LOADED,           // v4.11.62：报告列后台批次状态
+                  reportLoading: RPT_LOADING,
+                  reportFails: RPT_FAILS,
+                  reportAgo: RPT_AT ? Math.round((Date.now() - RPT_AT) / 1000) + 's' : 'never',
                   lastOkAgo: LAST_OK_TS ? Math.round((Date.now() - LAST_OK_TS) / 1000) + 's' : 'never',
                   sampleKeys: Object.keys(DET_MAP).slice(0, 8) };
         try{ console.log('[v4.11.24] debug', o); }catch(e){}
@@ -7380,11 +7498,12 @@ document.addEventListener('DOMContentLoaded', function(){
           return resolve(TR.rows || []);
         }
         var u = us[i++];
-        status('载入中…（飞书日报全量，约 10~20 秒）', 'var(--gold)');
+        status('载入中…（飞书日报全量，实测约 20~40 秒，上限 120 秒）', 'var(--gold)');
         var ctrl = ('AbortController' in window) ? new AbortController() : null;
-        var tmr = ctrl ? setTimeout(function(){ try{ ctrl.abort(); }catch(e){} }, 60000) : null;
+        var tmr = ctrl ? setTimeout(function(){ try{ ctrl.abort(); }catch(e){} }, 120000) : null;
+        // v4.11.62：趋势只读七列 + 两个综合分 ⇒ 剔除「完整主播报告」；超时 60s → 120s
         fetch(u, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                   body: JSON.stringify({ key: 'daily', limit: 1200 }),
+                   body: JSON.stringify({ key: 'daily', limit: 500, omit: ['完整主播报告'], stop_at: 1 }),
                    signal: ctrl ? ctrl.signal : undefined })
           .then(function(r){ if(tmr) clearTimeout(tmr); if(!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
           .then(function(d){

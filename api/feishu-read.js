@@ -11,6 +11,18 @@
  *   可选：view_id（指定视图）、limit（默认 300，上限 1200）
  * 返回：{ok:true, table:{table_id,name}, fields:['日期','主播',...], rows:[{日期:'…', …}], total:n, total_all:表内总数, limited:是否被截断}
  *
+ * v4.11.62（2026-11-09）：新增 omit / stop_at 两个可选参数（都不传时行为与 v4.11.52 完全一致）。
+ *   omit    ：要剔除的字段名，字符串（逗号分隔）或数组。**既用 field_names 让飞书少传，
+ *             也在服务端从结果里删掉**，两道保险。
+ *   起因（2026-11-09 实测）：主播日报表 474 行里「完整主播报告」占 79%（753 万字 / 9.1MB），
+ *     历史评分表 703 行里占 82%（927 万字 / 10.7MB）。前端 20 秒超时 ⇒ 必然/大概率失败
+ *     ⇒ 静默回退静态快照（停在 2026-10-20）⇒「每周一数据不更新」的表象。
+ *   ⚠️ 实测校正（别指望 omit 提速）：飞书 500 行**仅 2 字段**也要 29.8 秒，全字段 35.9 秒
+ *     —— 因为表里有 7 个公式字段（日报）/ 3 个（历史），飞书读取时全表重算，与返回多少字段无关。
+ *     omit 的价值是**把响应从 13.4MB 降到 0.96MB**（省传输/浏览器解析/DOM 体积），只省约 6 秒。
+ *     提速必须靠「减少行数」+「前端超时放宽」，两者已在壳层配套（v4.11.62）。
+ *   stop_at ：'1' 时「拉够 limit 条即停止翻页」。**只对「新记录在表头」的表安全**
+ *             （日报表是 upsert 先删后建 ⇒ 头在前；历史评分表新记录在尾部 ⇒ 严禁使用）。
  * v4.11.52（2026-10-30）：修正「超限时丢最新记录」——改为拉全部分页后按日期保留最新 limit 条。
  * v4.11.49（2026-10-21）：补齐 DateTime(type=5) 字段的毫秒 → 'YYYY-MM-DD' 转换。
  * 在此之前该字段原样 String() 输出，导致工作台「日期」列显示裸时间戳、月份分组全部落「未填」。
@@ -90,10 +102,14 @@ async function listTables(token){
   return (r.data && r.data.items || []).map(t => ({table_id: t.table_id, name: t.name}));
 }
 
-async function listRecordsPage(token, tableId, pageSize, pageToken, viewId){
+async function listRecordsPage(token, tableId, pageSize, pageToken, viewId, fieldNames){
   let path = '/open-apis/bitable/v1/apps/'+BASE_TOKEN+'/tables/'+tableId+'/records?page_size='+pageSize;
   if(viewId) path += '&view_id=' + encodeURIComponent(viewId);
   if(pageToken) path += '&page_token=' + encodeURIComponent(pageToken);
+  // v4.11.62：field_names 让飞书**不要返回**这些字段，从源头减小响应
+  if(fieldNames && fieldNames.length){
+    try{ path += '&field_names=' + encodeURIComponent(JSON.stringify(fieldNames)); }catch(e){}
+  }
   const r = await httpsJson({
     hostname:'open.feishu.cn', path: path,
     method:'GET', headers:{'Authorization':'Bearer '+token}
@@ -133,6 +149,7 @@ function msToDate(ms){
 }
 
 // 字段元数据缓存（同一 serverless 实例内复用，避免每次取记录都多打一次 /fields）
+// v4.11.62：顺带缓存「全部字段名」，供 omit 走 field_names
 const DATE_FIELD_CACHE = Object.create(null);
 const DATE_FIELD_TTL = 10 * 60 * 1000;
 
@@ -147,14 +164,40 @@ async function dateFieldsOf(token, tableId){
     });
     if(r.code !== 0) throw new Error(r.msg || ('code=' + r.code));
     const set = Object.create(null);
-    ((r.data && r.data.items) || []).forEach(function(f){ if(f.type === 5) set[f.field_name] = 1; });
-    DATE_FIELD_CACHE[tableId] = { set: set, exp: Date.now() + DATE_FIELD_TTL };
+    const all = [];
+    ((r.data && r.data.items) || []).forEach(function(f){
+      if(f.type === 5) set[f.field_name] = 1;
+      if(f.field_name) all.push(f.field_name);
+    });
+    DATE_FIELD_CACHE[tableId] = { set: set, all: all, exp: Date.now() + DATE_FIELD_TTL };
     return set;
   }catch(e){
     // 取不到元数据时**保留原值**：宁可日期显示丑，也不能把数值字段误改成日期
     console.log('[feishu-read] 字段元数据读取失败（' + tableId + '）：' + ((e && e.message) || e) + ' ⇒ 日期列按原值输出');
     return Object.create(null);
   }
+}
+
+// v4.11.62：取不到字段清单时返回 [] ⇒ 调用方退回「服务端剔除」，结果仍然正确
+async function allFieldsOf(token, tableId){
+  const c = DATE_FIELD_CACHE[tableId];
+  if(c && Date.now() < c.exp) return c.all || [];
+  await dateFieldsOf(token, tableId);
+  const c2 = DATE_FIELD_CACHE[tableId];
+  return (c2 && c2.all) || [];
+}
+
+// v4.11.62：omit 参数归一化 —— 接受 '甲,乙' 或 ['甲','乙']，空值返回 null
+function parseOmit(v){
+  if(!v) return null;
+  const arr = Array.isArray(v) ? v : String(v).split(',');
+  const set = Object.create(null);
+  let n = 0;
+  arr.forEach(function(x){
+    const s = String(x || '').trim();
+    if(s){ set[s] = 1; n++; }
+  });
+  return n ? set : null;
 }
 
 function normalizeRecord(rec, dtf){
@@ -216,13 +259,31 @@ module.exports = async function handler(req, res){
     if(!tableId) return res.status(200).json({ok:false, reason:'缺少 table_id 或 key'});
 
     const limit = Math.min(parseInt(data.limit || '300', 10) || 300, 1200);
+    const omitSet = parseOmit(data.omit);                        // v4.11.62
+    const stopAt = String(data.stop_at || '') === '1';           // v4.11.62
     const dtf = await dateFieldsOf(token, tableId);   // type===5 字段名集合，见上方 msToDate 说明
+    // v4.11.62：先算好要保留的字段名，让飞书**不返回**被 omit 的字段（拿不到清单则退回纯服务端剔除）
+    let fieldNames = null;
+    if(omitSet){
+      const all = await allFieldsOf(token, tableId);
+      if(all && all.length){
+        const keep = all.filter(function(n){ return !omitSet[n]; });
+        if(keep.length && keep.length < all.length) fieldNames = keep;
+      }
+    }
     let rows = [], pageToken = '', guard = 0;
     do{
-      const d = await listRecordsPage(token, tableId, 500, pageToken, data.view_id || '');
-      rows = rows.concat((d.items || []).map(function(rec){ return normalizeRecord(rec, dtf); }));
+      const d = await listRecordsPage(token, tableId, 500, pageToken, data.view_id || '', fieldNames);
+      rows = rows.concat((d.items || []).map(function(rec){
+        const o = normalizeRecord(rec, dtf);
+        if(omitSet){ for(const k in omitSet){ if(k in o) delete o[k]; } }
+        return o;
+      }));
       pageToken = d.has_more ? (d.page_token || '') : '';
       guard++;
+      // 拉够就停：**只对「新记录在表头」的表安全**（日报表先删后建 ⇒ 头在前）。
+      // 历史评分表新记录在尾部，传 stop_at 会丢掉最新记录 —— 前端不得对该表使用。
+      if(stopAt && rows.length >= limit) break;
     }while(pageToken && guard < 20);                  // 20×500 = 1 万条护栏，防死循环
 
     // ---------- v4.11.52（2026-10-30）：超限时保留「最新」而不是「最早」 ----------
@@ -262,7 +323,11 @@ module.exports = async function handler(req, res){
     return res.status(200).json({
       ok:true, key: key || '', table:{table_id: tableId, name: tableName || tableId},
       columns: cols, rows: rows, total: rows.length, total_all: totalAll,
-      limited: totalAll > rows.length
+      limited: totalAll > rows.length,
+      // v4.11.62：回显实际剔除的字段，便于排查「为什么少了一列」
+      omitted: omitSet ? Object.keys(omitSet) : [],
+      // v4.11.62：是否走了 field_names（false ⇒ 只是服务端删字段，响应仍大）
+      fieldFiltered: !!fieldNames
     });
   }catch(e){
     return res.status(200).json({ok:false, error: e.message});
