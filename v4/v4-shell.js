@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.63';
+var V4_VERSION = 'v4.11.64';
 // v4.11.36：存档格式版本 ≠ 壳层版本。rawV 只在「rawTotal/rawPen/rawBlk 这套字段的形态真变」时才动，
 //   **不跟 V4_VERSION 走**（否则每次改样式/改文案都要假装改了存档格式，溯源反而失真）。
 //   ⚠️ 渲染侧从不读 rawV（write-only 溯源标记）；断言请读本常量，别跟 V4_VERSION 比。
@@ -1623,8 +1623,15 @@ function v4FsShowSync(){
   }catch(e){ fb = null; }
   if(!fb){ warn.textContent = ''; warn.title = ''; return; }
   var asOf = fb.syncedAt ? String(fb.syncedAt) : '未知';
-  warn.textContent = '⚠️ 云端取数失败，当前为本地快照（截至 ' + asOf + '，' + (fb.rows || 0) + ' 条）';
-  warn.title = '失败原因：' + fb.reason + '\n解决：点「立即同步飞书」重试；若持续失败说明飞书接口超时或未部署。';
+  // v4.11.64：区分兜底来源 —— 「上次成功」和「三周前的静态快照」完全是两种性质，不能同一句话。
+  if(fb.source === 'lastGood'){
+    warn.textContent = '⚠️ 飞书暂不可读（表格正在重算），当前显示上次成功同步：' + asOf +
+                       '，' + (fb.rows || 0) + ' 条';
+  }else{
+    warn.textContent = '⚠️ 云端取数失败，当前为本地快照（截至 ' + asOf + '，' + (fb.rows || 0) + ' 条）';
+  }
+  warn.title = '失败原因：' + fb.reason +
+               '\n已自动重试 1 次。可点「立即同步飞书」再试；若反复出现，说明飞书表格正在大批量重算（公式列），通常 1 分钟内恢复。';
   warn.style.color = '#c0392b';
   warn.style.fontWeight = '600';
 }
@@ -2037,6 +2044,8 @@ document.addEventListener('DOMContentLoaded', function(){
       if(window.V4CLOUD){
         window.V4CLOUD.cache = {};
         window.V4CLOUD.fallback = {};
+        // v4.11.64：连进行中的请求一起去重表清掉，否则「立即同步」会复用到上一次失败的 promise
+        try{ for(var ik in window.V4CLOUD.inflight) delete window.V4CLOUD.inflight[ik]; }catch(e){}
       }
     }catch(e){}
     var warn = document.getElementById('fsWarn');
@@ -3147,9 +3156,12 @@ document.addEventListener('DOMContentLoaded', function(){
 
     var V4CLOUD = {
       cache: {},          // key -> {data, ts}；data=null 表示上次失败
-      fallback: {},       // v4.11.63：key -> {ts, reason, syncedAt} 记录「云端失败、已回退静态快照」
+      fallback: {},       // v4.11.63：key -> {ts, reason, syncedAt, source} 记录「云端失败、已回退」
                           //   ⚠️ 这是「连续几周没人发现数据是旧的」的正面解药：
                           //     原来失败只写 console，页面照常显示 10-20 的快照，用户毫不知情。
+      lastGood: {},       // v4.11.64：key -> {data, at} 本次会话内**最后一次成功**的云端结果。
+                          //   失败兜底优先用它（几小时前的真实数据），而不是 data/*.js 静态快照
+                          //   （停在 2026-10-20，等于三周前 —— 那种兜底等于没有兜底）。
       TTL: 60000,         // 成功缓存 60s（飞书接口限流约 100 次/分/应用）
       FAIL_TTL: 30000,    // 失败缓存 30s，避免反复重试拖慢界面
       grace: 300000,      // 本机 5 分钟内新评的记录优先于远端（飞书回写可能有延迟）
@@ -3301,10 +3313,16 @@ document.addEventListener('DOMContentLoaded', function(){
       return;
     }
 
+    // v4.11.64：并发去重。原先 cache 只在**请求成功后**才写入，导致同一张表被并发调用时
+    //   （日报页 + 三评面板 + 趋势页预热会在同一秒内各调一次）会各发一条 30 秒的重请求。
+    //   飞书对同一张表的并发读取会返回 1254607「Data not ready」—— 等于我们自己把并发拉满、
+    //   再被飞书拒掉。这里把进行中的 promise 存起来复用，同一 key 同一时刻只打一条。
+    var INFLIGHT = (V4CLOUD.inflight = V4CLOUD.inflight || Object.create(null));
     function cloudEnsure(key){
       var now = Date.now();
       var c = V4CLOUD.cache[key];
       if(c && (now - c.ts) < (c.data ? V4CLOUD.TTL : V4CLOUD.FAIL_TTL)) return Promise.resolve(c.data);
+      if(INFLIGHT[key]) return INFLIGHT[key];
 
       var task;
       if(key === '_index'){
@@ -3313,21 +3331,49 @@ document.addEventListener('DOMContentLoaded', function(){
         var payload = /^tbl_/.test(key)
           ? withOmit({ action: 'records', table_id: key.slice(4), limit: V4CLOUD.limit }, key.slice(4), false)
           : withOmit({ action: 'records', key: key, limit: (LIMIT_BY_KEY[key] || V4CLOUD.limit) }, key, key === 'daily');
-        task = fetchCloud(payload, READ_TIMEOUT).then(function(j){
-          j.syncedAt = stamp();
-          window.V4FS = window.V4FS || {};
-          window.V4FS[key] = j;
-          return j;
+        var attempt = function(){
+          return fetchCloud(payload, READ_TIMEOUT).then(function(j){
+            j.syncedAt = stamp();
+            window.V4FS = window.V4FS || {};
+            window.V4FS[key] = j;
+            return j;
+          });
+        };
+        // v4.11.64：失败后自动重试一次（间隔 5 秒）。
+        // 起因（11-10 实测）：飞书 `1254607 Data not ready` = 公式列全表重算中，
+        //   窗口通常十几秒到一分钟。服务端已退避重试 4 次（约 14s），但一次仍失败
+        //   **不代表表一直不可读**。原实现失败即回退，用户必须手点「重新载入」，
+        //   否则页面永远停在旧数据 —— 这正是「重新打开还是失败」的直接原因。
+        task = attempt()['catch'](function(e1){
+          console.log('[v4.11.64] 首次取数失败（' + ((e1 && e1.message) || e1) + '）⇒ 5 秒后自动重试一次');
+          return new Promise(function(res, rej){
+            setTimeout(function(){ attempt().then(res)['catch'](rej); }, 5000);
+          });
         });
       }
-      return task.then(function(d){
+      var finalP = task.then(function(d){
         V4CLOUD.cache[key] = { data: d, ts: Date.now() };
+        // v4.11.64：记住本次成功的结果，作为后续失败的兜底（比静态快照新得多）
+        if(d && d.rows && d.rows.length) V4CLOUD.lastGood[key] = { data: d, at: stamp() };
         delete V4CLOUD.fallback[key];                 // v4.11.63：成功即清掉回退警示
         return d;
       })['catch'](function(e){
         V4CLOUD.cache[key] = { data: null, ts: Date.now() };
         var why = (e && e.message) || String(e);
-        console.log('[v4.11.11] 云端读取失败 → 回退静态快照 | ' + key + ' | ' + why);
+        console.log('[v4.11.11] 云端读取失败 | ' + key + ' | ' + why);
+        // v4.11.64：兜底优先级 —— ①本次会话上一次成功的结果 ②data/*.js 静态快照
+        //   静态快照停在 2026-10-20，拿它兜底等于让用户看三周前的数据。
+        var lg = V4CLOUD.lastGood[key];
+        if(lg && lg.data && lg.data.rows && lg.data.rows.length){
+          console.log('[v4.11.64] 改用上次成功结果兜底（' + lg.data.rows.length + ' 条，' + lg.at + '）');
+          V4CLOUD.fallback[key] = {
+            ts: Date.now(), reason: why,
+            rows: lg.data.rows.length,
+            syncedAt: lg.at || lg.data.syncedAt || '',
+            source: 'lastGood'
+          };
+          return Promise.resolve(lg.data);
+        }
         // v4.11.63：把「这次是回退」记下来，供 v4FsShowSync() 在页面上明确警示。
         //   不回退会让页面停在旧数据却看起来一切正常 —— 那正是这次故障藏了几周的原因。
         return Promise.resolve(_origEnsure(key)).then(function(d){
@@ -3335,11 +3381,17 @@ document.addEventListener('DOMContentLoaded', function(){
             ts: Date.now(),
             reason: why,
             rows: (d && d.rows) ? d.rows.length : 0,
-            syncedAt: (d && d.syncedAt) || ''
+            syncedAt: (d && d.syncedAt) || '',
+            source: 'snapshot'
           };
           return d;
         });
       });
+      INFLIGHT[key] = finalP;
+      // 无论成功失败都清掉占用，下一次调用才会重新发起
+      finalP['catch'](function(){ delete INFLIGHT[key]; });
+      finalP.then(function(){ delete INFLIGHT[key]; });
+      return finalP;
     }
 
     window.v4FsEnsure = function(key){
@@ -3355,6 +3407,8 @@ document.addEventListener('DOMContentLoaded', function(){
     if(typeof _origReload === 'function'){
       window.v4FsReload = function(){
         V4CLOUD.cache = {};
+        // v4.11.64：同「立即同步」，进行中的请求也要清，否则会复用上一次的结果
+        try{ for(var ik in V4CLOUD.inflight) delete V4CLOUD.inflight[ik]; }catch(e){}
         console.log('[v4.11.11] 云端缓存已清空，强制重取');
         return _origReload.apply(this, arguments);
       };

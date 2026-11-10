@@ -11,6 +11,15 @@
  *   可选：view_id（指定视图）、limit（默认 300，上限 1200）
  * 返回：{ok:true, table:{table_id,name}, fields:['日期','主播',...], rows:[{日期:'…', …}], total:n, total_all:表内总数, limited:是否被截断}
  *
+ * v4.11.64（2026-11-10）：飞书 `1254607 Data not ready` 退避重试 —— 这才是「数据不更新」的真根因。
+ *   实测（11-10 10:20，线上接口 12 并发、前端真实参数）：**成功 2/12**，其余 10 次全部返回
+ *   {"ok":false,"error":"拉取记录失败: Data not ready, please try again later code=1254607"}。
+ *   1254607 = 飞书多维表格**公式字段正在全表重算**。日报 7 个公式列、历史 3 个，
+ *   任何一次写入（评分 / 补算 / 去重）都会触发全表重算，窗口内读表必然报它。
+ *   原实现对此**零重试** ⇒ 一次撞上就整条失败 ⇒ 前端回退 10-20 的静态快照。
+ *   ⚠️ 这与「超时」「配置」「字段」全都无关 —— 所以「什么都没改也会坏」。
+ *   处置：仅对可恢复错误（1254607 / 429 / 99991663 / 网络异常）退避重试 4 次（累计约 13.8 秒）；
+ *        1254045（字段名错）与权限类错误**不重试**，避免把真正的配置问题拖成超时。
  * v4.11.63（2026-11-09）：两处健壮性收紧（都不改变默认输出的数据内容）。
  *   ① `field_names` 命中 `1254045 FieldNameNotFound` 时自动**去掉该参数重试一次**。
  *     起因：飞书对 field_names 严格校验——任一字段名不符就**整条请求拒绝**（实测：混入一个
@@ -119,6 +128,43 @@ async function listTables(token){
 //   请求就会整条失败 ⇒ 前端静默回退静态快照 ⇒ 表现成「数据又不更新了」，与本轮要修的病一模一样。
 // 处置：命中 1254045 时**自动去掉 field_names 重试一次**（服务端仍会剔除 omit 字段，结果等价）；
 //   其它错误码照旧抛错。返回值带上 `fieldFiltered` 告诉调用方这次到底有没有走字段过滤。
+// ---------- v4.11.64（2026-11-10）：飞书 1254607「Data not ready」重试 ----------
+// 现场实测（2026-11-10 10:20，线上接口 12 并发，前端真实参数 omit+limit1200+stop_at）：
+//   成功 2/12；其余 10 次全部返回
+//   {"ok":false,"error":"拉取记录失败: Data not ready, please try again later code=1254607"}
+// 这是飞书多维表格**公式字段正在全表重算**时的标准回应 —— 既不是配置错，也不是超时或权限问题。
+// 主播日报有 7 个公式字段、历史评分 3 个，任何一次写入（评分 / 补算 / 去重）都会触发全表重算；
+// 重算窗口内读表必然 1254607。而本文件原先**对它没有任何重试**，一次碰上就整条失败，
+// 前端随即回退 data/daily.js 静态快照（停在 2026-10-20）⇒ 用户看到的就是「数据不更新」。
+// 这解释了「什么设置都没改却坏了」：坏的从来不是设置，是**读出时机撞上重算窗口**。
+// 处置：仅对可恢复错误退避重试（4 次，累计约 13.8 秒）；1254045 / 权限类错误一律不重试。
+const RETRY_DELAYS = [800, 2000, 4000, 7000];
+function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
+function isRetryableCode(r){
+  if(!r) return true;
+  const c = Number(r.code);
+  if(c === 1254607 || c === 429 || c === 99991663) return true;      // Data not ready / 限流 / 系统繁忙
+  return /not ready|try again|too many request|rate limit|internal error/i.test(String(r.msg || ''));
+}
+async function httpsJsonRetry(opts, body, tag, maxRetry){
+  const delays = (maxRetry === undefined) ? RETRY_DELAYS : RETRY_DELAYS.slice(0, maxRetry);
+  let last = null;
+  for(let i = 0; i <= delays.length; i++){
+    let r = null, err = null;
+    try{ r = await httpsJson(opts, body); }
+    catch(e){ err = e; }
+    if(!err && r && Number(r.code) === 0) return r;
+    last = r || { code: -1, msg: (err && err.message) || String(err) };
+    const retryable = err ? true : isRetryableCode(r);
+    if(!retryable || i >= delays.length) return last;
+    console.log('[feishu-read] ' + (tag || 'read') + ' code=' + last.code + ' ' +
+                String(last.msg || '').slice(0, 60) + ' ⇒ 第 ' + (i + 1) + '/' + delays.length +
+                ' 次重试（' + delays[i] + 'ms 后）');
+    await sleep(delays[i]);
+  }
+  return last;
+}
+
 async function listRecordsPage(token, tableId, pageSize, pageToken, viewId, fieldNames){
   const base = '/open-apis/bitable/v1/apps/' + BASE_TOKEN + '/tables/' + tableId + '/records?page_size=' + pageSize
              + (viewId ? '&view_id=' + encodeURIComponent(viewId) : '')
@@ -128,7 +174,10 @@ async function listRecordsPage(token, tableId, pageSize, pageToken, viewId, fiel
   if(fieldNames && fieldNames.length){
     let path2 = base;
     try{ path2 += '&field_names=' + encodeURIComponent(JSON.stringify(fieldNames)); }catch(e){}
-    const r = await httpsJson({ hostname:'open.feishu.cn', path: path2, method:'GET', headers: headers });
+    // 这个请求必须给足重试：1254607 是**表级锁定**，与请求内容无关，
+    // 退回全字段同样会被拒，只是多传 12MB。宁可在这里等，也不要退化成全字段重来。
+    const r = await httpsJsonRetry({ hostname:'open.feishu.cn', path: path2, method:'GET', headers: headers },
+                                   null, 'fields-filter table=' + tableId);
     if(r.code === 0) return { d: r.data || {}, fieldFiltered: true };
     if(Number(r.code) !== 1254045){
       throw new Error('拉取记录失败: ' + (r.msg||'') + ' code=' + r.code);
@@ -137,7 +186,8 @@ async function listRecordsPage(token, tableId, pageSize, pageToken, viewId, fiel
                 '）⇒ 已退回全字段重试，omit 改由服务端剔除');
   }
 
-  const r2 = await httpsJson({ hostname:'open.feishu.cn', path: base, method:'GET', headers: headers });
+  const r2 = await httpsJsonRetry({ hostname:'open.feishu.cn', path: base, method:'GET', headers: headers },
+                                  null, 'records table=' + tableId);
   if(r2.code !== 0) throw new Error('拉取记录失败: ' + (r2.msg||'') + ' code=' + r2.code);
   return { d: r2.data || {}, fieldFiltered: false };
 }
@@ -181,11 +231,13 @@ async function dateFieldsOf(token, tableId){
   const c = DATE_FIELD_CACHE[tableId];
   if(c && Date.now() < c.exp) return c.set;
   try{
-    const r = await httpsJson({
+    // 元数据只重试 1 次：它失败有降级（日期列按原值输出），不值得占掉十几秒 ——
+    // 实测 12 并发时它自己先撞 1254607，等满 4 次（13.8s）才轮到真正读记录，白耗时间。
+    const r = await httpsJsonRetry({
       hostname: 'open.feishu.cn',
       path: '/open-apis/bitable/v1/apps/' + BASE_TOKEN + '/tables/' + tableId + '/fields?page_size=100',
       method: 'GET', headers: { 'Authorization': 'Bearer ' + token }
-    });
+    }, null, 'fields table=' + tableId, 1);
     if(r.code !== 0) throw new Error(r.msg || ('code=' + r.code));
     const set = Object.create(null);
     const all = [];
