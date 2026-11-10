@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.64';
+var V4_VERSION = 'v4.11.65';
 // v4.11.36：存档格式版本 ≠ 壳层版本。rawV 只在「rawTotal/rawPen/rawBlk 这套字段的形态真变」时才动，
 //   **不跟 V4_VERSION 走**（否则每次改样式/改文案都要假装改了存档格式，溯源反而失真）。
 //   ⚠️ 渲染侧从不读 rawV（write-only 溯源标记）；断言请读本常量，别跟 V4_VERSION 比。
@@ -123,6 +123,15 @@ function v4Navigate(){
   if(key === 'dashboard') try{ v4RenderDashboard(); }catch(e){}
   if(key === 'settings')  try{ v4RenderSettings(); }catch(e){}
   if(key === 'feishu')    try{ v4FeishuLoad(curT || 'daily'); }catch(e){}
+  // v4.11.65（2026-11-10）修「历史页看不到飞书全员记录」：本函数原来只处理
+  //   dashboard / settings / feishu / trend / problem，**没有 history / golden / cases**。
+  //   而文件末尾启动脚本里的 v4ArchRender('history') 又早于「云端包装器」安装（包装器在
+  //   本文件靠后才执行）⇒ 启动那次渲染不带云端拉取；之后切到历史页也不再渲染 ⇒
+  //   既不渲染也不发请求，页面永远停在初始文案「暂无存档记录——完成一次评分后自动归档」。
+  //   现补上：每次切到这三页都重渲染一次（云端拉取由包装器的 8 秒防抖 + 60 秒 TTL 管住）。
+  if(key === 'history' || key === 'golden' || key === 'cases'){
+    try{ if(typeof window.v4ArchRender === 'function') window.v4ArchRender(key); }catch(e){}
+  }
   // v4.11.61：主播趋势页（飞书日报「主播最终综合评分」自定义周期趋势）
   if(key === 'trend')     try{ v4TrendBoot(); }catch(e){ console.error('[v4.11.61] 趋势页渲染异常:', e); }
   // v4.8.10 关键：切到「问题库」页时主动重渲染，确保培训清单芯片一定生成
@@ -3253,6 +3262,11 @@ document.addEventListener('DOMContentLoaded', function(){
       }
       return next();
     }
+    // v4.11.65（2026-11-10）修「历史页全员记录永远空」：历史库那一层在**另一个 IIFE** 里，
+    //   却直接写了 `fetchCloud(...)` ⇒ ReferenceError: fetchCloud is not defined。
+    //   该异常被 ensureCloud 的 .catch 吞掉并 return null ⇒ 上层判定「飞书暂无全员记录」，
+    //   于是即便摘要已成功拉到 563 条，页面仍只显示本机存档。现把入口暴露到 window 供其调用。
+    window.v4CloudFetch = fetchCloud;
 
     // ---- 表名 → 逻辑键（与 api/feishu-read.js 的 NAME_KEYS 同口径，先精确后模糊）----
     // 顺序即优先级：「周总结-明星主播」必须先于「周总结」，「历史评分汇总」必须先于「历史评分」
@@ -5012,8 +5026,16 @@ document.addEventListener('DOMContentLoaded', function(){
     function kickReports(force){
       if(!force && RPT_LOADED) return Promise.resolve(true);
       if(RPT_P) return RPT_P;
+      // v4.11.65：本层与「云端取数层」不是同一个 IIFE，必须走 window 入口
+      //   （原来写裸 fetchCloud / 裸 V4CLOUD ⇒ 前者 ReferenceError、后者同样越界）
+      if(typeof window.v4CloudFetch !== 'function'){
+        RPT_LOADING = false; RPT_FAILS++;
+        log('完整报告后台拉取跳过：云端取数入口未就绪（window.v4CloudFetch 缺失）');
+        return Promise.resolve(false);
+      }
       RPT_LOADING = true;
-      RPT_P = fetchCloud({ action: 'records', key: 'history', limit: V4CLOUD.limit }, RPT_TIMEOUT)   // 不带 omit：这一批就是要报告列
+      var _lim = (window.V4CLOUD && window.V4CLOUD.limit) || 1200;
+      RPT_P = window.v4CloudFetch({ action: 'records', key: 'history', limit: _lim }, RPT_TIMEOUT)   // 不带 omit：这一批就是要报告列
         .then(function(j){
           var r = applyReports((j && j.rows) || []);
           RPT_LOADED = true; RPT_LOADING = false; RPT_P = null; RPT_FAILS = 0; RPT_AT = Date.now();
