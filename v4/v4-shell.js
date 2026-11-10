@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.65';
+var V4_VERSION = 'v4.11.66';
 // v4.11.36：存档格式版本 ≠ 壳层版本。rawV 只在「rawTotal/rawPen/rawBlk 这套字段的形态真变」时才动，
 //   **不跟 V4_VERSION 走**（否则每次改样式/改文案都要假装改了存档格式，溯源反而失真）。
 //   ⚠️ 渲染侧从不读 rawV（write-only 溯源标记）；断言请读本常量，别跟 V4_VERSION 比。
@@ -1562,7 +1562,8 @@ var V4_LAST_SCORE_DATE = '';
 
 // ---------- 7.7 飞书数据表内嵌渲染（v4.6：读本地同步产物 data/*.js，全程不跳转飞书） ----------
 var V4_FS_NAMES = {daily:'主播日报', top1:'多主播TOP1评分', week:'周总结', weekstar:'周总结-明星主播', month:'月总结', reward:'激励记录', punish:'惩罚记录'};
-var V4_FS_STATE = {key:'', table:null, columns:[], rows:[], syncedAt:''};
+// v4.11.66：补 limited / totalAll —— 截断原来只写进状态栏一行 12px 小字，是「数据静默变少」的盲区。
+var V4_FS_STATE = {key:'', table:null, columns:[], rows:[], syncedAt:'', limited:false, totalAll:null};
 var V4_FS_PENDING = {};
 
 // 以 <script src> 注入载入：file:// 双击打开也能用（fetch/XHR 在 file:// 会被 CORS 拦截）
@@ -1618,6 +1619,8 @@ function v4FsNoData(key){
   box.innerHTML = '<div class="fs-tip">' + tip + '</div>';
 }
 function v4FsShowSync(){
+  // v4.11.66：顶部预警条（回退快照 / 已截断 / 临近触顶）统一在这里刷新
+  try{ v4FsBanner(); }catch(e){}
   var el = document.getElementById('fsSyncAt');
   if(el) el.textContent = V4_FS_STATE.syncedAt ? ('最近同步：' + V4_FS_STATE.syncedAt) : '';
   // v4.11.63：云端失败、当前显示的是本地静态快照时，**必须在页面顶部显式警示**。
@@ -1645,9 +1648,98 @@ function v4FsShowSync(){
   warn.style.fontWeight = '600';
 }
 var V4_FS_REQUEST_ID = 0;
+
+// ---------- v4.11.66：页面顶部预警条 ----------
+// 起因（2026-11-10 结构体检实测）：
+//   ① 接口单次上限 1200 行，触顶后会**静默丢弃最早的数据**，而原来只在状态栏角落
+//      写 4 个字「（已达上限）」，12px 小字 + 排在表格名后面 ⇒ 等于没有提示；
+//   ② 日报表实测 443 行、11.97 行/日（10-03~11-08 现测，非外推）⇒ 约 63 天触顶；
+//   ③ 该表 41 个字段里 7 个是公式列，飞书按**全表重算** ⇒ 行数越多越慢，
+//      90 秒超时是硬墙，撞上就回退旧数据。
+// 所以把「会静默变少/变慢」的三件事提到页面顶部大字：回退快照（红）、已截断（橙）、临近触顶（橙）。
+// 口径：增长率从本次数据的日期跨度现算，不写死数字；达上限 85% 即预警。
+function v4FsDaysToLimit(n, lim, rows){
+  try{
+    var ds = [];
+    for(var i = 0; i < (rows || []).length; i++){
+      var v = rows[i]['标准日期'] || rows[i]['日期'] || rows[i]['日报'] || '';
+      var m = String(v).match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+      if(m) ds.push(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+    }
+    if(ds.length < 2) return 0;
+    ds.sort(function(a, b){ return a - b; });
+    var span = (ds[ds.length - 1] - ds[0]) / 86400000 + 1;
+    if(!(span > 0)) return 0;
+    var rate = n / span;                       // 行/天（实测口径）
+    if(!(rate > 0)) return 0;
+    return Math.max(1, Math.round((lim - n) / rate));
+  }catch(e){ return 0; }
+}
+function v4FsBanner(){
+  var el = document.getElementById('fsBanner');
+  if(!el) return;
+  // 本地转义：本层闭包里没有 esc（它在另外两个闭包里）⇒ 裸调用必 ReferenceError，
+  //   且会被上层 .catch 吞成「无数据」假象（v4.11.65 的 fetchCloud 就是这么坏的）。
+  var _esc = function(s){
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  };
+  var st = V4_FS_STATE || {};
+  var out = [];
+  // ① 云端取不到数、当前是兜底数据 —— 红色（沿用 fsWarn 同源判断，但提到顶部）
+  var fb = null;
+  try{ fb = (window.V4CLOUD && window.V4CLOUD.fallback) ? window.V4CLOUD.fallback[st.key || ''] : null; }catch(e){ fb = null; }
+  if(fb){
+    var asOf = fb.syncedAt ? String(fb.syncedAt) : '未知';
+    out.push({
+      lv: 'red',
+      tx: (fb.source === 'lastGood'
+        ? '飞书暂时读不到（表格正在重算公式），当前显示上次成功同步：' + asOf + '，' + (fb.rows || 0) + ' 条'
+        : '云端取数失败，当前为本地快照（截至 ' + asOf + '，' + (fb.rows || 0) + ' 条）'),
+      tip: '失败原因：' + (fb.reason || '未记录') + '\n已自动重试 1 次。可点「立即同步飞书」再试；若反复出现说明飞书正在大批量重算公式列，通常 1 分钟内恢复。'
+    });
+  }
+  var n = (st.rows || []).length;
+  var lim = window.V4_FS_LIMIT_MAX || 0;
+  // ② 已截断 —— 橙色。这是「数据静默变少」的直接原因，必须说清丢的是哪一头
+  if(st.limited){
+    out.push({
+      lv: 'orange',
+      tx: '已截断：只加载了最新 ' + n + ' 条' + (st.totalAll ? '（表内共 ' + st.totalAll + ' 条）' : '') +
+          '，更早的数据本次未加载' + (lim ? '（单次上限 ' + lim + ' 行）' : ''),
+      tip: '触顶后接口保留最新数据、丢弃最早的。要恢复更早的数据，需先把旧行归档：\n_verify/_archive_old_rows.py（默认演练，--apply 才落地）'
+    });
+  }else if(lim && n / lim >= 0.85){
+    // ③ 临近触顶 —— 橙色预警
+    var days = v4FsDaysToLimit(n, lim, st.rows);
+    out.push({
+      lv: 'orange',
+      tx: '行数预警：当前 ' + n + ' 行，已用掉单次上限 ' + lim + ' 行的 ' + Math.round(100 * n / lim) + '%' +
+          (days > 0 ? '，按实测增长速度约 ' + days + ' 天后触顶' : ''),
+      tip: '触顶后最早的数据将不再加载。建议提前把 3 个月前的旧行归档到别处。'
+    });
+  }
+  if(!out.length){ el.style.display = 'none'; el.innerHTML = ''; return; }
+  var h = '';
+  for(var i = 0; i < out.length; i++){
+    var o = out[i];
+    var bg = o.lv === 'red' ? '#fdecea' : '#fff4e0';
+    var bd = o.lv === 'red' ? '#e9a49c' : '#f0c36d';
+    var cl = o.lv === 'red' ? '#a5271b' : '#8a5300';
+    h += '<div class="fs-banner-item" title="' + _esc(o.tip) + '" style="background:' + bg +
+         ';border:1px solid ' + bd + ';color:' + cl + ';padding:8px 12px;border-radius:8px;' +
+         'font-size:13px;font-weight:600;line-height:1.55;margin-bottom:6px">' +
+         (o.lv === 'red' ? '⛔ ' : '⚠️ ') + _esc(o.tx) + '</div>';
+  }
+  el.innerHTML = h;
+  el.style.display = '';
+}
+
 function v4FeishuLoad(key){
   var requestId = ++V4_FS_REQUEST_ID;
   V4_FS_STATE.key = key;
+  V4_FS_STATE.limited = false;      // v4.11.66：每次换表先复位，避免上一张表的截断状态串过来
+  V4_FS_STATE.totalAll = null;
   var box = document.getElementById('v4arch-feishu');
   var st = document.getElementById('fsStatus');
   var ttl = document.getElementById('fs-title');
@@ -1708,6 +1800,9 @@ function v4FeishuLoad(key){
     V4_FS_STATE.columns = d.columns || [];
     V4_FS_STATE.rows = d.rows || [];
     V4_FS_STATE.syncedAt = d.syncedAt || '';
+    // v4.11.66：把「是否被截断 / 表内总数」留在状态里，供顶部预警条判断
+    V4_FS_STATE.limited = !!d.limited;
+    V4_FS_STATE.totalAll = (typeof d.total_all === 'number') ? d.total_all : null;
     var n = (d.rows || []).length;
     if(st) st.textContent = '共 ' + n + ' 条' + (d.limited ? '（已达上限）' : '') + ' ｜ ' + (d.table && d.table.name ? d.table.name : '');
     v4FsShowSync();
@@ -3345,6 +3440,8 @@ document.addEventListener('DOMContentLoaded', function(){
         var payload = /^tbl_/.test(key)
           ? withOmit({ action: 'records', table_id: key.slice(4), limit: V4CLOUD.limit }, key.slice(4), false)
           : withOmit({ action: 'records', key: key, limit: (LIMIT_BY_KEY[key] || V4CLOUD.limit) }, key, key === 'daily');
+        // v4.11.66：把本次实际使用的上限暴露给顶部预警条（跨 IIFE ⇒ 必须走 window，裸引用必 ReferenceError）
+        if(!/^tbl_/.test(key)) window.V4_FS_LIMIT_MAX = (LIMIT_BY_KEY[key] || V4CLOUD.limit);
         var attempt = function(){
           return fetchCloud(payload, READ_TIMEOUT).then(function(j){
             j.syncedAt = stamp();
