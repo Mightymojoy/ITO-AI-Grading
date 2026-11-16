@@ -449,6 +449,29 @@
   function recompute(r){
     if(!r || !r.modules) return;
     var moduleResults = r.modules;
+
+    // v4.11.67（2026-11-16）：修掉一处长期存在的归一基数失配 ——
+    //   本处原写死 `/100`，而 app-core runGrading 自 v4.11.60 起已按 W_SUM（可计分权重合计＝90）归一。
+    //   后果：语义引擎只要跑过一次，同一场总分就被压到 90 分制。
+    //   实测（18 场真实语料）偏差均值 6.34 分、最大 8.50 分。现统一按 W_SUM。
+    var _WSUM = 0, _order = ['c1','c2','c3','c4','c5','c6','c7','c8'];
+    if(STD && STD.modules){
+      for(var _wi=0; _wi<_order.length; _wi++){
+        var _wm = STD.modules[_order[_wi]];
+        if(_wm && _wm.weight > 0) _WSUM += _wm.weight;
+      }
+    }
+    if(!(_WSUM > 0)) _WSUM = 100;
+
+    // v4.11.67：硬性参数讲错 ⇒ 产品理解 c1 整块归零；同时取消原「−4/处、封顶 −12」。
+    //   与 app-core runGrading 完全同口径，回退阀同为 localStorage.v4hardparam_c1zero='0'。
+    var blErr = (r.baseline && r.baseline.errors) || 0;
+    var _hpZero = true;
+    try{
+      if(typeof localStorage !== 'undefined' && localStorage.getItem('v4hardparam_c1zero') === '0') _hpZero = false;
+    }catch(e){}
+    var _hpOn = _hpZero && (blErr > 0);
+
     var total = 0;
     for(var i=0;i<moduleResults.length;i++){
       var m = moduleResults[i];
@@ -456,12 +479,19 @@
       for(var j=0;j<(m.standards||[]).length;j++) sum += m.standards[j].score || 0;
       var ms = m.standards && m.standards.length ? Math.round(sum / m.standards.length) : 0;
       m.score = ms;
-      m.weighted = (m.weight > 0) ? Math.round(ms * m.weight / 100 * 10) / 10 : null;
-      if(m.weight > 0) total += ms * m.weight / 100;
+      if(_hpOn && m.key === 'c1'){
+        m.score = 0;
+        m.hardParamZero = true;
+        m.hardParamErrors = blErr;
+      }
+      m.weighted = (m.weight > 0) ? Math.round(m.score * m.weight / _WSUM * 10) / 10 : null;
+      if(m.weight > 0) total += m.score * m.weight / _WSUM;
     }
-    var blErr = (r.baseline && r.baseline.errors) || 0;
-    var pen = Math.min(12, blErr * 4);
-    total = Math.round((total - pen) * 10) / 10;
+    if(!_hpZero){
+      // 回退路径：与旧口径一致，按 −4/处 扣，封顶 −12
+      total = total - Math.min(12, blErr * 4);
+    }
+    total = Math.round(total * 10) / 10;
     if(total < 0) total = 0;
     r.total = total;
     r.grade = gradeOf(total);
@@ -566,6 +596,7 @@
     SAFETY: { N1_EXEMPT_RE: N1_EXEMPT_RE, N1_STRICT_RE: N1_STRICT_RE,
               N2_EXEMPT_RE: N2_EXEMPT_RE, N2_STRICT_RE: N2_STRICT_RE,
               COMFORT_EXEMPT_RE: COMFORT_EXEMPT_RE },
-    _v: '4.10.5'   // 4.10.5（2026-11-03）：n1/n2 豁免扩充（耐用性描述·销量变体·定价政策）+ 安抚口语跨分类复用；扣分公式与 -4/处 口径未变
+    _v: '4.11.67'   // 4.11.67（2026-11-16）：recompute 归一基数 /100 → W_SUM（修与 runGrading 的失配，实测偏差均值 6.34）；
+                    //   硬参数错误改由 c1 整块归零承担，取消 -4/处 扣分（阀 v4hardparam_c1zero）
   };
 });

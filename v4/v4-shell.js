@@ -12,7 +12,7 @@
 //   v4.11.12 / v4.11.13 界面仍显示 v4.11.11 → 据此判断"包没更新"是错的
 //   （2026-09-17 排查同事端降级问题时被它带偏过一次）。
 // v4/index.html 里残留的静态字样只是 JS 完全失效时的兜底，运行时会立刻被下面覆盖。
-var V4_VERSION = 'v4.11.66';
+var V4_VERSION = 'v4.11.67';
 // v4.11.36：存档格式版本 ≠ 壳层版本。rawV 只在「rawTotal/rawPen/rawBlk 这套字段的形态真变」时才动，
 //   **不跟 V4_VERSION 走**（否则每次改样式/改文案都要假装改了存档格式，溯源反而失真）。
 //   ⚠️ 渲染侧从不读 rawV（write-only 溯源标记）；断言请读本常量，别跟 V4_VERSION 比。
@@ -2406,6 +2406,105 @@ document.addEventListener('DOMContentLoaded', function(){
   window.semAnnotateOn = semAnnotateOn;
 
   // ---- 红线横幅（让"为什么 0 分"可见，避免用户以为系统坏了）----
+  // ============ v4.11.67（2026-11-16）：人工复核结论分流 ============
+  // 业务口径（老大 11-16 原话）：
+  //   飞书「主播日报」`复核违规` = 否 ⇒ 该行内容已判不违规，**不再作为违规呈现**
+  //                              = 是 ⇒ 该行内容确认违规，**要在报告里标注出来**
+  //   空（未复核）⇒ 维持系统原判，不动
+  // 🔑 必须按「主播 + 日期」这一行的粒度匹配，**绝不能按词条**：
+  //   实测同一触发词两边都有结论 —— 飞机悬窗 否41/是26、母婴级 否34/是9、不降价 否26/是6、
+  //   天花板 否18/是12 ⇒ 人工是逐场按语境判断的，按词条加豁免会把真违规场次漏判。
+  // 数据源：api/feishu-read.js 的 action='review'（只读 4 列，实测 499 行 / 23.7s）。
+  var RV_CACHE_KEY = 'v4_review_cache_v1';
+  var RV_TTL = 12 * 3600 * 1000;
+  var RVMAP = null;        // null=未加载；{}=已加载但不可用；{key:{rev,terms,codes,raw}}
+  var RV_WAIT = null;      // 加载中时的回调队列
+
+  function rvDateKey(v){
+    if(v == null || v === '') return '';
+    var s = String(v).trim();
+    // 飞书日期字段实测返回毫秒时间戳字符串（如 "1794412800000"）
+    if(/^\d{12,13}$/.test(s)){
+      var d = new Date(Number(s));
+      if(isNaN(d.getTime())) return '';
+      var m = d.getMonth() + 1, dd = d.getDate();
+      return d.getFullYear() + '-' + (m < 10 ? '0' + m : m) + '-' + (dd < 10 ? '0' + dd : dd);
+    }
+    var mm = s.match(/(\d{4})[-\/.年](\d{1,2})[-\/.月](\d{1,2})/);
+    if(mm){
+      var m2 = Number(mm[2]), d2 = Number(mm[3]);
+      return mm[1] + '-' + (m2 < 10 ? '0' + m2 : m2) + '-' + (d2 < 10 ? '0' + d2 : d2);
+    }
+    return s;
+  }
+
+  function rvBuildMap(rows){
+    var map = {};
+    for(var i=0;i<(rows||[]).length;i++){
+      var x = rows[i] || {};
+      var host = String(x['主播'] || '').trim();
+      var dk = rvDateKey(x['日期']);
+      if(!host || !dk) continue;
+      var raw = String(x['误判内容'] || '');
+      var terms = {}, codes = {}, m;
+      var reT = /触发词「([^」]{1,30})」/g;
+      while((m = reT.exec(raw))){ terms[m[1]] = 1; }
+      var reC = /\[(S[12]-[0-9A-Za-z]+)\]/g;
+      while((m = reC.exec(raw))){ codes[m[1]] = 1; }
+      map[host + '|' + dk] = { rev: String(x['复核违规'] || '').trim(), terms: terms, codes: codes, raw: raw };
+    }
+    return map;
+  }
+
+  function rvEnsure(cb){
+    if(RVMAP !== null){
+      if(cb){ try{ cb(RVMAP); }catch(e){} }
+      return RVMAP;
+    }
+    // 先看缓存（12 小时内直接用）
+    try{
+      var s = localStorage.getItem(RV_CACHE_KEY);
+      if(s){
+        var o = JSON.parse(s);
+        if(o && o.at && (Date.now() - o.at) < RV_TTL && o.rows){
+          RVMAP = rvBuildMap(o.rows);
+          if(cb){ try{ cb(RVMAP); }catch(e){} }
+          return RVMAP;
+        }
+      }
+    }catch(e){}
+    if(RV_WAIT){ if(cb) RV_WAIT.push(cb); return null; }
+    RV_WAIT = cb ? [cb] : [];
+    function done(map){
+      RVMAP = map || {};
+      var q = RV_WAIT || []; RV_WAIT = null;
+      for(var i=0;i<q.length;i++){ try{ q[i](RVMAP); }catch(e){} }
+    }
+    try{
+      var base = '';
+      try{ base = location.origin || ''; }catch(e){}
+      fetch(base + '/api/feishu-read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'review' })
+      }).then(function(res){ return res.json(); }).then(function(j){
+        if(j && j.ok && j.rows && j.rows.length){
+          try{ localStorage.setItem(RV_CACHE_KEY, JSON.stringify({ at: Date.now(), rows: j.rows })); }catch(e){}
+          done(rvBuildMap(j.rows));
+        } else { done({}); }
+      })['catch'](function(){ done({}); });
+    }catch(e){ done({}); }
+    return null;
+  }
+
+  function rvLookup(r){
+    if(!RVMAP || !r) return null;
+    var host = String(r.host || (r.meta && r.meta.host) || '').trim();
+    var dk = rvDateKey(r.date || (r.meta && r.meta.date) || '');
+    if(!host || !dk) return null;
+    return RVMAP[host + '|' + dk] || null;
+  }
+
   function redlineBanner(r, root){
     if(!r || !r.__redline) return 0;
     var rel = r.__redline;
@@ -2425,12 +2524,32 @@ document.addEventListener('DOMContentLoaded', function(){
       + ';border-radius:8px;padding:12px 14px;margin:10px 0;font-size:13px;line-height:1.7';
     var h = '<div style="font-weight:600;color:' + acc + ';margin-bottom:6px">'
       + (sess ? '⚠️ 命中平台红线 —— 本场总分按 0 计'
-              : (annOnly ? 'ℹ️ 命中极限词 —— 仅标注，不判 0 分（已按 -4/处 计入信息准确性）'
+              : (annOnly ? 'ℹ️ 命中极限词 —— 仅标注，不判 0 分（已计入信息准确性判定）'
                          : '⚠️ 命中平台红线 —— 对应能力模块按 0 计')) + '</div>';
+
+    // ---- v4.11.67：按人工复核结论分流 ----
+    //   RVMAP 未加载 ⇒ 先触发异步拉取，拿到后把横幅摘掉重渲染一次（失败则保持原样，不会反复重试）
+    if(RVMAP === null){
+      rvEnsure(function(){
+        try{
+          var old = host.querySelector && host.querySelector('#redlineBanner');
+          if(old && old.parentNode) old.parentNode.removeChild(old);
+          redlineBanner(r, root);
+        }catch(e){}
+      });
+    }
+    var rvRec = rvLookup(r);
+    var _rvNo  = !!(rvRec && rvRec.rev === '否');   // 人工已判不违规 ⇒ 不呈现明细
+    var _rvYes = !!(rvRec && rvRec.rev === '是');   // 确认违规 ⇒ 保留并标注
+    var _all  = rel.reasons || [];
+    var _list = _rvNo ? [] : _all;
+
     h += '<div style="color:#5c564e">';
-    var shown = rel.reasons.slice(0, 8);
+    var shown = _list.slice(0, 8);
     for(var i=0;i<shown.length;i++){
       var x = shown[i];
+      // 「已复核确认违规」徽标：仅当复核=是，且该条目在「误判内容」里被点名（按触发词或规则编号）
+      var _rvHit = _rvYes && ((x.term && rvRec.terms[x.term]) || (x.code && rvRec.codes[x.code]));
       // v4.11.31：行首显示规则编号（如 [S1-04] / [S2-145]），便于回表核对
       h += '<div>· ' + (x.code ? '<span style="color:' + acc + ';font-weight:600">[' + esc(x.code) + ']</span> ' : '')
         + '<b>' + esc(x.cat) + '</b>'
@@ -2438,10 +2557,15 @@ document.addEventListener('DOMContentLoaded', function(){
         + '　<span style="color:#8b857c">[' + esc(x.src) + '（'
         + (x.action === 'MODULE_ZERO' ? '模块归0' : (x.action === 'ANNOTATE' ? '标注·不判0' : '整场归0')) + '）]</span>'
         + (x.ts ? ' <span style="color:#8b857c">' + esc(x.ts) + '</span>' : '')
+        + (_rvHit ? ' <span style="background:#e8ece4;color:#3f7a52;padding:1px 6px;border-radius:8px;font-size:11px;font-weight:600">已复核确认违规</span>' : '')
         + (x.quote ? '<div style="color:#8b857c;font-size:12px;margin-left:12px">「' + esc(String(x.quote).slice(0, 90)) + '」</div>' : '')
         + '</div>';
     }
-    if(rel.reasons.length > shown.length) h += '<div>· …另有 ' + (rel.reasons.length - shown.length) + ' 组命中</div>';
+    if(_list.length > shown.length) h += '<div>· …另有 ' + (_list.length - shown.length) + ' 组命中</div>';
+    if(_rvNo && _all.length){
+      h += '<div style="color:#3f7a52;margin-top:2px">· 本场 <b>' + _all.length + '</b> 条命中已由人工复核判定'
+        + '<b>不违规</b>，按要求不再呈现明细</div>';
+    }
     h += '</div>';
     if(sess) h += '<div style="color:#8b857c;font-size:12px;margin-top:6px">模块明细仅供参考复盘，不计入总分。依据《抖音直播客观违规规则》。</div>';
     box.innerHTML = h;

@@ -1,6 +1,8 @@
 // =====================================================
 // v4 app-core.js —— 评分计算、报告渲染和兼容入口
 // 来源：v3.9 (07a97a7) v3/index.html L279-L2917 ｜ 提取日期：2026-08-28
+// v4.11.67（2026-11-16 老大拍板）：硬性参数讲错 ⇒ 产品理解能力 c1 整块归零（权重 25/90 全扣），
+//   同时取消原「每处 -4、封顶 -12」的全局红旗扣分。回退阀 localStorage.v4hardparam_c1zero='0'。
 // v4.11：保留评分公式，入口由 workflow.js 统一调度。
 // =====================================================
 // =====================================================
@@ -588,14 +590,40 @@ function runGrading(segs, productKey){
     moduleResults.push({key:mk, name:mod.name, weight:mod.weight, analyze:!!mod.analyze, score:modScore, weighted: mod.weight>0 ? Math.round(modScore*mod.weight/W_SUM*10)/10 : null, standards:stdRes});
   }
 
+  // ===== v4.11.67（2026-11-16 老大拍板）硬性参数讲错 ⇒ 产品理解能力 c1 整块归零 =====
+  //   业务口径：「参数必须严格讲对」。baselineFacts（全局 F1–F11 + 本品 B/P 项）命中任一错误
+  //   即触发（bl.errors > 0），c1（权重 25/90）分数直接置 0，而不是原来的轻微降档。
+  //   同时**取消**原「每处 −4、封顶 −12」的全局红旗扣分（老大定：替换掉，不叠加）。
+  //   回退阀：localStorage.v4hardparam_c1zero = '0' ⇒ 恢复旧口径（-4/处 且不动 c1）。
+  //   实测（18 场真实语料）：触发率 28%，触发场次总分均值 −15.96（−10.4 ~ −21.6），等级变化 2/18。
+  var _hpZero = true;
+  try{
+    if(typeof localStorage !== 'undefined' && localStorage.getItem('v4hardparam_c1zero') === '0') _hpZero = false;
+  }catch(e){}
+  var _hpHit = _hpZero && (bl.errors > 0);
+  if(_hpHit){
+    for(var hpi=0; hpi<moduleResults.length; hpi++){
+      if(moduleResults[hpi].key === 'c1'){
+        moduleResults[hpi].score = 0;
+        moduleResults[hpi].weighted = 0;
+        moduleResults[hpi].hardParamZero = true;      // 供报告渲染标注，不参与计分
+        moduleResults[hpi].hardParamErrors = bl.errors;
+        break;
+      }
+    }
+  }
+
   // 3.2 总分 + 等级（只计权重>0 的能力）
   var total = 0;
   for(var i=0;i<moduleResults.length;i++){
     if(moduleResults[i].weight > 0) total += moduleResults[i].score * moduleResults[i].weight / W_SUM;
   }
-  // baseline 信息准确性红旗扣分：每处错误 -4 分（人工将信息准确性作为重扣项），封顶 -12
-  var blPenalty = Math.min(12, bl.errors * 4);
-  total = Math.round((total - blPenalty) * 10) / 10;
+  // v4.11.67：原「每处错误 −4 分、封顶 −12」的红旗扣分已由 c1 整块归零取代（见上）。
+  //   仅在 c1 归零被阀关掉（_hpZero=false）时，退回旧的 −4/处 口径，保证回退路径行为一致。
+  if(!_hpZero){
+    total = total - Math.min(12, bl.errors * 4);
+  }
+  total = Math.round(total * 10) / 10;
   if(total < 0) total = 0;
   var grade = 'E';
   for(var g=0;g<STD.grades.length;g++){ if(total >= STD.grades[g].min){ grade = STD.grades[g].name; break; } }
@@ -1280,7 +1308,7 @@ function renderResult(r){
   for(var i=0;i<r.modules.length;i++){
     var m = r.modules[i];
     var wLabel = m.weight > 0 ? m.weight + '%' : '分析';
-    ms += '<div class="s-cell"><div class="n">' + m.name + ' · ' + wLabel + '</div><div class="v ' + (m.weight>0 ? (m.score>=75?'hi':(m.score<45?'lo':'')) : '') + '">' + m.score + '</div><div class="w">' + (m.weight>0 ? '加权 ' + m.weighted : '不计入总分') + '</div></div>';
+    ms += '<div class="s-cell"><div class="n">' + m.name + (m.hardParamZero ? ' <span style="color:var(--danger);font-weight:700">· 硬参数讲错，整块归零</span>' : '') + ' · ' + wLabel + '</div><div class="v ' + (m.weight>0 ? (m.score>=75?'hi':(m.score<45?'lo':'')) : '') + '">' + m.score + '</div><div class="w">' + (m.weight>0 ? '加权 ' + m.weighted : '不计入总分') + '</div></div>';
   }
   $('moduleSummary').innerHTML = ms;
 
@@ -1915,7 +1943,7 @@ function buildReportHTML(r){
   for(var i=0;i<r.modules.length;i++){
     var m = r.modules[i];
     var wLabel = m.weight > 0 ? m.weight + '%' : '分析';
-    out += '<div class="s-cell"><div class="n">' + m.name + ' · ' + wLabel + '</div><div class="v ' + (m.weight>0 ? (m.score>=75?'hi':(m.score<45?'lo':'')) : '') + '">' + m.score + '</div><div class="w">' + (m.weight>0 ? '加权 ' + m.weighted : '不计入总分') + '</div></div>';
+    out += '<div class="s-cell"><div class="n">' + m.name + (m.hardParamZero ? ' <span style="color:var(--danger);font-weight:700">· 硬参数讲错，整块归零</span>' : '') + ' · ' + wLabel + '</div><div class="v ' + (m.weight>0 ? (m.score>=75?'hi':(m.score<45?'lo':'')) : '') + '">' + m.score + '</div><div class="w">' + (m.weight>0 ? '加权 ' + m.weighted : '不计入总分') + '</div></div>';
   }
   out += '</div>';
   // 能力明细（每个子标准：评判标准+完成度×质量+证据+未命中词）

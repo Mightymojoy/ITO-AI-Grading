@@ -310,6 +310,44 @@ module.exports = async function handler(req, res){
       return res.status(200).json({ok:true, tables: tables});
     }
 
+    // ①b v4.11.67（2026-11-16）：只取「人工复核」4 列 —— 主播 / 日期 / 复核违规 / 误判内容
+    //    用途：工作台评分报告按人工复核结论分流呈现
+    //          `复核违规`=否 ⇒ 该行列出的条目属误判，不再作为违规呈现
+    //          `复核违规`=是 ⇒ 该行内容确认违规，需在报告里标注出来
+    //    为什么单开 action 而不复用 omit：日报表 41 列，omit 要列全其余 37 个列名（错一个就
+    //      1254045 整条拒），白名单 4 列最稳。耗时由行数决定（公式字段全表重算），与 omit 相当。
+    //    🔴 不调 dateFieldsOf：那会多一次字段元数据请求；日期由前端统一归一（只有「日期」一列是 type=5）。
+    if(action === 'review'){
+      let tid = data.table_id || ENV_TBL.daily || '';
+      if(!tid){
+        const tbs = await listTables(token);
+        const hit = tbs.find(t => String(t.name || '').indexOf('主播日报') >= 0);
+        if(hit) tid = hit.table_id;
+      }
+      if(!tid) return res.status(200).json({ok:false, reason:'未找到「主播日报」表'});
+      const FN = ['主播', '日期', '复核违规', '误判内容'];
+      let rws = [], pt = '', guard2 = 0, filtered = false;
+      do{
+        const pg = await listRecordsPage(token, tid, 500, pt, data.view_id || '', FN);
+        if(pg.fieldFiltered) filtered = true;
+        const d = pg.d || {};
+        rws = rws.concat((d.items || []).map(function(rec){
+          const o = normalizeRecord(rec, null);
+          const out = {};
+          for(let i=0;i<FN.length;i++){ out[FN[i]] = (o[FN[i]] === undefined ? '' : o[FN[i]]); }
+          out._rid = rec.record_id || '';
+          return out;
+        }));
+        pt = d.has_more ? (d.page_token || '') : '';
+        if(++guard2 > 40) break;
+      }while(pt);
+      return res.status(200).json({
+        ok: true, action: 'review', table_id: tid,
+        rows: rws, total_all: rws.length,
+        field_filtered: filtered, syncedAt: new Date().toISOString()
+      });
+    }
+
     // ② 取记录
     let tableId = data.table_id || '';
     let tableName = data.table_name || '';
